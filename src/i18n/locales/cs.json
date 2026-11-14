@@ -243,7 +243,17 @@
         "zoom": "Zoom",
         "spin": "Otáčení",
         "smooth": "Vyhlazení"
-      }
+      },
+      "skin": "",
+      "skinFindingFace": "",
+      "skinKeepTexture": "",
+      "skinRedness": "",
+      "skinRednessEven": "",
+      "skinRednessHalfWay": "",
+      "skinRednessThisSkin": "",
+      "skinRednessWarm": "",
+      "skinShine": "",
+      "skinSpots": ""
     }
   },
   "contextMenus": {
@@ -1662,7 +1672,8 @@
         "sharpness": "Ostrost",
         "transformRotation": "Transformace a rotace",
         "vignette": "Viněta",
-        "whiteBalance": "Vyvážení bílé"
+        "whiteBalance": "Vyvážení bílé",
+        "skin": ""
       },
       "includedAdjustments": "Zahrnuté úpravy",
       "modeMerge": "Sloučit",
@@ -1878,6 +1889,13 @@
       "yAxis": "Osa Y",
       "zoomInTooltip": "Přiblížit",
       "zoomOutTooltip": "Oddálit"
+    },
+    "dngConverter": {
+      "title": "",
+      "message": "",
+      "confirm": "",
+      "installerStarted": "",
+      "failed": ""
     }
   },
   "settings": {

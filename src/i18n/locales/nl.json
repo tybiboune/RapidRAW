@@ -243,7 +243,17 @@
         "zoom": "Zoom",
         "spin": "Draaiing",
         "smooth": "Zacht"
-      }
+      },
+      "skin": "",
+      "skinFindingFace": "",
+      "skinKeepTexture": "",
+      "skinRedness": "",
+      "skinRednessEven": "",
+      "skinRednessHalfWay": "",
+      "skinRednessThisSkin": "",
+      "skinRednessWarm": "",
+      "skinShine": "",
+      "skinSpots": ""
     }
   },
   "contextMenus": {
@@ -1596,7 +1606,8 @@
         "sharpness": "Scherpte",
         "transformRotation": "Transformeren & rotatie",
         "vignette": "Vignet",
-        "whiteBalance": "Witbalans"
+        "whiteBalance": "Witbalans",
+        "skin": ""
       },
       "includedAdjustments": "Opgenomen aanpassingen",
       "modeMerge": "Samenvoegen",
@@ -1800,6 +1811,13 @@
       "yAxis": "Y-as",
       "zoomInTooltip": "Inzoomen",
       "zoomOutTooltip": "Uitzoomen"
+    },
+    "dngConverter": {
+      "title": "",
+      "message": "",
+      "confirm": "",
+      "installerStarted": "",
+      "failed": ""
     }
   },
   "settings": {
@@ -2021,7 +2039,11 @@
         "zoom_in": "Inzoomen",
         "zoom_in_step": "Inzoomen (stap voor stap)",
         "zoom_out": "Uitzoomen",
-        "zoom_out_step": "Uitzoomen (stap voor stap)"
+        "zoom_out_step": "Uitzoomen (stap voor stap)",
+        "delete_rejected": "",
+        "toggle_pick": "",
+        "toggle_reject": "",
+        "unflag": ""
       },
       "sections": {
         "editing": "Bewerken",
@@ -2457,6 +2479,10 @@
         "showClipping": "Uitknipwaarschuwingen weergeven",
         "vectorscope": "Vectoroscoop"
       }
+    },
+    "flags": {
+      "togglePick": "",
+      "toggleReject": ""
     }
   }
 }

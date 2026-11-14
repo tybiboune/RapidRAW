@@ -243,7 +243,17 @@
       "roundness": "Rundheit",
       "size": "Größe",
       "spatial": "Räumlich",
-      "vignette": "Vignettierung"
+      "vignette": "Vignettierung",
+      "skin": "",
+      "skinFindingFace": "",
+      "skinKeepTexture": "",
+      "skinRedness": "",
+      "skinRednessEven": "",
+      "skinRednessHalfWay": "",
+      "skinRednessThisSkin": "",
+      "skinRednessWarm": "",
+      "skinShine": "",
+      "skinSpots": ""
     }
   },
   "contextMenus": {
@@ -1596,7 +1606,8 @@
         "sharpness": "Schärfe",
         "transformRotation": "Transformieren & Drehen",
         "vignette": "Vignettierung",
-        "whiteBalance": "Weißabgleich"
+        "whiteBalance": "Weißabgleich",
+        "skin": ""
       },
       "includedAdjustments": "Einbezogene Anpassungen",
       "modeMerge": "Zusammenführen",
@@ -1800,6 +1811,13 @@
       "yAxis": "Y-Achse",
       "zoomInTooltip": "Vergrößern",
       "zoomOutTooltip": "Verkleinern"
+    },
+    "dngConverter": {
+      "title": "",
+      "message": "",
+      "confirm": "",
+      "installerStarted": "",
+      "failed": ""
     }
   },
   "settings": {

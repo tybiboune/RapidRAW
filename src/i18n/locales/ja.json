@@ -243,7 +243,17 @@
         "zoom": "ズーム",
         "spin": "回転",
         "smooth": "なめらか"
-      }
+      },
+      "skin": "",
+      "skinFindingFace": "",
+      "skinKeepTexture": "",
+      "skinRedness": "",
+      "skinRednessEven": "",
+      "skinRednessHalfWay": "",
+      "skinRednessThisSkin": "",
+      "skinRednessWarm": "",
+      "skinShine": "",
+      "skinSpots": ""
     }
   },
   "contextMenus": {
@@ -560,7 +570,10 @@
         "quickErase_one": "クイック消去 {{count}}",
         "quickErase_other": "クイック消去 {{count}}",
         "retouch": "レタッチ {{count}}",
-        "retouch_other": "レタッチ {{count}}"
+        "retouch_other": "レタッチ {{count}}",
+        "clone_one": "",
+        "heal_one": "",
+        "retouch_one": ""
       },
       "resetInpaintingTooltip": "インペインティングをリセット",
       "settings": {
@@ -1203,7 +1216,8 @@
       "thumbnailPending": "AI処理待ち",
       "title": "AI処理",
       "unprocessed_other": "{{count}}枚の画像にAI処理が必要です",
-      "waiting": "AI処理を準備中…"
+      "waiting": "AI処理を準備中…",
+      "unprocessed_one": ""
     },
     "community": {
       "actionSave": "保存",
@@ -1249,7 +1263,8 @@
     "filterExit": {
       "hiddenSingle": "{{name}} はフィルターに一致しなくなりました",
       "hiddenMultiple_other": "{{count}} 枚の画像がフィルターに一致しなくなりました",
-      "undo": "元に戻す"
+      "undo": "元に戻す",
+      "hiddenMultiple_one": ""
     },
     "filters": {
       "edited": {
@@ -1411,7 +1426,8 @@
       },
       "openInLibrary": "ライブラリで開く",
       "recent": "最近",
-      "title": "ジョブ"
+      "title": "ジョブ",
+      "images_one": ""
     },
     "reject": {
       "deleteConfirm": "除外した画像を削除",
@@ -1590,7 +1606,8 @@
         "sharpness": "シャープネス",
         "transformRotation": "変形と回転",
         "vignette": "周辺光量補正",
-        "whiteBalance": "ホワイトバランス"
+        "whiteBalance": "ホワイトバランス",
+        "skin": ""
       },
       "includedAdjustments": "対象の補正項目",
       "modeMerge": "マージ",
@@ -1794,6 +1811,13 @@
       "yAxis": "Y軸",
       "zoomInTooltip": "拡大",
       "zoomOutTooltip": "縮小"
+    },
+    "dngConverter": {
+      "title": "",
+      "message": "",
+      "confirm": "",
+      "installerStarted": "",
+      "failed": ""
     }
   },
   "settings": {

@@ -243,7 +243,17 @@
       "roundness": "Округлість",
       "size": "Розмір",
       "spatial": "Просторові",
-      "vignette": "Віньєтка"
+      "vignette": "Віньєтка",
+      "skin": "",
+      "skinFindingFace": "",
+      "skinKeepTexture": "",
+      "skinRedness": "",
+      "skinRednessEven": "",
+      "skinRednessHalfWay": "",
+      "skinRednessThisSkin": "",
+      "skinRednessWarm": "",
+      "skinShine": "",
+      "skinSpots": ""
     }
   },
   "contextMenus": {
@@ -1662,7 +1672,8 @@
         "sharpness": "Різкість",
         "transformRotation": "Трансформація і поворот",
         "vignette": "Віньєтка",
-        "whiteBalance": "Баланс білого"
+        "whiteBalance": "Баланс білого",
+        "skin": ""
       },
       "includedAdjustments": "Включені коригування",
       "modeMerge": "Об'єднати",
@@ -1878,6 +1889,13 @@
       "yAxis": "Вісь Y",
       "zoomInTooltip": "Збільшити",
       "zoomOutTooltip": "Зменшити"
+    },
+    "dngConverter": {
+      "title": "",
+      "message": "",
+      "confirm": "",
+      "installerStarted": "",
+      "failed": ""
     }
   },
   "settings": {
@@ -2044,7 +2062,9 @@
       "uiScaleDesc": "Зменште або збільште інтерфейс незалежно від системного масштабування екрана. Компактні розміри зручніші на невеликих екранах ноутбуків.",
       "uiScaleLarge": "Великий",
       "xmpSync": "Синхронізація метаданих XMP",
-      "xmpSyncDesc": "Синхронізувати оцінки, колірні мітки й теги зі стандартними супровідними файлами XMP для сумісності з іншими фоторедакторами."
+      "xmpSyncDesc": "Синхронізувати оцінки, колірні мітки й теги зі стандартними супровідними файлами XMP для сумісності з іншими фоторедакторами.",
+      "hideCollapsedPanels": "",
+      "hideCollapsedPanelsDesc": ""
     },
     "keybinds": {
       "actions": {

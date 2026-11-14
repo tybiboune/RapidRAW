@@ -243,7 +243,17 @@
         "zoom": "Зум",
         "spin": "Вращение",
         "smooth": "Сглаживание"
-      }
+      },
+      "skin": "",
+      "skinFindingFace": "",
+      "skinKeepTexture": "",
+      "skinRedness": "",
+      "skinRednessEven": "",
+      "skinRednessHalfWay": "",
+      "skinRednessThisSkin": "",
+      "skinRednessWarm": "",
+      "skinShine": "",
+      "skinSpots": ""
     }
   },
   "contextMenus": {
@@ -1662,7 +1672,8 @@
         "sharpness": "Резкость",
         "transformRotation": "Трансформация и поворот",
         "vignette": "Виньетка",
-        "whiteBalance": "Баланс белого"
+        "whiteBalance": "Баланс белого",
+        "skin": ""
       },
       "includedAdjustments": "Включаемые настройки",
       "modeMerge": "Объединить",
@@ -1878,6 +1889,13 @@
       "yAxis": "Ось Y",
       "zoomInTooltip": "Увеличить",
       "zoomOutTooltip": "Уменьшить"
+    },
+    "dngConverter": {
+      "title": "",
+      "message": "",
+      "confirm": "",
+      "installerStarted": "",
+      "failed": ""
     }
   },
   "settings": {

@@ -243,7 +243,17 @@
         "zoom": "缩放",
         "spin": "旋转",
         "smooth": "平滑"
-      }
+      },
+      "skin": "",
+      "skinFindingFace": "",
+      "skinKeepTexture": "",
+      "skinRedness": "",
+      "skinRednessEven": "",
+      "skinRednessHalfWay": "",
+      "skinRednessThisSkin": "",
+      "skinRednessWarm": "",
+      "skinShine": "",
+      "skinSpots": ""
     }
   },
   "contextMenus": {
@@ -560,7 +570,10 @@
         "quickErase_one": "快速擦除 {{count}}",
         "quickErase_other": "快速擦除 {{count}}",
         "retouch": "修饰 {{count}}",
-        "retouch_other": "修饰 {{count}}"
+        "retouch_other": "修饰 {{count}}",
+        "clone_one": "",
+        "heal_one": "",
+        "retouch_one": ""
       },
       "resetInpaintingTooltip": "重置图像修复",
       "settings": {
@@ -1203,7 +1216,8 @@
       "thumbnailPending": "等待 AI 处理",
       "title": "AI 处理",
       "unprocessed_other": "{{count}} 张图像需要 AI 处理",
-      "waiting": "正在准备 AI 处理…"
+      "waiting": "正在准备 AI 处理…",
+      "unprocessed_one": ""
     },
     "community": {
       "actionSave": "保存",
@@ -1249,7 +1263,8 @@
     "filterExit": {
       "hiddenSingle": "{{name}} 已不再符合筛选条件",
       "hiddenMultiple_other": "{{count}} 张图像已不再符合筛选条件",
-      "undo": "撤销"
+      "undo": "撤销",
+      "hiddenMultiple_one": ""
     },
     "filters": {
       "edited": {
@@ -1411,7 +1426,8 @@
       },
       "openInLibrary": "在图库中打开",
       "recent": "最近",
-      "title": "任务"
+      "title": "任务",
+      "images_one": ""
     },
     "reject": {
       "deleteConfirm": "删除已拒绝",
@@ -1590,7 +1606,8 @@
         "sharpness": "锐度",
         "transformRotation": "变换与旋转",
         "vignette": "暗角",
-        "whiteBalance": "白平衡"
+        "whiteBalance": "白平衡",
+        "skin": ""
       },
       "includedAdjustments": "包含的调整",
       "modeMerge": "合并",
@@ -1794,6 +1811,13 @@
       "yAxis": "Y 轴",
       "zoomInTooltip": "放大",
       "zoomOutTooltip": "缩小"
+    },
+    "dngConverter": {
+      "title": "",
+      "message": "",
+      "confirm": "",
+      "installerStarted": "",
+      "failed": ""
     }
   },
   "settings": {

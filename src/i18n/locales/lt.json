@@ -243,7 +243,17 @@
       "roundness": "Apvalumas",
       "size": "Dydis",
       "spatial": "Erdvinis",
-      "vignette": "Vinjetė"
+      "vignette": "Vinjetė",
+      "skin": "",
+      "skinFindingFace": "",
+      "skinKeepTexture": "",
+      "skinRedness": "",
+      "skinRednessEven": "",
+      "skinRednessHalfWay": "",
+      "skinRednessThisSkin": "",
+      "skinRednessWarm": "",
+      "skinShine": "",
+      "skinSpots": ""
     }
   },
   "contextMenus": {
@@ -935,7 +945,8 @@
         "iso": "ISO",
         "lens": "Objektyvas",
         "shutterSpeed": "Išlaikymas",
-        "title": "Kameros informacija"
+        "title": "Kameros informacija",
+        "model": ""
       },
       "clickToEdit": "Spustelėkite, norėdami redaguoti",
       "copied": "Nukopijuota",
@@ -1700,7 +1711,8 @@
         "sharpness": "Ryškumas",
         "transformRotation": "Transformacija ir pasukimas",
         "vignette": "Vinjetė",
-        "whiteBalance": "Baltos spalvos balansas"
+        "whiteBalance": "Baltos spalvos balansas",
+        "skin": ""
       },
       "includedAdjustments": "Įtraukti koregavimai",
       "modeMerge": "Sulieti",
@@ -1917,6 +1929,13 @@
       "yAxis": "Y ašis",
       "zoomInTooltip": "Priartinti",
       "zoomOutTooltip": "Nutolinti"
+    },
+    "dngConverter": {
+      "title": "",
+      "message": "",
+      "confirm": "",
+      "installerStarted": "",
+      "failed": ""
     }
   },
   "settings": {

@@ -243,7 +243,17 @@
         "zoom": "Zoom",
         "spin": "Rotazione",
         "smooth": "Morbido"
-      }
+      },
+      "skin": "",
+      "skinFindingFace": "",
+      "skinKeepTexture": "",
+      "skinRedness": "",
+      "skinRednessEven": "",
+      "skinRednessHalfWay": "",
+      "skinRednessThisSkin": "",
+      "skinRednessWarm": "",
+      "skinShine": "",
+      "skinSpots": ""
     }
   },
   "contextMenus": {
@@ -1629,7 +1639,8 @@
         "sharpness": "Nitidezza",
         "transformRotation": "Trasformazione e Rotazione",
         "vignette": "Vignettatura",
-        "whiteBalance": "Bilanciamento del Bianco"
+        "whiteBalance": "Bilanciamento del Bianco",
+        "skin": ""
       },
       "includedAdjustments": "Regolazioni Incluse",
       "modeMerge": "Unisci",
@@ -1839,6 +1850,13 @@
       "yAxis": "Asse Y",
       "zoomInTooltip": "Ingrandisci",
       "zoomOutTooltip": "Riduci"
+    },
+    "dngConverter": {
+      "title": "",
+      "message": "",
+      "confirm": "",
+      "installerStarted": "",
+      "failed": ""
     }
   },
   "settings": {
