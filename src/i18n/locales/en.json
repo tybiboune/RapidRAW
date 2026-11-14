@@ -242,6 +242,16 @@
       "roughness": "Roughness",
       "roundness": "Roundness",
       "size": "Size",
+      "skin": "Skin",
+      "skinFindingFace": "Finding the face",
+      "skinKeepTexture": "Keep texture",
+      "skinRedness": "Redness",
+      "skinRednessEven": "Even",
+      "skinRednessHalfWay": "Half way",
+      "skinRednessThisSkin": "This skin",
+      "skinRednessWarm": "Warm",
+      "skinShine": "Shine",
+      "skinSpots": "Spots",
       "spatial": "Spatial",
       "vignette": "Vignette"
     }
@@ -1594,6 +1604,7 @@
         "presence": "Presence",
         "relight": "Relight",
         "sharpness": "Sharpness",
+        "skin": "Skin",
         "transformRotation": "Transform & Rotation",
         "vignette": "Vignette",
         "whiteBalance": "White Balance"

@@ -670,6 +670,7 @@ pub fn run() {
             ai::commands::check_ai_connector_status,
             ai::commands::test_ai_connector_connection,
             ai::commands::generate_full_image_depth_map,
+            ai::commands::generate_full_image_face_map,
             ai::commands::generate_relight_normal_map,
             ai::commands::get_depth_preview,
             ai::denoise::clear_ai_denoise_cache,

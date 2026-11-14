@@ -967,6 +967,52 @@ pub async fn generate_full_image_depth_map(
     generate_loaded_effect_map(EffectMapKind::Depth, js_adjustments, state, app_handle).await
 }
 
+/// The face skin of the loaded picture, as one map over the whole frame, for the skin tools to work
+/// in. It is the same face-part masking the mask panel offers, asked for one part and kept as a map
+/// rather than as a mask, so the skin sliders need no mask of their own to be drawn first.
+#[tauri::command]
+pub async fn generate_full_image_face_map(
+    js_adjustments: serde_json::Value,
+    path: String,
+    state: tauri::State<'_, AppState>,
+    app_handle: tauri::AppHandle,
+) -> Result<String, String> {
+    let models = get_or_init_ai_models(
+        &app_handle,
+        &state.ai_state,
+        &state.ai_init_lock,
+        AiMaskModel::Face,
+    )
+    .await
+    .map_err(|e| e.to_string())?;
+
+    let loaded_image = get_loaded_image(&state)?;
+    // the picture as the effects see it, before any geometry: the map is put back through the warp
+    // when it is used, the same way the depth map is
+    let source_image = crate::masks::generation::build_converted_source_image(
+        &loaded_image.image,
+        loaded_image.is_raw,
+        &js_adjustments,
+    );
+    let analysis = cached_face_analysis(
+        &state.ai_state,
+        &models,
+        &ai_cache_key(&path, &js_adjustments),
+        &source_image,
+        MaskTransform::from_adjustments(&js_adjustments),
+    )?;
+    if analysis.faces.is_empty() {
+        return Err(NO_FACES_FOUND.to_string());
+    }
+    let mask = compose_face_mask(&source_image, &analysis, &[FacePart::FaceSkin]);
+    let encoded = encode_to_base64_png(&mask)?;
+    Ok(format!(
+        "{}{}",
+        crate::effects::maps::SOURCE_SPACE_MAP_PREFIX,
+        encoded.trim_start_matches("data:image/png;base64,")
+    ))
+}
+
 #[tauri::command]
 pub async fn generate_relight_normal_map(
     js_adjustments: serde_json::Value,

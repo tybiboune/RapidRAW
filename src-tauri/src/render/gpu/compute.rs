@@ -61,16 +61,18 @@ pub enum Group {
     Fog,
     LensBlur,
     Light,
+    Skin,
 }
 
 impl Group {
-    const ALL: [Group; 6] = [
+    const ALL: [Group; 7] = [
         Group::Common,
         Group::Transform,
         Group::Relight,
         Group::Fog,
         Group::LensBlur,
         Group::Light,
+        Group::Skin,
     ];
 
     fn source(self) -> (&'static str, &'static [&'static str]) {
@@ -82,6 +84,10 @@ impl Group {
             Group::Transform => (
                 include_str!("../../shaders/transform.wgsl"),
                 &["tf_warp", "tf_frame", "tf_downscale", "tf_grain"],
+            ),
+            Group::Skin => (
+                include_str!("../../shaders/skin.wgsl"),
+                &["sk_stats", "sk_split", "sk_maps", "sk_apply"],
             ),
             Group::Relight => (
                 include_str!("../../shaders/relight.wgsl"),

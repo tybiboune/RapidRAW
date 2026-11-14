@@ -290,6 +290,13 @@ impl<'a> RenderSource<'a> {
                     crate::effects::lens_blur::encode(enc, &job, src, dst)
                 });
             }
+            if let Some(job) =
+                crate::effects::skin::prepare(adjustments, transform.warp.as_ref(), working_size)
+            {
+                stage(enc, &mut current, working_size, &|enc, src, dst| {
+                    crate::effects::skin::encode(enc, &job, src, dst)
+                });
+            }
         }
         if !transform.frame.is_identity(working_size) {
             let frame = &transform.frame;

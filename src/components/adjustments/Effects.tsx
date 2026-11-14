@@ -218,6 +218,8 @@ function EffectsPanel({
 }: EffectsPanelProps) {
   const { t } = useTranslation();
   const [isGeneratingDepth, setIsGeneratingDepth] = useState(false);
+  const [isGeneratingFaceMap, setIsGeneratingFaceMap] = useState(false);
+  const selectedImagePath = useEditorStore((state) => state.selectedImage?.path ?? null);
   const [isGeneratingNormals, setIsGeneratingNormals] = useState(false);
   const [isGeneratingFogDepth, setIsGeneratingFogDepth] = useState(false);
   const [isGeneratingMotionDepth, setIsGeneratingMotionDepth] = useState(false);
@@ -228,6 +230,31 @@ function EffectsPanel({
   const activeRelightLightId = useEditorStore((state) => state.activeRelightLightId);
   const setEditor = useEditorStore((state) => state.setEditor);
   const { showContextMenu } = useContextMenu();
+
+  // The skin tools work inside the face the masking already finds, so the first thing switching them
+  // on does is ask for that one map. Nothing is applied by it: every slider still starts at zero.
+  const handleGenerateFaceMap = async () => {
+    setIsGeneratingFaceMap(true);
+    try {
+      const b64: string = await invoke('generate_full_image_face_map', {
+        jsAdjustments: adjustments,
+        path: selectedImagePath,
+      });
+      setAdjustments((prev: Partial<Adjustments>) => ({ ...prev, skinFaceMap: b64 }));
+    } catch (e) {
+      toast.error(`Failed to find a face: ${e}`);
+      setAdjustments((prev: Partial<Adjustments>) => ({ ...prev, skinEnabled: false }));
+    } finally {
+      setIsGeneratingFaceMap(false);
+    }
+  };
+
+  const handleSkinToggle = (enabled: boolean) => {
+    handleAdjustmentChange(Effect.SkinEnabled, enabled);
+    if (enabled && !adjustments.skinFaceMap) {
+      handleGenerateFaceMap();
+    }
+  };
 
   const handleGenerateLensBlurDepthMap = async () => {
     setIsGeneratingDepth(true);
@@ -734,6 +761,97 @@ function EffectsPanel({
                             lensBlurMaxFade: values.minFade,
                           }));
                         }}
+                        onDragStateChange={onDragStateChange}
+                      />
+                    </>
+                  )}
+                </SpatialEffect>
+                <SpatialEffect
+                  enabled={!!adjustments.skinEnabled}
+                  label={t('adjustments.effects.skin')}
+                  onToggle={handleSkinToggle}
+                >
+                  {isGeneratingFaceMap ? (
+                    <MapGenerationStatus label={t('adjustments.effects.skinFindingFace')} />
+                  ) : (
+                    <>
+                      <Slider
+                        resetKey="skinSpots"
+                        label={t('adjustments.effects.skinSpots')}
+                        max={100}
+                        min={0}
+                        defaultValue={0}
+                        onChange={(e: SliderChangeEvent) =>
+                          handleAdjustmentChange(Effect.SkinSpots, e.target.value)
+                        }
+                        step={1}
+                        value={adjustments.skinSpots ?? 0}
+                        onDragStateChange={onDragStateChange}
+                      />
+
+                      <Slider
+                        resetKey="skinRedness"
+                        label={t('adjustments.effects.skinRedness')}
+                        max={100}
+                        min={0}
+                        defaultValue={0}
+                        onChange={(e: SliderChangeEvent) =>
+                          handleAdjustmentChange(Effect.SkinRedness, e.target.value)
+                        }
+                        step={1}
+                        value={adjustments.skinRedness ?? 0}
+                        onDragStateChange={onDragStateChange}
+                      />
+
+                      {(adjustments.skinRedness ?? 0) > 0 && (
+                        <div className="flex gap-1">
+                          {[
+                            t('adjustments.effects.skinRednessThisSkin'),
+                            t('adjustments.effects.skinRednessHalfWay'),
+                            t('adjustments.effects.skinRednessWarm'),
+                            t('adjustments.effects.skinRednessEven'),
+                          ].map((label, index) => (
+                            <button
+                              key={label}
+                              type="button"
+                              onClick={() => handleAdjustmentChange(Effect.SkinRednessWay, index)}
+                              className={`flex-1 rounded-md px-2 py-1 text-xs transition-colors ${
+                                (adjustments.skinRednessWay ?? 0) === index
+                                  ? 'bg-card-active text-primary'
+                                  : 'bg-surface text-text-secondary hover:bg-card-active/60'
+                              }`}
+                            >
+                              {label}
+                            </button>
+                          ))}
+                        </div>
+                      )}
+
+                      <Slider
+                        resetKey="skinShine"
+                        label={t('adjustments.effects.skinShine')}
+                        max={100}
+                        min={0}
+                        defaultValue={0}
+                        onChange={(e: SliderChangeEvent) =>
+                          handleAdjustmentChange(Effect.SkinShine, e.target.value)
+                        }
+                        step={1}
+                        value={adjustments.skinShine ?? 0}
+                        onDragStateChange={onDragStateChange}
+                      />
+
+                      <Slider
+                        resetKey="skinKeepTexture"
+                        label={t('adjustments.effects.skinKeepTexture')}
+                        max={100}
+                        min={0}
+                        defaultValue={0}
+                        onChange={(e: SliderChangeEvent) =>
+                          handleAdjustmentChange(Effect.SkinKeepTexture, e.target.value)
+                        }
+                        step={1}
+                        value={adjustments.skinKeepTexture ?? 0}
                         onDragStateChange={onDragStateChange}
                       />
                     </>

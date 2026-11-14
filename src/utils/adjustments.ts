@@ -123,6 +123,13 @@ export enum Effect {
   VignetteFeather = 'vignetteFeather',
   VignetteMidpoint = 'vignetteMidpoint',
   VignetteRoundness = 'vignetteRoundness',
+  SkinEnabled = 'skinEnabled',
+  SkinFaceMap = 'skinFaceMap',
+  SkinSpots = 'skinSpots',
+  SkinRedness = 'skinRedness',
+  SkinRednessWay = 'skinRednessWay',
+  SkinShine = 'skinShine',
+  SkinKeepTexture = 'skinKeepTexture',
   LensBlurEnabled = 'lensBlurEnabled',
   LensBlurAmount = 'lensBlurAmount',
   lensBlurDiffusion = 'lensBlurDiffusion',
@@ -326,6 +333,13 @@ export interface Adjustments {
   highlights: number;
   hsl: Hsl;
   hue: number;
+  skinEnabled: boolean;
+  skinFaceMap: string | null;
+  skinSpots: number;
+  skinRedness: number;
+  skinRednessWay: number;
+  skinShine: number;
+  skinKeepTexture: number;
   lensBlurAmount: number;
   lensBlurDiffusion: number;
   lensBlurShape: 'circle' | 'hexagon' | 'octagon' | 'ring';
@@ -809,6 +823,13 @@ export const normalizeLoadedAdjustments = (loadedAdjustments: Adjustments): any 
     flareAmount: loadedAdjustments.flareAmount ?? INITIAL_ADJUSTMENTS.flareAmount,
     glowAmount: loadedAdjustments.glowAmount ?? INITIAL_ADJUSTMENTS.glowAmount,
     halationAmount: loadedAdjustments.halationAmount ?? INITIAL_ADJUSTMENTS.halationAmount,
+    skinEnabled: loadedAdjustments.skinEnabled ?? INITIAL_ADJUSTMENTS.skinEnabled,
+    skinFaceMap: loadedAdjustments.skinFaceMap ?? INITIAL_ADJUSTMENTS.skinFaceMap,
+    skinSpots: loadedAdjustments.skinSpots ?? INITIAL_ADJUSTMENTS.skinSpots,
+    skinRedness: loadedAdjustments.skinRedness ?? INITIAL_ADJUSTMENTS.skinRedness,
+    skinRednessWay: loadedAdjustments.skinRednessWay ?? INITIAL_ADJUSTMENTS.skinRednessWay,
+    skinShine: loadedAdjustments.skinShine ?? INITIAL_ADJUSTMENTS.skinShine,
+    skinKeepTexture: loadedAdjustments.skinKeepTexture ?? INITIAL_ADJUSTMENTS.skinKeepTexture,
     lensBlurAmount: loadedAdjustments.lensBlurAmount ?? INITIAL_ADJUSTMENTS.lensBlurAmount,
     lensBlurDiffusion: loadedAdjustments.lensBlurDiffusion ?? INITIAL_ADJUSTMENTS.lensBlurDiffusion,
     lensBlurShape: loadedAdjustments.lensBlurShape ?? INITIAL_ADJUSTMENTS.lensBlurShape,
@@ -1007,6 +1028,17 @@ export const ADJUSTMENT_GROUPS: Record<string, AdjustmentGroup[]> = {
       ],
     },
     {
+      label: 'modals.copyPaste.groups.skin',
+      keys: [
+        Effect.SkinEnabled,
+        Effect.SkinSpots,
+        Effect.SkinRedness,
+        Effect.SkinRednessWay,
+        Effect.SkinShine,
+        Effect.SkinKeepTexture,
+      ],
+    },
+    {
       label: 'modals.copyPaste.groups.lensBlur',
       keys: [
         Effect.LensBlurEnabled,
@@ -1199,6 +1231,13 @@ export const ADJUSTMENT_SECTIONS: Sections = {
     Effect.VignetteRoundness,
     Effect.VignetteCenterX,
     Effect.VignetteCenterY,
+    Effect.SkinEnabled,
+    Effect.SkinFaceMap,
+    Effect.SkinSpots,
+    Effect.SkinRedness,
+    Effect.SkinRednessWay,
+    Effect.SkinShine,
+    Effect.SkinKeepTexture,
     Effect.LensBlurEnabled,
     Effect.LensBlurAmount,
     Effect.lensBlurDiffusion,
@@ -1332,7 +1371,7 @@ export const ADJUSTMENT_SECTION_TOOLS: Record<string, Array<AdjustmentSectionToo
   ],
   effects: [
     { id: 'creative', label: 'adjustments.effects.creative' },
-    { id: 'spatial', label: 'adjustments.effects.spatial', subTools: ['lensBlur', 'relight', 'fog'] },
+    { id: 'spatial', label: 'adjustments.effects.spatial', subTools: ['lensBlur', 'relight', 'fog', 'skin'] },
     { id: 'lut', label: 'adjustments.effects.lut' },
     { id: 'vignette', label: 'adjustments.effects.vignette' },
     { id: 'motionBlur', label: 'adjustments.effects.motionBlur' },
