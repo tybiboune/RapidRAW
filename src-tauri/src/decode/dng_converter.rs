@@ -37,13 +37,6 @@ fn is_unsupported_nef_compression_text(text: &str) -> bool {
         && lowered.contains("highefficen")
 }
 
-pub fn is_nef(path: &str) -> bool {
-    Path::new(path)
-        .extension()
-        .and_then(|e| e.to_str())
-        .is_some_and(|e| e.eq_ignore_ascii_case("nef"))
-}
-
 fn default_converter_locations() -> Vec<PathBuf> {
     let mut found = Vec::new();
     if cfg!(target_os = "windows") {

@@ -157,6 +157,8 @@ pub fn load_base_image_from_bytes(
     }
 
     if is_raw_file(path_for_ext_check) {
+        let he_linear_mode = linear_mode.clone();
+        let he_cancel_token = cancel_token.clone();
         match panic::catch_unwind(move || {
             crate::decode::raw_processing::develop_raw_image(
                 bytes,
@@ -182,10 +184,10 @@ pub fn load_base_image_from_bytes(
                         settings.dng_converter_path.as_deref(),
                         use_fast_raw_dev,
                         highlight_compression,
-                        linear_mode.clone(),
+                        he_linear_mode,
                         color_nr_amount,
                         sharpening_amount,
-                        cancel_token.clone(),
+                        he_cancel_token,
                     ) {
                         Ok(image) => return Ok(image),
                         Err(e) => log::warn!(
