@@ -299,6 +299,8 @@ fn cached_face_analysis(
     // A failure also gets one immediate second try on the fresh sessions. That is what makes a GPU
     // that dies mid-inference recoverable in the same click: the failure switches the AI models to
     // the CPU, and the rebuilt sessions are CPU ones.
+    let started = std::time::Instant::now();
+    log::info!("Face analysis started");
     let mut result = compute_face_analysis(ai_state, models, cache_key, warped_image, transform);
     if let Err(error) = &result {
         log::warn!("Face analysis failed, rebuilding the face models and retrying: {error}");
@@ -308,10 +310,16 @@ fn cached_face_analysis(
     let analysis = match result {
         Ok(analysis) => Arc::new(analysis),
         Err(error) => {
+            log::error!("Face analysis failed after a retry: {error}");
             reset_face_models(ai_state, models);
             return Err(error);
         }
     };
+    log::info!(
+        "Face analysis found {} face(s) in {:?}",
+        analysis.faces.len(),
+        started.elapsed()
+    );
 
     if analysis.faces.is_empty() {
         reset_face_models(ai_state, models);
