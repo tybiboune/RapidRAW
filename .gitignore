@@ -43,3 +43,6 @@ src-tauri/libs/
 
 # bench/replay.js result dumps
 bench/out/
+
+# locally downloaded installers
+/release-windows/
