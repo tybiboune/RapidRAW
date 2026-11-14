@@ -244,16 +244,16 @@
         "spin": "Rotation",
         "smooth": "Lisse"
       },
-      "skin": "",
-      "skinFindingFace": "",
-      "skinKeepTexture": "",
-      "skinRedness": "",
-      "skinRednessEven": "",
-      "skinRednessHalfWay": "",
-      "skinRednessThisSkin": "",
-      "skinRednessWarm": "",
-      "skinShine": "",
-      "skinSpots": ""
+      "skin": "Skin",
+      "skinFindingFace": "Finding the face",
+      "skinKeepTexture": "Keep texture",
+      "skinRedness": "Redness",
+      "skinRednessEven": "Even",
+      "skinRednessHalfWay": "Half way",
+      "skinRednessThisSkin": "This skin",
+      "skinRednessWarm": "Warm",
+      "skinShine": "Shine",
+      "skinSpots": "Spots"
     }
   },
   "contextMenus": {
@@ -1641,7 +1641,7 @@
         "transformRotation": "Transformation & Rotation",
         "vignette": "Vignettage",
         "whiteBalance": "Balance des blancs",
-        "skin": ""
+        "skin": "Skin"
       },
       "includedAdjustments": "Ajustements inclus",
       "modeMerge": "Fusionner",
@@ -1853,11 +1853,11 @@
       "zoomOutTooltip": "Zoom arrière"
     },
     "dngConverter": {
-      "title": "",
-      "message": "",
-      "confirm": "",
-      "installerStarted": "",
-      "failed": ""
+      "title": "Adobe DNG Converter needed",
+      "message": "This Nikon NEF uses High Efficiency compression, which can't be decoded directly. Adobe's free DNG Converter can convert it to a full-quality DNG (full detail and colour depth, not the embedded JPEG).\n\nDownload Adobe's installer now? Adobe's installer will then open for you to finish installing; reopen the image afterwards.",
+      "confirm": "Download & install",
+      "installerStarted": "Adobe's installer was opened. Finish the installation, then reopen the image.",
+      "failed": "Couldn't get Adobe DNG Converter: {{error}}"
     }
   },
   "settings": {

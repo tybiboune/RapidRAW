@@ -244,16 +244,16 @@
         "spin": "회전",
         "smooth": "부드럽게"
       },
-      "skin": "",
-      "skinFindingFace": "",
-      "skinKeepTexture": "",
-      "skinRedness": "",
-      "skinRednessEven": "",
-      "skinRednessHalfWay": "",
-      "skinRednessThisSkin": "",
-      "skinRednessWarm": "",
-      "skinShine": "",
-      "skinSpots": ""
+      "skin": "Skin",
+      "skinFindingFace": "Finding the face",
+      "skinKeepTexture": "Keep texture",
+      "skinRedness": "Redness",
+      "skinRednessEven": "Even",
+      "skinRednessHalfWay": "Half way",
+      "skinRednessThisSkin": "This skin",
+      "skinRednessWarm": "Warm",
+      "skinShine": "Shine",
+      "skinSpots": "Spots"
     }
   },
   "contextMenus": {
@@ -571,9 +571,9 @@
         "quickErase_other": "빠른 지우기 {{count}}",
         "retouch": "리터칭 {{count}}",
         "retouch_other": "리터칭 {{count}}",
-        "clone_one": "",
-        "heal_one": "",
-        "retouch_one": ""
+        "clone_one": "Clone {{count}}",
+        "heal_one": "Heal {{count}}",
+        "retouch_one": "Retouch {{count}}"
       },
       "resetInpaintingTooltip": "인페인팅 초기화",
       "settings": {
@@ -1217,7 +1217,7 @@
       "title": "AI 처리",
       "unprocessed_other": "이미지 {{count}}개에 AI 처리가 필요합니다",
       "waiting": "AI 처리 준비 중…",
-      "unprocessed_one": ""
+      "unprocessed_one": "{{count}} image needs AI processing"
     },
     "community": {
       "actionSave": "저장",
@@ -1264,7 +1264,7 @@
       "hiddenSingle": "{{name}}이(가) 더 이상 필터와 일치하지 않습니다",
       "hiddenMultiple_other": "이미지 {{count}}개가 더 이상 필터와 일치하지 않습니다",
       "undo": "실행 취소",
-      "hiddenMultiple_one": ""
+      "hiddenMultiple_one": "{{count}} images no longer match the filter"
     },
     "filters": {
       "edited": {
@@ -1427,7 +1427,7 @@
       "openInLibrary": "라이브러리에서 열기",
       "recent": "최근",
       "title": "작업",
-      "images_one": ""
+      "images_one": "{{count}} image"
     },
     "reject": {
       "deleteConfirm": "거부된 항목 삭제",
@@ -1607,7 +1607,7 @@
         "transformRotation": "변형 및 회전",
         "vignette": "비네트",
         "whiteBalance": "화이트 밸런스",
-        "skin": ""
+        "skin": "Skin"
       },
       "includedAdjustments": "포함된 조정값",
       "modeMerge": "병합",
@@ -1813,11 +1813,11 @@
       "zoomOutTooltip": "축소"
     },
     "dngConverter": {
-      "title": "",
-      "message": "",
-      "confirm": "",
-      "installerStarted": "",
-      "failed": ""
+      "title": "Adobe DNG Converter needed",
+      "message": "This Nikon NEF uses High Efficiency compression, which can't be decoded directly. Adobe's free DNG Converter can convert it to a full-quality DNG (full detail and colour depth, not the embedded JPEG).\n\nDownload Adobe's installer now? Adobe's installer will then open for you to finish installing; reopen the image afterwards.",
+      "confirm": "Download & install",
+      "installerStarted": "Adobe's installer was opened. Finish the installation, then reopen the image.",
+      "failed": "Couldn't get Adobe DNG Converter: {{error}}"
     }
   },
   "settings": {

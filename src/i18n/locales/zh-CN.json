@@ -244,16 +244,16 @@
         "spin": "旋转",
         "smooth": "平滑"
       },
-      "skin": "",
-      "skinFindingFace": "",
-      "skinKeepTexture": "",
-      "skinRedness": "",
-      "skinRednessEven": "",
-      "skinRednessHalfWay": "",
-      "skinRednessThisSkin": "",
-      "skinRednessWarm": "",
-      "skinShine": "",
-      "skinSpots": ""
+      "skin": "Skin",
+      "skinFindingFace": "Finding the face",
+      "skinKeepTexture": "Keep texture",
+      "skinRedness": "Redness",
+      "skinRednessEven": "Even",
+      "skinRednessHalfWay": "Half way",
+      "skinRednessThisSkin": "This skin",
+      "skinRednessWarm": "Warm",
+      "skinShine": "Shine",
+      "skinSpots": "Spots"
     }
   },
   "contextMenus": {
@@ -571,9 +571,9 @@
         "quickErase_other": "快速擦除 {{count}}",
         "retouch": "修饰 {{count}}",
         "retouch_other": "修饰 {{count}}",
-        "clone_one": "",
-        "heal_one": "",
-        "retouch_one": ""
+        "clone_one": "Clone {{count}}",
+        "heal_one": "Heal {{count}}",
+        "retouch_one": "Retouch {{count}}"
       },
       "resetInpaintingTooltip": "重置图像修复",
       "settings": {
@@ -1217,7 +1217,7 @@
       "title": "AI 处理",
       "unprocessed_other": "{{count}} 张图像需要 AI 处理",
       "waiting": "正在准备 AI 处理…",
-      "unprocessed_one": ""
+      "unprocessed_one": "{{count}} image needs AI processing"
     },
     "community": {
       "actionSave": "保存",
@@ -1264,7 +1264,7 @@
       "hiddenSingle": "{{name}} 已不再符合筛选条件",
       "hiddenMultiple_other": "{{count}} 张图像已不再符合筛选条件",
       "undo": "撤销",
-      "hiddenMultiple_one": ""
+      "hiddenMultiple_one": "{{count}} images no longer match the filter"
     },
     "filters": {
       "edited": {
@@ -1427,7 +1427,7 @@
       "openInLibrary": "在图库中打开",
       "recent": "最近",
       "title": "任务",
-      "images_one": ""
+      "images_one": "{{count}} image"
     },
     "reject": {
       "deleteConfirm": "删除已拒绝",
@@ -1607,7 +1607,7 @@
         "transformRotation": "变换与旋转",
         "vignette": "暗角",
         "whiteBalance": "白平衡",
-        "skin": ""
+        "skin": "Skin"
       },
       "includedAdjustments": "包含的调整",
       "modeMerge": "合并",
@@ -1813,11 +1813,11 @@
       "zoomOutTooltip": "缩小"
     },
     "dngConverter": {
-      "title": "",
-      "message": "",
-      "confirm": "",
-      "installerStarted": "",
-      "failed": ""
+      "title": "Adobe DNG Converter needed",
+      "message": "This Nikon NEF uses High Efficiency compression, which can't be decoded directly. Adobe's free DNG Converter can convert it to a full-quality DNG (full detail and colour depth, not the embedded JPEG).\n\nDownload Adobe's installer now? Adobe's installer will then open for you to finish installing; reopen the image afterwards.",
+      "confirm": "Download & install",
+      "installerStarted": "Adobe's installer was opened. Finish the installation, then reopen the image.",
+      "failed": "Couldn't get Adobe DNG Converter: {{error}}"
     }
   },
   "settings": {
