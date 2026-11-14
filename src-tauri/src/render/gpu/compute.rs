@@ -134,7 +134,7 @@ impl Group {
 pub struct ComputePipelines {
     layout: wgpu::PipelineLayout,
     bgl: wgpu::BindGroupLayout,
-    groups: [OnceLock<HashMap<&'static str, wgpu::ComputePipeline>>; 6],
+    groups: [OnceLock<HashMap<&'static str, wgpu::ComputePipeline>>; Group::ALL.len()],
     dummy_view: wgpu::TextureView,
     dummy_layers: wgpu::TextureView,
     dummy_f32: wgpu::TextureView,
