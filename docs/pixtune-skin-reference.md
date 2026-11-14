@@ -260,9 +260,9 @@ On branch `skin-by-fault` (`src-tauri/src/effects/skin.rs`, `src-tauri/src/shade
 | Shine | ported |
 | Keep texture | ported |
 | the face's own colour | ported, measured on the card as a 256-bin histogram over the skin pixels, median and the 75th percentile for the spread |
-| **Lines** | **not ported** - needs the Nasolabial, UnderEye and Forehead regions |
-| **Under eyes** | **not ported** - needs the UnderEye region |
-| the five regions | **not ported** - RapidRAW has face-part masks (`FacePart::FaceSkin` and the rest) but not these five, which are what weight the Lines map and place the under-eye band |
+| **Lines** | ported (`sk_valley`, `sk_band`, `sk_lines`): two widths of valley that follow the face's width, read against how much this skin varies from place to place, weighted by where a face folds |
+| **Under eyes** | ported (`sk_lines`, applied in `sk_apply`): darker than the cheek below it, inside the under-eye band |
+| the regions | ported as far as the maps need: `compose_skin_regions` in `masks/face.rs` builds the fold weight (Nasolabial + UnderEye x 0.8 + Forehead x 0.6) and the UnderEye band from the 478 landmarks, in the face's own upright frame, and the two travel with the edit as `skinLinesMap` and `skinUnderEyeMap`. Cheeks and NoseChin are not built: nothing ported reads them |
 | skin smoothing, skin tone, spotlight, eye clarity | not ported, and arguably should not be: RapidRAW can already do all four through its existing adjustments on a face-part mask |
 | the brush tool | not ported; RapidRAW's own brush masks cover it |
 

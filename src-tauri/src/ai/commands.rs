@@ -1021,7 +1021,7 @@ pub async fn generate_full_image_face_map(
     path: String,
     state: tauri::State<'_, AppState>,
     app_handle: tauri::AppHandle,
-) -> Result<String, String> {
+) -> Result<FaceMaps, String> {
     let models = get_or_init_ai_models(
         &app_handle,
         &state.ai_state,
@@ -1050,12 +1050,34 @@ pub async fn generate_full_image_face_map(
         return Err(NO_FACES_FOUND.to_string());
     }
     let mask = compose_face_mask(&source_image, &analysis, &[FacePart::FaceSkin]);
-    let encoded = encode_to_base64_png(&mask)?;
-    Ok(format!(
-        "{}{}",
-        crate::effects::maps::SOURCE_SPACE_MAP_PREFIX,
-        encoded.trim_start_matches("data:image/png;base64,")
-    ))
+    let regions = crate::masks::face::compose_skin_regions(
+        source_image.width(),
+        source_image.height(),
+        &analysis,
+    );
+    let source_space = |map: &image::GrayImage| -> Result<String, String> {
+        let encoded = encode_to_base64_png(map)?;
+        Ok(format!(
+            "{}{}",
+            crate::effects::maps::SOURCE_SPACE_MAP_PREFIX,
+            encoded.trim_start_matches("data:image/png;base64,")
+        ))
+    };
+    Ok(FaceMaps {
+        face_map: source_space(&mask)?,
+        lines_map: source_space(&regions.lines)?,
+        under_eye_map: source_space(&regions.under_eye)?,
+    })
+}
+
+/// The maps the skin tools work in, all in the picture's own space: the face skin, where a face tends
+/// to fold, and the band under each eye.
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FaceMaps {
+    face_map: String,
+    lines_map: String,
+    under_eye_map: String,
 }
 
 #[tauri::command]

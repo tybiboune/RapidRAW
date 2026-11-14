@@ -30,20 +30,98 @@ struct Params {
     keep_texture: f32,
     low_size: [u32; 2],
     face_size: [u32; 2],
+    region_size: [u32; 2],
     redness_way: u32,
+    lines: f32,
+    under_eye: f32,
     _pad0: u32,
     _pad1: u32,
     _pad2: u32,
 }
 
+// where a face folds and where it shades under the eyes: two soft maps made from the landmarks
+struct Regions {
+    lines: Arc<GrayImage>,
+    under_eye: Arc<GrayImage>,
+    key: u64,
+}
+
 pub struct Skin {
     face_map: Arc<GrayImage>,
     map_key: u64,
+    regions: Option<Regions>,
+    // how wide the face is, as a fraction of the picture, which is what the widths of lines go by
+    face_fraction: f32,
     spots: f32,
     redness: f32,
     shine: f32,
+    lines: f32,
+    under_eye: f32,
     keep_texture: f32,
     redness_way: u32,
+}
+
+// The face as a fraction of the picture's width: the widest part of the largest blob on the map. Lines
+// are a thin fraction of a face, so they have to be looked for at a width that follows the face and not
+// the frame - a small face in a big picture has thinner lines in pixels than a large one.
+fn face_fraction(map: &GrayImage) -> f32 {
+    const SIDE: u32 = 128;
+    const FALLBACK: f32 = 0.2;
+    let (mw, mh) = map.dimensions();
+    let scale = (SIDE as f32 / mw.max(mh) as f32).min(1.0);
+    let (gw, gh) = (
+        ((mw as f32 * scale).round() as u32).max(1),
+        ((mh as f32 * scale).round() as u32).max(1),
+    );
+    let on = |x: u32, y: u32| {
+        let (sx, sy) = (
+            (((x as f32 + 0.5) / gw as f32 * mw as f32) as u32).min(mw - 1),
+            (((y as f32 + 0.5) / gh as f32 * mh as f32) as u32).min(mh - 1),
+        );
+        map.get_pixel(sx, sy)[0] > 127
+    };
+    let mut seen = vec![false; (gw * gh) as usize];
+    let mut best = (0u32, 0.0f32);
+    for start_y in 0..gh {
+        for start_x in 0..gw {
+            let start = (start_y * gw + start_x) as usize;
+            if seen[start] || !on(start_x, start_y) {
+                continue;
+            }
+            seen[start] = true;
+            let mut stack = vec![(start_x, start_y)];
+            let (mut area, mut left, mut right) = (0u32, start_x, start_x);
+            while let Some((x, y)) = stack.pop() {
+                area += 1;
+                left = left.min(x);
+                right = right.max(x);
+                let around = [
+                    (x.wrapping_sub(1), y),
+                    (x + 1, y),
+                    (x, y.wrapping_sub(1)),
+                    (x, y + 1),
+                ];
+                for (nx, ny) in around {
+                    if nx >= gw || ny >= gh {
+                        continue;
+                    }
+                    let index = (ny * gw + nx) as usize;
+                    if !seen[index] && on(nx, ny) {
+                        seen[index] = true;
+                        stack.push((nx, ny));
+                    }
+                }
+            }
+            if area > best.0 {
+                best = (area, (right - left + 1) as f32 / gw as f32);
+            }
+        }
+    }
+    if best.0 == 0 {
+        FALLBACK
+    } else {
+        best.1.clamp(0.02, 1.0)
+    }
 }
 
 pub fn prepare(
@@ -62,7 +140,9 @@ pub fn prepare(
     let spots = get("skinSpots");
     let redness = get("skinRedness");
     let shine = get("skinShine");
-    if spots <= 0.0 && redness <= 0.0 && shine <= 0.0 {
+    let lines = get("skinLines");
+    let under_eye = get("skinUnderEye");
+    if spots <= 0.0 && redness <= 0.0 && shine <= 0.0 && lines <= 0.0 && under_eye <= 0.0 {
         return None;
     }
     if w < 8 || h < 8 {
@@ -72,12 +152,36 @@ pub fn prepare(
     if face_map.width() < 2 || face_map.height() < 2 {
         return None;
     }
+    // An edit saved before these maps existed has a face map and not these: the lines are then looked
+    // for everywhere on the skin alike, and there is no under-eye band to correct.
+    let map_of = |key: &str| {
+        let data = adjustments[key].as_str().filter(|map| !map.is_empty())?;
+        let map = crate::effects::maps::resolve_luma_map(data, adjustments, geometry)?;
+        let key = crate::effects::maps::effect_map_key(data, adjustments);
+        Some((map, key))
+    };
+    let regions = match (map_of("skinLinesMap"), map_of("skinUnderEyeMap")) {
+        (Some((lines, lines_key)), Some((under_eye, under_eye_key)))
+            if lines.dimensions() == under_eye.dimensions() && lines.width() >= 2 =>
+        {
+            Some(Regions {
+                lines,
+                under_eye,
+                key: lines_key ^ under_eye_key.rotate_left(17),
+            })
+        }
+        _ => None,
+    };
     Some(Skin {
         map_key: crate::effects::maps::effect_map_key(face_b64, adjustments),
+        face_fraction: face_fraction(&face_map),
         face_map,
+        regions,
         spots,
         redness,
         shine,
+        lines,
+        under_eye,
         keep_texture: get("skinKeepTexture"),
         redness_way: adjustments["skinRednessWay"].as_u64().unwrap_or(0).min(3) as u32,
     })
@@ -97,6 +201,34 @@ pub fn encode(enc: &mut ComputeEncoder, job: &Skin, src: &Slot, dst: &Slot) {
         ((size.1 as f32 * scale).round() as u32).clamp(4, size.1),
     );
 
+    let face = enc.cached_map("Skin Face Map", job.map_key, (fw, fh), r32, || {
+        job.face_map.pixels().map(|p| p[0] as f32 / 255.0).collect()
+    });
+
+    // the two region maps travel as one texture, the folds in the first channel and the under-eye band
+    // in the second; without them a single empty texel stands in, which reads as no region at all
+    let rg32 = wgpu::TextureFormat::Rg32Float;
+    let (region_size, regions) = match &job.regions {
+        Some(regions) => {
+            let size = regions.lines.dimensions();
+            let texture = enc.cached_map("Skin Regions", regions.key, size, rg32, || {
+                regions
+                    .lines
+                    .pixels()
+                    .zip(regions.under_eye.pixels())
+                    .flat_map(|(lines, under_eye)| {
+                        [lines[0] as f32 / 255.0, under_eye[0] as f32 / 255.0]
+                    })
+                    .collect()
+            });
+            (size, texture)
+        }
+        None => (
+            (1, 1),
+            enc.cached_map("Skin Regions", 0, (1, 1), rg32, || vec![0.0, 0.0]),
+        ),
+    };
+
     let params = Params {
         grid: Grid::new(size),
         spots: job.spots,
@@ -105,13 +237,12 @@ pub fn encode(enc: &mut ComputeEncoder, job: &Skin, src: &Slot, dst: &Slot) {
         keep_texture: job.keep_texture,
         low_size: [low_size.0, low_size.1],
         face_size: [fw, fh],
+        region_size: [region_size.0, region_size.1],
         redness_way: job.redness_way,
+        lines: job.lines,
+        under_eye: job.under_eye,
         ..Default::default()
     };
-
-    let face = enc.cached_map("Skin Face Map", job.map_key, (fw, fh), r32, || {
-        job.face_map.pixels().map(|p| p[0] as f32 / 255.0).collect()
-    });
 
     // what this face's own skin colour comes to, left in scratch for the passes that read against it
     let low = enc.area_down(src, low_size, RGB_MODE);
@@ -172,12 +303,86 @@ pub fn encode(enc: &mut ComputeEncoder, job: &Skin, src: &Slot, dst: &Slot) {
         },
     );
 
+    // Lines and the under-eye band, which cost several more passes, are only looked for when asked for.
+    // Lines are thin valleys, so they are found at widths that follow the face: each is the picture
+    // blurred wide against the same blurred narrow, at two widths, and the strongest of the two counts.
+    let extras = if job.lines > 0.0 || job.under_eye > 0.0 {
+        let face_px = (job.face_fraction * size.0 as f32).max(24.0);
+        // a blur of this radius spreads about as far as a gaussian a little under it
+        let radius = |share: f32| ((face_px * share * 1.2).round() as u32).clamp(1, 150);
+        let narrow_a = split(enc, "Skin Narrow A");
+        let narrow_b = split(enc, "Skin Narrow B");
+        let wide_a = split(enc, "Skin Wide A");
+        let wide_b = split(enc, "Skin Wide B");
+        let narrow_a = enc.blur(narrow_a, radius(0.0036), 2, 0);
+        let narrow_b = enc.blur(narrow_b, radius(0.0078), 2, 0);
+        let wide_a = enc.blur(wide_a, radius(0.0132), 2, 0);
+        let wide_b = enc.blur(wide_b, radius(0.0286), 2, 0);
+
+        let valleys = enc.texture("Skin Valleys", size, f32x4);
+        enc.run(
+            Group::Skin,
+            "sk_valley",
+            &params,
+            size,
+            &[
+                &here.view,
+                &narrow_a.view,
+                &narrow_b.view,
+                &wide_a.view,
+                &wide_b.view,
+            ],
+            Out::F32(&valleys.view),
+            Bind::default(),
+        );
+
+        // how much this skin varies from place to place: the yardstick the valleys are read against
+        let band = enc.texture("Skin Band", size, f32x4);
+        enc.run(
+            Group::Skin,
+            "sk_band",
+            &params,
+            size,
+            &[&fine.view, &wide.view, &here.view],
+            Out::F32(&band.view),
+            Bind::default(),
+        );
+        let spread = enc.blur(band, radius(0.09), 2, 0);
+
+        let extras = enc.texture("Skin Extras", size, f32x4);
+        enc.run(
+            Group::Skin,
+            "sk_lines",
+            &params,
+            size,
+            &[
+                &valleys.view,
+                &spread.view,
+                &regions.view,
+                &wide.view,
+                &here.view,
+            ],
+            Out::F32(&extras.view),
+            Bind::default(),
+        );
+        Some(extras)
+    } else {
+        None
+    };
+
     enc.run(
         Group::Skin,
         "sk_apply",
         &params,
         size,
-        &[&src.view, &maps.view, &fine.view, &wide.view],
+        &[
+            &src.view,
+            &maps.view,
+            &fine.view,
+            &wide.view,
+            // when neither is asked for the apply pass never reads this one
+            extras.as_ref().map_or(&maps.view, |extras| &extras.view),
+        ],
         Out::F16(&dst.view),
         Bind {
             scratch: Some(&stats),
@@ -435,5 +640,115 @@ mod tests {
                 "way {way}"
             );
         }
+    }
+
+    const CREASE_Y: u32 = 290;
+    const BAG: (f32, f32) = (90.0, 90.0);
+
+    // the flat portrait with a thin dark crease across it and a shadow under an eye
+    fn portrait_with_folds() -> Rgb32FImage {
+        let mut img = portrait();
+        for (x, y, px) in img.enumerate_pixels_mut() {
+            if (60..330).contains(&x) && (CREASE_Y..CREASE_Y + 3).contains(&y) {
+                px.0 = px.0.map(|v| v * 0.82);
+            }
+            let (dx, dy) = ((x as f32 - BAG.0) / 7.0, (y as f32 - BAG.1) / 3.5);
+            let bag = (-(dx * dx + dy * dy)).exp();
+            px.0 = px.0.map(|v| v * (1.0 - 0.25 * bag));
+        }
+        img
+    }
+
+    fn gray_map(value: impl Fn(u32, u32) -> u8) -> String {
+        let map = image::GrayImage::from_fn(N, N, |x, y| image::Luma([value(x, y)]));
+        let mut buf = Cursor::new(Vec::new());
+        map.write_to(&mut buf, ImageFormat::Png).unwrap();
+        format!(
+            "data:image/png;base64,{}",
+            STANDARD.encode(buf.into_inner())
+        )
+    }
+
+    fn with_regions(extra: serde_json::Value) -> serde_json::Value {
+        let mut v = adj(extra);
+        v["skinLinesMap"] = json!(gray_map(|_, _| 255));
+        v["skinUnderEyeMap"] = json!(gray_map(|x, y| {
+            let d = ((x as f32 - BAG.0).powi(2) + (y as f32 - BAG.1).powi(2)).sqrt();
+            if d < 30.0 { 255 } else { 0 }
+        }));
+        v
+    }
+
+    #[test]
+    fn lines_and_under_eyes_are_filled_back_towards_the_skin_around_them() {
+        let context = gpu();
+        let img = portrait_with_folds();
+        let input: Vec<[f32; 3]> = img.pixels().map(|p| p.0).collect();
+
+        // like every other slider, neither does anything until it moves
+        assert!(prepare(&with_regions(json!({})), None, (N, N)).is_none());
+        assert!(prepare(&with_regions(json!({ "skinLines": 10 })), None, (N, N)).is_some());
+        assert!(prepare(&with_regions(json!({ "skinUnderEye": 10 })), None, (N, N)).is_some());
+
+        let lines = render(&context, &img, with_regions(json!({ "skinLines": 100 })));
+        let under = render(&context, &img, with_regions(json!({ "skinUnderEye": 100 })));
+        // an edit saved before the region maps existed still renders, with the lines weighted evenly
+        let bare = render(
+            &context,
+            &img,
+            adj(json!({ "skinLines": 100, "skinUnderEye": 100 })),
+        );
+        for out in [&lines, &under, &bare] {
+            assert!(
+                out.iter().all(|p| p.iter().all(|v| v.is_finite())),
+                "non-finite output"
+            );
+        }
+
+        let crease = (240.0, CREASE_Y as f32 + 1.0);
+        let beside = mean(&input, (240.0, 320.0), 10.0);
+        let crease_in = mean(&input, crease, 1.5);
+        let crease_out = mean(&lines, crease, 1.5);
+        eprintln!("crease in {crease_in:?} out {crease_out:?} beside {beside:?}");
+        assert!(
+            luma(beside) - luma(crease_out) < (luma(beside) - luma(crease_in)) * 0.9,
+            "crease not filled"
+        );
+
+        let shadow_beside = mean(&input, (90.0, 135.0), 8.0);
+        let bag_in = mean(&input, BAG, 2.0);
+        let bag_out = mean(&under, BAG, 2.0);
+        eprintln!("bag in {bag_in:?} out {bag_out:?} beside {shadow_beside:?}");
+        assert!(
+            luma(shadow_beside) - luma(bag_out) < (luma(shadow_beside) - luma(bag_in)) * 0.9,
+            "under-eye shadow not lifted"
+        );
+
+        // far from the crease and the shadow the skin is left essentially alone
+        let far_in = mean(&input, (320.0, 60.0), 25.0);
+        for out in [&lines, &under] {
+            let far_out = mean(out, (320.0, 60.0), 25.0);
+            for i in 0..3 {
+                assert!((far_in[i] - far_out[i]).abs() < 0.02, "clean skin changed");
+            }
+        }
+    }
+
+    #[test]
+    fn the_face_fraction_follows_the_largest_blob() {
+        let mut map = image::GrayImage::new(400, 400);
+        for y in 100..300 {
+            for x in 50..250 {
+                map.put_pixel(x, y, image::Luma([255]));
+            }
+        }
+        for y in 10..30 {
+            for x in 300..390 {
+                map.put_pixel(x, y, image::Luma([255]));
+            }
+        }
+        let fraction = super::face_fraction(&map);
+        assert!((fraction - 0.5).abs() < 0.05, "fraction {fraction}");
+        assert!(super::face_fraction(&image::GrayImage::new(64, 64)) > 0.0);
     }
 }

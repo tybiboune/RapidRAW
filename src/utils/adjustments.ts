@@ -130,6 +130,10 @@ export enum Effect {
   SkinRednessWay = 'skinRednessWay',
   SkinShine = 'skinShine',
   SkinKeepTexture = 'skinKeepTexture',
+  SkinLines = 'skinLines',
+  SkinLinesMap = 'skinLinesMap',
+  SkinUnderEye = 'skinUnderEye',
+  SkinUnderEyeMap = 'skinUnderEyeMap',
   LensBlurEnabled = 'lensBlurEnabled',
   LensBlurAmount = 'lensBlurAmount',
   lensBlurDiffusion = 'lensBlurDiffusion',
@@ -340,6 +344,10 @@ export interface Adjustments {
   skinRednessWay: number;
   skinShine: number;
   skinKeepTexture: number;
+  skinLines: number;
+  skinLinesMap: string | null;
+  skinUnderEye: number;
+  skinUnderEyeMap: string | null;
   lensBlurAmount: number;
   lensBlurDiffusion: number;
   lensBlurShape: 'circle' | 'hexagon' | 'octagon' | 'ring';
@@ -830,6 +838,10 @@ export const normalizeLoadedAdjustments = (loadedAdjustments: Adjustments): any 
     skinRednessWay: loadedAdjustments.skinRednessWay ?? INITIAL_ADJUSTMENTS.skinRednessWay,
     skinShine: loadedAdjustments.skinShine ?? INITIAL_ADJUSTMENTS.skinShine,
     skinKeepTexture: loadedAdjustments.skinKeepTexture ?? INITIAL_ADJUSTMENTS.skinKeepTexture,
+    skinLines: loadedAdjustments.skinLines ?? INITIAL_ADJUSTMENTS.skinLines,
+    skinLinesMap: loadedAdjustments.skinLinesMap ?? INITIAL_ADJUSTMENTS.skinLinesMap,
+    skinUnderEye: loadedAdjustments.skinUnderEye ?? INITIAL_ADJUSTMENTS.skinUnderEye,
+    skinUnderEyeMap: loadedAdjustments.skinUnderEyeMap ?? INITIAL_ADJUSTMENTS.skinUnderEyeMap,
     lensBlurAmount: loadedAdjustments.lensBlurAmount ?? INITIAL_ADJUSTMENTS.lensBlurAmount,
     lensBlurDiffusion: loadedAdjustments.lensBlurDiffusion ?? INITIAL_ADJUSTMENTS.lensBlurDiffusion,
     lensBlurShape: loadedAdjustments.lensBlurShape ?? INITIAL_ADJUSTMENTS.lensBlurShape,
@@ -1035,6 +1047,8 @@ export const ADJUSTMENT_GROUPS: Record<string, AdjustmentGroup[]> = {
         Effect.SkinRedness,
         Effect.SkinRednessWay,
         Effect.SkinShine,
+        Effect.SkinLines,
+        Effect.SkinUnderEye,
         Effect.SkinKeepTexture,
       ],
     },
@@ -1238,6 +1252,10 @@ export const ADJUSTMENT_SECTIONS: Sections = {
     Effect.SkinRednessWay,
     Effect.SkinShine,
     Effect.SkinKeepTexture,
+    Effect.SkinLines,
+    Effect.SkinLinesMap,
+    Effect.SkinUnderEye,
+    Effect.SkinUnderEyeMap,
     Effect.LensBlurEnabled,
     Effect.LensBlurAmount,
     Effect.lensBlurDiffusion,

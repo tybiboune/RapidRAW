@@ -236,11 +236,20 @@ function EffectsPanel({
   const handleGenerateFaceMap = async () => {
     setIsGeneratingFaceMap(true);
     try {
-      const b64: string = await invoke('generate_full_image_face_map', {
-        jsAdjustments: adjustments,
-        path: selectedImagePath,
-      });
-      setAdjustments((prev: Partial<Adjustments>) => ({ ...prev, skinFaceMap: b64 }));
+      // the face skin, and the two maps that say where a face folds and where it shades under the eyes
+      const maps: { faceMap: string; linesMap: string; underEyeMap: string } = await invoke(
+        'generate_full_image_face_map',
+        {
+          jsAdjustments: adjustments,
+          path: selectedImagePath,
+        },
+      );
+      setAdjustments((prev: Partial<Adjustments>) => ({
+        ...prev,
+        skinFaceMap: maps.faceMap,
+        skinLinesMap: maps.linesMap,
+        skinUnderEyeMap: maps.underEyeMap,
+      }));
     } catch (e) {
       toast.error(`Failed to find a face: ${e}`);
       setAdjustments((prev: Partial<Adjustments>) => ({ ...prev, skinEnabled: false }));
@@ -251,7 +260,8 @@ function EffectsPanel({
 
   const handleSkinToggle = (enabled: boolean) => {
     handleAdjustmentChange(Effect.SkinEnabled, enabled);
-    if (enabled && !adjustments.skinFaceMap) {
+    // an edit saved before the lines and under-eye maps existed has a face map but not those
+    if (enabled && (!adjustments.skinFaceMap || !adjustments.skinLinesMap)) {
       handleGenerateFaceMap();
     }
   };
@@ -838,6 +848,34 @@ function EffectsPanel({
                         }
                         step={1}
                         value={adjustments.skinShine ?? 0}
+                        onDragStateChange={onDragStateChange}
+                      />
+
+                      <Slider
+                        resetKey="skinLines"
+                        label={t('adjustments.effects.skinLines')}
+                        max={100}
+                        min={0}
+                        defaultValue={0}
+                        onChange={(e: SliderChangeEvent) =>
+                          handleAdjustmentChange(Effect.SkinLines, e.target.value)
+                        }
+                        step={1}
+                        value={adjustments.skinLines ?? 0}
+                        onDragStateChange={onDragStateChange}
+                      />
+
+                      <Slider
+                        resetKey="skinUnderEye"
+                        label={t('adjustments.effects.skinUnderEye')}
+                        max={100}
+                        min={0}
+                        defaultValue={0}
+                        onChange={(e: SliderChangeEvent) =>
+                          handleAdjustmentChange(Effect.SkinUnderEye, e.target.value)
+                        }
+                        step={1}
+                        value={adjustments.skinUnderEye ?? 0}
                         onDragStateChange={onDragStateChange}
                       />
 

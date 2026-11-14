@@ -769,6 +769,128 @@ fn segment_probabilities(
     values
 }
 
+/// What a face does around its skin, for the skin tools: where it tends to fold, and the band under
+/// each eye that tends to go dark. Both are soft, so they are kept small and read at any size.
+pub struct SkinRegions {
+    /// where lines are likely: the folds beside the nose, under the eyes and across the forehead
+    pub lines: GrayImage,
+    /// the shadowed band under each eye
+    pub under_eye: GrayImage,
+}
+
+const REGION_MAP_SIDE: f32 = 1024.0;
+const RIGHT_EYE_INNER_CORNER: usize = 133;
+const LEFT_EYE_INNER_CORNER: usize = 362;
+const MOUTH_CORNERS: [usize; 2] = [61, 291];
+const NOSE_TIP: usize = 1;
+
+fn mean_point(points: &[[f32; 2]], indices: impl Iterator<Item = usize>) -> [f32; 2] {
+    let (sum, count) = indices.fold(([0.0f32; 2], 0.0f32), |(sum, count), i| {
+        ([sum[0] + points[i][0], sum[1] + points[i][1]], count + 1.0)
+    });
+    [sum[0] / count.max(1.0), sum[1] / count.max(1.0)]
+}
+
+fn distance(a: [f32; 2], b: [f32; 2]) -> f32 {
+    (a[0] - b[0]).hypot(a[1] - b[1])
+}
+
+fn smooth_step(low: f32, high: f32, x: f32) -> f32 {
+    let t = ((x - low) / (high - low).max(1e-6)).clamp(0.0, 1.0);
+    t * t * (3.0 - 2.0 * t)
+}
+
+fn segment_distance(p: [f32; 2], a: [f32; 2], b: [f32; 2]) -> f32 {
+    let (dx, dy) = (b[0] - a[0], b[1] - a[1]);
+    let t =
+        (((p[0] - a[0]) * dx + (p[1] - a[1]) * dy) / (dx * dx + dy * dy).max(1e-6)).clamp(0.0, 1.0);
+    distance(p, [a[0] + dx * t, a[1] + dy * t])
+}
+
+/// The regions are laid out from the fitted landmarks in the face's own upright frame, in proportion
+/// to the face: the width between the eyes sets the size of everything else, so they land the same way
+/// on a small face and a large one.
+pub fn compose_skin_regions(width: u32, height: u32, analysis: &FaceAnalysis) -> SkinRegions {
+    let scale = (REGION_MAP_SIDE / width.max(height) as f32).min(1.0);
+    let w = ((width as f32 * scale).round() as usize).max(1);
+    let h = ((height as f32 * scale).round() as usize).max(1);
+    let mut lines = vec![0.0f32; w * h];
+    let mut under_eye = vec![0.0f32; w * h];
+
+    for face in &analysis.faces {
+        let origin = [face.center[0] * scale, face.center[1] * scale];
+        let upright: Vec<[f32; 2]> = face
+            .landmarks
+            .iter()
+            .map(|p| {
+                rotate(
+                    [p[0] * scale - origin[0], p[1] * scale - origin[1]],
+                    -face.angle,
+                )
+            })
+            .collect();
+
+        let right_eye = mean_point(&upright, RIGHT_EYE.iter().copied());
+        let left_eye = mean_point(&upright, LEFT_EYE.iter().copied());
+        let eye_span = distance(right_eye, left_eye).max(1.0);
+        let size = eye_span * 2.6;
+        let eye_radius = ((distance(upright[RIGHT_EYE_CORNER], upright[RIGHT_EYE_INNER_CORNER])
+            + distance(upright[LEFT_EYE_CORNER], upright[LEFT_EYE_INNER_CORNER]))
+            / 4.0)
+            .max(1.0);
+        let brow_y = mean_point(&upright, LEFT_BROW.iter().chain(RIGHT_BROW.iter()).copied())[1];
+        let mouth = mean_point(&upright, MOUTH_CORNERS.iter().copied());
+        let mouth_half = distance(upright[MOUTH_CORNERS[0]], upright[MOUTH_CORNERS[1]]) / 2.0;
+        let nose = upright[NOSE_TIP];
+
+        let blob = |u: [f32; 2], centre: [f32; 2], rx: f32, ry: f32| {
+            let (dx, dy) = ((u[0] - centre[0]) / rx, (u[1] - centre[1]) / ry);
+            (-(dx * dx + dy * dy)).exp()
+        };
+        // a soft band from beside the nose down to the corner of the mouth, one on each side
+        let fold = |u: [f32; 2], side: f32| {
+            let from = [nose[0] + side * size * 0.09, nose[1] + size * 0.03];
+            let to = [mouth[0] + side * mouth_half, mouth[1] + mouth_half * 0.4];
+            let d = segment_distance(u, from, to) / (size * 0.05);
+            (-(d * d)).exp()
+        };
+
+        let (x0, y0, x1, y1) = face_region(face, width, height);
+        let (x0, y0) = ((x0 as f32 * scale) as usize, (y0 as f32 * scale) as usize);
+        let (x1, y1) = (
+            ((x1 as f32 * scale).ceil() as usize).min(w),
+            ((y1 as f32 * scale).ceil() as usize).min(h),
+        );
+        for y in y0..y1 {
+            for x in x0..x1 {
+                let u = rotate([x as f32 - origin[0], y as f32 - origin[1]], -face.angle);
+                let forehead = 1.0 - smooth_step(brow_y - size * 0.06, brow_y, u[1]);
+                let under = blob(
+                    u,
+                    [right_eye[0], right_eye[1] + eye_radius * 1.35],
+                    eye_radius * 1.5,
+                    eye_radius * 0.85,
+                )
+                .max(blob(
+                    u,
+                    [left_eye[0], left_eye[1] + eye_radius * 1.35],
+                    eye_radius * 1.5,
+                    eye_radius * 0.85,
+                ));
+                let folds = fold(u, 1.0).max(fold(u, -1.0));
+                let i = y * w + x;
+                lines[i] = lines[i].max((folds + under * 0.8 + forehead * 0.6).clamp(0.0, 1.0));
+                under_eye[i] = under_eye[i].max(under);
+            }
+        }
+    }
+
+    SkinRegions {
+        lines: to_gray(&lines, w, h),
+        under_eye: to_gray(&under_eye, w, h),
+    }
+}
+
 pub fn compose_face_mask(
     image: &DynamicImage,
     analysis: &FaceAnalysis,

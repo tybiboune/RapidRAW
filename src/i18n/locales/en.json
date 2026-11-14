@@ -245,6 +245,7 @@
       "skin": "Skin",
       "skinFindingFace": "Finding the face",
       "skinKeepTexture": "Keep texture",
+      "skinLines": "Lines",
       "skinRedness": "Redness",
       "skinRednessEven": "Even",
       "skinRednessHalfWay": "Half way",
@@ -252,6 +253,7 @@
       "skinRednessWarm": "Warm",
       "skinShine": "Shine",
       "skinSpots": "Spots",
+      "skinUnderEye": "Under eyes",
       "spatial": "Spatial",
       "vignette": "Vignette"
     }

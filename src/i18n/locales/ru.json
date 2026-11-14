@@ -247,13 +247,15 @@
       "skin": "Skin",
       "skinFindingFace": "Finding the face",
       "skinKeepTexture": "Keep texture",
+      "skinLines": "Lines",
       "skinRedness": "Redness",
       "skinRednessEven": "Even",
       "skinRednessHalfWay": "Half way",
       "skinRednessThisSkin": "This skin",
       "skinRednessWarm": "Warm",
       "skinShine": "Shine",
-      "skinSpots": "Spots"
+      "skinSpots": "Spots",
+      "skinUnderEye": "Under eyes"
     }
   },
   "contextMenus": {
