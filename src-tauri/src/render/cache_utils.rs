@@ -272,6 +272,26 @@ pub fn calculate_effects_hash(adjustments: &serde_json::Value) -> u64 {
         hash_orientation(adjustments, &mut hasher);
     }
 
+    // the skin sliders and the face map they work in: without them the rendered effects would be
+    // reused as they were, whatever the sliders say
+    let skin_enabled = is_effect_enabled(adjustments, "skin", "skinEnabled");
+    skin_enabled.hash(&mut hasher);
+
+    if skin_enabled {
+        hash_effect_keys(
+            adjustments,
+            &[
+                "skinSpots",
+                "skinRedness",
+                "skinRednessWay",
+                "skinShine",
+                "skinKeepTexture",
+                "skinFaceMap",
+            ],
+            &mut hasher,
+        );
+    }
+
     hasher.finish()
 }
 
@@ -364,6 +384,25 @@ pub fn calculate_transform_hash(adjustments: &serde_json::Value) -> u64 {
             }
         }
         if let Some(val) = adjustments.get("fogDepthMap") {
+            val.as_str().unwrap_or("").len().hash(&mut hasher);
+        }
+    }
+
+    let skin_enabled = is_effect_enabled(adjustments, "skin", "skinEnabled");
+    skin_enabled.hash(&mut hasher);
+    if skin_enabled {
+        for key in [
+            "skinSpots",
+            "skinRedness",
+            "skinRednessWay",
+            "skinShine",
+            "skinKeepTexture",
+        ] {
+            if let Some(val) = adjustments.get(key) {
+                val.to_string().hash(&mut hasher);
+            }
+        }
+        if let Some(val) = adjustments.get("skinFaceMap") {
             val.as_str().unwrap_or("").len().hash(&mut hasher);
         }
     }

@@ -108,6 +108,7 @@ pub fn is_image_edited(
         ("lensBlur", "lensBlurEnabled"),
         ("relight", "relightEnabled"),
         ("fog", "fogEnabled"),
+        ("skin", "skinEnabled"),
     ]
     .iter()
     .any(|(tool, enabled_key)| is_effect_enabled(adj, tool, enabled_key))
