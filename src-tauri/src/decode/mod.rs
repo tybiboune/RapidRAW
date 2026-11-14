@@ -3,6 +3,7 @@ pub mod as_shot;
 pub mod baseline_exposure;
 pub mod demosaic;
 pub mod develop;
+pub mod dng_converter;
 pub mod formats;
 pub mod image_loader;
 pub mod image_preload;

@@ -690,6 +690,8 @@ pub fn run() {
             merge::focus_stacking::stitch_focus_stack,
             merge::focus_stacking::save_focus_stack,
             decode::image_loader::load_image,
+            decode::dng_converter::get_dng_converter_status,
+            decode::dng_converter::install_dng_converter,
             decode::image_loader::is_image_cached,
             decode::image_preload::preload_images,
             merge::panorama::stitch_panorama,

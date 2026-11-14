@@ -63,6 +63,8 @@ export enum Invokes {
   LoadImage = 'load_image',
   LoadMetadata = 'load_metadata',
   GetDefaultAdjustments = 'get_default_adjustments',
+  GetDngConverterStatus = 'get_dng_converter_status',
+  InstallDngConverter = 'install_dng_converter',
   LoadPresets = 'load_presets',
   LoadSettings = 'load_settings',
   MoveFiles = 'move_files',

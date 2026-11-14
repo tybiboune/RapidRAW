@@ -29,6 +29,10 @@ pub fn register_app_handle(app_handle: &tauri::AppHandle) {
     let _ = APP_HANDLE.set(app_handle.clone());
 }
 
+pub fn app_handle() -> Option<&'static tauri::AppHandle> {
+    APP_HANDLE.get()
+}
+
 pub fn shared_gpu_context() -> Result<GpuContext, String> {
     let app_handle = APP_HANDLE
         .get()

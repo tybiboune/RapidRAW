@@ -13,6 +13,7 @@ import { useUIStore } from '../store/useUIStore';
 import { useLibraryStore } from '../store/useLibraryStore';
 import { adjustmentsFromMetadata, fetchImageDefaults } from '../utils/developDefaults';
 import { globalImageCache } from '../utils/ImageLRUCache';
+import i18n from 'i18next';
 
 const THUMBNAIL_REFRESH_LIMIT = 500;
 
@@ -278,6 +279,48 @@ export function useTauriListeners({
         editStatusBuffer.current[path] = is_edited;
         metadataBuffer.current[path] = { flag, tags, needs_ai };
         scheduleFlush();
+      }),
+      listen<string>('dng-converter-needed', () => {
+        if (!isEffectActive) return;
+        useUIStore.getState().setUI({
+          confirmModalState: {
+            confirmText: i18n.t('modals.dngConverter.confirm'),
+            isOpen: true,
+            message: i18n.t('modals.dngConverter.message'),
+            onConfirm: () => {
+              invoke(Invokes.InstallDngConverter)
+                .then(() => toast.info(i18n.t('modals.dngConverter.installerStarted'), { autoClose: 15000 }))
+                .catch((err) => toast.error(i18n.t('modals.dngConverter.failed', { error: String(err) })));
+            },
+            title: i18n.t('modals.dngConverter.title'),
+          },
+        });
+      }),
+      listen<string>('dng-converter-download-start', (event) => {
+        if (isEffectActive)
+          modelDownloadJobIds[event.payload] = useProcessStore
+            .getState()
+            .startJob(JobKind.ModelDownload, { detail: event.payload });
+      }),
+      listen<{ name: string; current: number; total: number }>('dng-converter-download-progress', (event) => {
+        const { name, current, total } = event.payload;
+        const jobId = modelDownloadJobIds[name];
+        if (isEffectActive && jobId) useProcessStore.getState().updateJob(jobId, { progress: { current, total } });
+      }),
+      listen<{ error: string | null }>('dng-converter-download-finish', (event) => {
+        if (!isEffectActive) return;
+        const name = 'Adobe DNG Converter';
+        const jobId = modelDownloadJobIds[name];
+        delete modelDownloadJobIds[name];
+        if (jobId)
+          useProcessStore
+            .getState()
+            .updateJob(
+              jobId,
+              event.payload.error
+                ? { status: JobStatus.Error, error: event.payload.error }
+                : { status: JobStatus.Success },
+            );
       }),
       listen<string>('ai-model-download-start', (event) => {
         if (isEffectActive)

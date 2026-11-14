@@ -176,6 +176,26 @@ pub fn load_base_image_from_bytes(
                     return Err(classified);
                 }
 
+                if crate::decode::dng_converter::is_unsupported_nef_compression(&classified) {
+                    match develop_he_nef_via_dng(
+                        path_for_ext_check,
+                        settings.dng_converter_path.as_deref(),
+                        use_fast_raw_dev,
+                        highlight_compression,
+                        linear_mode.clone(),
+                        color_nr_amount,
+                        sharpening_amount,
+                        cancel_token.clone(),
+                    ) {
+                        Ok(image) => return Ok(image),
+                        Err(e) => log::warn!(
+                            "DNG conversion unavailable for '{}': {}",
+                            path_for_ext_check,
+                            e
+                        ),
+                    }
+                }
+
                 log::warn!(
                     "Error developing RAW file '{}': {}",
                     path_for_ext_check,
@@ -219,6 +239,37 @@ pub fn load_base_image_from_bytes(
             Ok(image)
         }
     }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn develop_he_nef_via_dng(
+    path: &str,
+    configured_converter: Option<&str>,
+    use_fast_raw_dev: bool,
+    highlight_compression: f32,
+    linear_mode: String,
+    color_nr_amount: f32,
+    sharpening_amount: f32,
+    cancel_token: Option<(Arc<AtomicUsize>, usize)>,
+) -> Result<DynamicImage> {
+    let source = parse_virtual_path(path).0;
+    let source = source.to_string_lossy();
+    let dng_path =
+        crate::decode::dng_converter::dng_for_he_nef(configured_converter, &source)?;
+    let dng_bytes = fs::read(&dng_path)?;
+    log::info!("Developing HE NEF '{}' from converted DNG", path);
+    panic::catch_unwind(move || {
+        crate::decode::raw_processing::develop_raw_image(
+            &dng_bytes,
+            use_fast_raw_dev,
+            highlight_compression,
+            linear_mode,
+            color_nr_amount,
+            sharpening_amount,
+            cancel_token,
+        )
+    })
+    .map_err(|_| anyhow!("RAW decoder panicked on converted DNG"))?
 }
 
 fn classify_raw_develop_error(path: &str, err: anyhow::Error) -> anyhow::Error {
