@@ -15,16 +15,20 @@
 // leaves the brightness exactly as it was: correct a flush by darkening it and the face goes grey,
 // which is the usual giveaway.
 
+// A pair of numbers sits on an eight-byte boundary here, so the order is the layout and the Rust copy
+// of this struct is written to come out the same.
 struct Params {
     grid: Grid,
     spots: f32,
     redness: f32,
     shine: f32,
     keep_texture: f32,
-    redness_way: u32,
     low_size: vec2<u32>,
     face_size: vec2<u32>,
+    redness_way: u32,
     _pad0: u32,
+    _pad1: u32,
+    _pad2: u32,
 }
 
 @group(0) @binding(7) var<uniform> params: Params;

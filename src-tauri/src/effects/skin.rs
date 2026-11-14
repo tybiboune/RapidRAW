@@ -14,22 +14,26 @@ use image::GrayImage;
 
 use crate::render::adjustment_utils::is_effect_enabled;
 use crate::render::geometry::GeometryParams;
-use crate::render::gpu::compute::{Bind, ComputeEncoder, Grid, Group, Out, Slot};
+use crate::render::gpu::compute::{Bind, ComputeEncoder, Grid, Group, Out, RGB_MODE, Slot};
 
 const STATS_LONG_SIDE: f32 = 512.0;
 
 #[repr(C)]
 #[derive(Debug, Default, Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
+// The order is the layout: a pair of numbers sits on an eight-byte boundary and the whole thing comes
+// to a multiple of sixteen, which is what the shader's copy of this struct also works out to.
 struct Params {
     grid: Grid,
     spots: f32,
     redness: f32,
     shine: f32,
     keep_texture: f32,
-    redness_way: u32,
     low_size: [u32; 2],
     face_size: [u32; 2],
+    redness_way: u32,
     _pad0: u32,
+    _pad1: u32,
+    _pad2: u32,
 }
 
 pub struct Skin {
@@ -99,9 +103,9 @@ pub fn encode(enc: &mut ComputeEncoder, job: &Skin, src: &Slot, dst: &Slot) {
         redness: job.redness,
         shine: job.shine,
         keep_texture: job.keep_texture,
-        redness_way: job.redness_way,
         low_size: [low_size.0, low_size.1],
         face_size: [fw, fh],
+        redness_way: job.redness_way,
         ..Default::default()
     };
 
@@ -110,7 +114,7 @@ pub fn encode(enc: &mut ComputeEncoder, job: &Skin, src: &Slot, dst: &Slot) {
     });
 
     // what this face's own skin colour comes to, left in scratch for the passes that read against it
-    let low = enc.area_down(src, low_size, 0);
+    let low = enc.area_down(src, low_size, RGB_MODE);
     let stats = enc.buffer("Skin Stats", bytemuck::cast_slice(&[0u32; 4]));
     enc.run(
         Group::Skin,
