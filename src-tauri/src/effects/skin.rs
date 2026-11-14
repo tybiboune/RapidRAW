@@ -207,9 +207,8 @@ mod tests {
     const FLUSH: (f32, f32) = (110.0, 290.0);
 
     fn gpu() -> GpuContext {
-        let instance = wgpu::Instance::new(
-            wgpu::InstanceDescriptor::new_without_display_handle_from_env(),
-        );
+        let instance =
+            wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle_from_env());
         let adapter = pollster::block_on(instance.request_adapter(&Default::default()))
             .expect("no wgpu adapter (install a Vulkan driver, e.g. mesa lavapipe)");
         eprintln!("adapter: {:?}", adapter.get_info().name);
@@ -266,7 +265,10 @@ mod tests {
         let map = image::GrayImage::from_pixel(N, N, image::Luma([255]));
         let mut buf = Cursor::new(Vec::new());
         map.write_to(&mut buf, ImageFormat::Png).unwrap();
-        format!("data:image/png;base64,{}", STANDARD.encode(buf.into_inner()))
+        format!(
+            "data:image/png;base64,{}",
+            STANDARD.encode(buf.into_inner())
+        )
     }
 
     fn read(context: &GpuContext, slot: &Slot) -> Vec<[f32; 3]> {
@@ -289,12 +291,19 @@ mod tests {
                     rows_per_image: Some(h),
                 },
             },
-            wgpu::Extent3d { width: w, height: h, depth_or_array_layers: 1 },
+            wgpu::Extent3d {
+                width: w,
+                height: h,
+                depth_or_array_layers: 1,
+            },
         );
         context.queue.submit(Some(enc.finish()));
         let slice = buffer.slice(..);
         slice.map_async(wgpu::MapMode::Read, |r| r.unwrap());
-        context.device.poll(wgpu::PollType::wait_indefinitely()).unwrap();
+        context
+            .device
+            .poll(wgpu::PollType::wait_indefinitely())
+            .unwrap();
         let data = slice.get_mapped_range();
         let mut out = Vec::with_capacity((w * h) as usize);
         for y in 0..h {
@@ -307,7 +316,11 @@ mod tests {
         out
     }
 
-    fn render(context: &GpuContext, img: &Rgb32FImage, adjustments: serde_json::Value) -> Vec<[f32; 3]> {
+    fn render(
+        context: &GpuContext,
+        img: &Rgb32FImage,
+        adjustments: serde_json::Value,
+    ) -> Vec<[f32; 3]> {
         assert_eq!(IMAGE_FORMAT, wgpu::TextureFormat::Rgba16Float);
         let dynamic = DynamicImage::ImageRgb32F(img.clone());
         let slot = compute::upload_image(context, (N, N), &compute::rgba_halves(&dynamic));
@@ -315,7 +328,10 @@ mod tests {
             &dynamic,
             1,
             &adjustments,
-            SourceTransform { effects: true, ..Default::default() },
+            SourceTransform {
+                effects: true,
+                ..Default::default()
+            },
         );
         let out = source.render(context, &slot).expect("render");
         read(context, &out)
@@ -340,7 +356,8 @@ mod tests {
     }
 
     fn adj(extra: serde_json::Value) -> serde_json::Value {
-        let mut v = json!({ "skinEnabled": true, "skinFaceMap": face_map(), "skinKeepTexture": 50 });
+        let mut v =
+            json!({ "skinEnabled": true, "skinFaceMap": face_map(), "skinKeepTexture": 50 });
         for (k, val) in extra.as_object().unwrap() {
             v[k] = val.clone();
         }
@@ -358,9 +375,16 @@ mod tests {
 
         let spots = render(&context, &img, adj(json!({ "skinSpots": 100 })));
         let shine = render(&context, &img, adj(json!({ "skinShine": 100 })));
-        let redness = render(&context, &img, adj(json!({ "skinRedness": 100, "skinRednessWay": 0 })));
+        let redness = render(
+            &context,
+            &img,
+            adj(json!({ "skinRedness": 100, "skinRednessWay": 0 })),
+        );
         for out in [&spots, &shine, &redness] {
-            assert!(out.iter().all(|p| p.iter().all(|v| v.is_finite())), "non-finite output");
+            assert!(
+                out.iter().all(|p| p.iter().all(|v| v.is_finite())),
+                "non-finite output"
+            );
         }
 
         let bg = mean(&input, (330.0, 330.0), 25.0);
@@ -389,14 +413,27 @@ mod tests {
         let ratio = |p: [f32; 3]| p[0] / (p[0] + p[1] + p[2]);
         let r_in = mean(&input, FLUSH, 10.0);
         let r_out = mean(&redness, FLUSH, 10.0);
-        eprintln!("flush in {r_in:?} out {r_out:?} (bg ratio {:.3})", ratio(bg));
+        eprintln!(
+            "flush in {r_in:?} out {r_out:?} (bg ratio {:.3})",
+            ratio(bg)
+        );
         assert!(ratio(r_in) - ratio(r_out) > 0.01, "flush not reduced");
         assert!(ratio(r_out) >= ratio(bg) - 0.01, "flush overcorrected");
-        assert!((luma(r_in) - luma(r_out)).abs() < 0.03, "redness changed brightness");
+        assert!(
+            (luma(r_in) - luma(r_out)).abs() < 0.03,
+            "redness changed brightness"
+        );
 
         for way in 0..4 {
-            let out = render(&context, &img, adj(json!({ "skinRedness": 80, "skinRednessWay": way })));
-            assert!(out.iter().all(|p| p.iter().all(|v| v.is_finite())), "way {way}");
+            let out = render(
+                &context,
+                &img,
+                adj(json!({ "skinRedness": 80, "skinRednessWay": way })),
+            );
+            assert!(
+                out.iter().all(|p| p.iter().all(|v| v.is_finite())),
+                "way {way}"
+            );
         }
     }
 }

@@ -256,8 +256,7 @@ fn develop_he_nef_via_dng(
 ) -> Result<DynamicImage> {
     let source = parse_virtual_path(path).0;
     let source = source.to_string_lossy();
-    let dng_path =
-        crate::decode::dng_converter::dng_for_he_nef(configured_converter, &source)?;
+    let dng_path = crate::decode::dng_converter::dng_for_he_nef(configured_converter, &source)?;
     let dng_bytes = fs::read(&dng_path)?;
     log::info!("Developing HE NEF '{}' from converted DNG", path);
     panic::catch_unwind(move || {

@@ -20,7 +20,8 @@ use anyhow::{Context, Result, anyhow, bail};
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager};
 
-pub const ADOBE_DNG_PAGE: &str = "https://helpx.adobe.com/camera-raw/using/adobe-dng-converter.html";
+pub const ADOBE_DNG_PAGE: &str =
+    "https://helpx.adobe.com/camera-raw/using/adobe-dng-converter.html";
 
 static CONVERSION_LOCK: Mutex<()> = Mutex::new(());
 static PROMPTED: AtomicBool = AtomicBool::new(false);
@@ -184,10 +185,15 @@ pub fn get_dng_converter_status(configured_path: Option<String>) -> DngConverter
 
 /// Picks Adobe's installer link for this platform out of the DNG Converter page.
 fn pick_installer_url(page: &str) -> Option<String> {
-    let re = regex::Regex::new(r#"https?://[A-Za-z0-9./_\-]*DNGConverter[A-Za-z0-9._\-]*\.(?:exe|dmg)"#)
-        .ok()?;
+    let re =
+        regex::Regex::new(r#"https?://[A-Za-z0-9./_\-]*DNGConverter[A-Za-z0-9._\-]*\.(?:exe|dmg)"#)
+            .ok()?;
     let links: Vec<&str> = re.find_iter(page).map(|m| m.as_str()).collect();
-    let ext = if cfg!(target_os = "windows") { ".exe" } else { ".dmg" };
+    let ext = if cfg!(target_os = "windows") {
+        ".exe"
+    } else {
+        ".dmg"
+    };
     let wants_arm = cfg!(target_arch = "aarch64");
     let is_arm = |l: &str| {
         let l = l.to_ascii_lowercase();
@@ -216,12 +222,15 @@ pub async fn install_dng_converter(app: AppHandle) -> Result<(), String> {
     if !cfg!(any(target_os = "windows", target_os = "macos")) {
         return Err("Adobe DNG Converter is only available for Windows and macOS".to_string());
     }
-    run_install(&app).await.map_err(|e| e.to_string()).inspect_err(|e| {
-        let _ = app.emit(
-            "dng-converter-download-finish",
-            serde_json::json!({ "error": e }),
-        );
-    })
+    run_install(&app)
+        .await
+        .map_err(|e| e.to_string())
+        .inspect_err(|e| {
+            let _ = app.emit(
+                "dng-converter-download-finish",
+                serde_json::json!({ "error": e }),
+            );
+        })
 }
 
 async fn run_install(app: &AppHandle) -> Result<()> {
@@ -256,7 +265,10 @@ async fn run_install(app: &AppHandle) -> Result<()> {
     }
     file.flush()?;
     drop(file);
-    let _ = app.emit("dng-converter-download-finish", serde_json::json!({ "error": null }));
+    let _ = app.emit(
+        "dng-converter-download-finish",
+        serde_json::json!({ "error": null }),
+    );
 
     launch_installer(&dest)
 }
@@ -281,7 +293,9 @@ fn launch_installer(dmg: &Path) -> Result<()> {
 
 #[cfg(not(any(target_os = "windows", target_os = "macos")))]
 fn launch_installer(_installer: &Path) -> Result<()> {
-    Err(anyhow!("Adobe DNG Converter is only available for Windows and macOS"))
+    Err(anyhow!(
+        "Adobe DNG Converter is only available for Windows and macOS"
+    ))
 }
 
 #[cfg(test)]
@@ -296,7 +310,9 @@ mod tests {
         assert!(is_unsupported_nef_compression_text(
             "Unsupported RAW compression format for 'a.NEF'. Original error: Decoder failed: NEF compression Some(HighEfficencyStar) is not supported"
         ));
-        assert!(!is_unsupported_nef_compression_text("NEF compression Lossy is not supported"));
+        assert!(!is_unsupported_nef_compression_text(
+            "NEF compression Lossy is not supported"
+        ));
         assert!(!is_unsupported_nef_compression_text("Load cancelled"));
     }
 
@@ -319,7 +335,10 @@ mod tests {
     #[test]
     fn args_are_lossless_cached_output() {
         let args = converter_args(Path::new("/o"), "k.dng", Path::new("/s/a.NEF"));
-        let s: Vec<_> = args.iter().map(|a| a.to_string_lossy().into_owned()).collect();
+        let s: Vec<_> = args
+            .iter()
+            .map(|a| a.to_string_lossy().into_owned())
+            .collect();
         assert_eq!(s, ["-c", "-p0", "-d", "/o", "-o", "k.dng", "/s/a.NEF"]);
     }
 }
