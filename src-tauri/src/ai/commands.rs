@@ -295,8 +295,17 @@ fn cached_face_analysis(
     // indistinguishable from a model that was set up badly, so it is never cached and it throws the
     // sessions away: the next request re-verifies the model files and builds new sessions instead of
     // reusing the same ones for the rest of the run.
-    let analysis = match compute_face_analysis(ai_state, models, cache_key, warped_image, transform)
-    {
+    //
+    // A failure also gets one immediate second try on the fresh sessions. That is what makes a GPU
+    // that dies mid-inference recoverable in the same click: the failure switches the AI models to
+    // the CPU, and the rebuilt sessions are CPU ones.
+    let mut result = compute_face_analysis(ai_state, models, cache_key, warped_image, transform);
+    if let Err(error) = &result {
+        log::warn!("Face analysis failed, rebuilding the face models and retrying: {error}");
+        reset_face_models(ai_state, models);
+        result = compute_face_analysis(ai_state, models, cache_key, warped_image, transform);
+    }
+    let analysis = match result {
         Ok(analysis) => Arc::new(analysis),
         Err(error) => {
             reset_face_models(ai_state, models);
