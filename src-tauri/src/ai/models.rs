@@ -342,6 +342,39 @@ pub struct AiModels {
 }
 
 impl AiModels {
+    /// Whether every file the model needs is still on disk. Cheap (no hashing), so it can guard the
+    /// fast path; the full sha256 check only runs when this fails or the model is invalidated.
+    fn assets_present(&self, model: AiMaskModel) -> bool {
+        let all_present = |gpu_inference: bool| {
+            model
+                .assets(gpu_inference)
+                .iter()
+                .all(|asset| self.models_dir.join(asset.filename).is_file())
+        };
+        // only the foreground model differs between the two, and which one applies depends on the GPU
+        all_present(false) || all_present(true)
+    }
+
+    /// Throws away everything the face tools stand on, so the next request downloads/verifies the
+    /// files again and builds fresh sessions. Called when a face request failed or came back empty:
+    /// without it, one bad initialisation would be reused for the rest of the run.
+    ///
+    /// The EfficientSAM3 encoder/decoder are shared with the sky and text masks, so those masks are
+    /// marked unverified too and re-check their files on their next use.
+    pub fn invalidate_face_models(&self) {
+        {
+            let mut downloaded = self.downloaded.lock().unwrap();
+            for model in [AiMaskModel::Face, AiMaskModel::Sky, AiMaskModel::Text] {
+                downloaded.remove(&model);
+            }
+        }
+        *self.esam3_image_encoder.lock().unwrap() = None;
+        *self.esam3_decoder.lock().unwrap() = None;
+        *self.esam3_face_prompt.lock().unwrap() = None;
+        *self.face_landmarks.lock().unwrap() = None;
+        *self.face_segmenter.lock().unwrap() = None;
+    }
+
     fn session(
         &self,
         slot: &Mutex<Option<SharedSession>>,
@@ -815,7 +848,11 @@ pub async fn get_or_init_ai_models(
     ai_init_lock: &TokioMutex<()>,
     model: AiMaskModel,
 ) -> Result<Arc<AiModels>> {
-    let is_downloaded = |models: &AiModels| models.downloaded.lock().unwrap().contains(&model);
+    // "ready" is the verified flag plus the files still being on disk: the flag alone would keep
+    // vouching for a model whose file was deleted or replaced after the first check of the run
+    let is_downloaded = |models: &AiModels| {
+        models.downloaded.lock().unwrap().contains(&model) && models.assets_present(model)
+    };
 
     if let Some(models) = cached_ai_state(ai_state_mutex, |state| state.models.clone())
         && is_downloaded(&models)
@@ -858,6 +895,7 @@ pub async fn get_or_init_ai_models(
     };
 
     if !is_downloaded(&models) {
+        models.downloaded.lock().unwrap().remove(&model);
         for asset in model.assets(models.gpu_inference()) {
             download_and_verify_model(app_handle, &models.models_dir, asset).await?;
         }
@@ -1098,6 +1136,13 @@ pub struct AiState {
 }
 
 impl AiState {
+    /// Drops the per-picture results the face tools cache, so nothing computed by a session that has
+    /// just been judged bad survives it.
+    pub fn forget_face_results(&mut self) {
+        self.esam3_features = None;
+        self.face_analysis = None;
+    }
+
     pub fn release_sessions(&mut self) {
         self.models = None;
         self.denoise_model = None;

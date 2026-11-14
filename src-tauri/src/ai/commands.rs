@@ -286,11 +286,39 @@ fn cached_face_analysis(
         .unwrap()
         .as_ref()
         .and_then(|s| s.face_analysis.clone())
-        .filter(|cached| cached.path_hash == cache_key)
+        .filter(|cached| cached.path_hash == cache_key && !cached.faces.is_empty())
     {
         return Ok(cached);
     }
 
+    // Only a real result is worth remembering. A failure, or an analysis with no face in it, is
+    // indistinguishable from a model that was set up badly, so it is never cached and it throws the
+    // sessions away: the next request re-verifies the model files and builds new sessions instead of
+    // reusing the same ones for the rest of the run.
+    let analysis = match compute_face_analysis(ai_state, models, cache_key, warped_image, transform)
+    {
+        Ok(analysis) => Arc::new(analysis),
+        Err(error) => {
+            reset_face_models(ai_state, models);
+            return Err(error);
+        }
+    };
+
+    if analysis.faces.is_empty() {
+        reset_face_models(ai_state, models);
+    } else if let Some(state) = ai_state.lock().unwrap().as_mut() {
+        state.face_analysis = Some(analysis.clone());
+    }
+    Ok(analysis)
+}
+
+fn compute_face_analysis(
+    ai_state: &Mutex<Option<AiState>>,
+    models: &AiModels,
+    cache_key: &str,
+    warped_image: &DynamicImage,
+    transform: MaskTransform,
+) -> Result<FaceAnalysis, String> {
     let features = cached_esam3_features(ai_state, models, cache_key, warped_image)?;
     let detections = run_esam3_boxes(
         &*models.esam3_decoder().map_err(|e| e.to_string())?,
@@ -299,22 +327,22 @@ fn cached_face_analysis(
         ESAM3_FACE_SCORE_THRESHOLD,
     )
     .map_err(|e| e.to_string())?;
-    let analysis = Arc::new(
-        analyze_faces(
-            warped_image,
-            &detections,
-            &*models.face_landmarks().map_err(|e| e.to_string())?,
-            &*models.face_segmenter().map_err(|e| e.to_string())?,
-            -(transform.orientation_steps as f32) * std::f32::consts::FRAC_PI_2,
-            cache_key.to_string(),
-        )
-        .map_err(|e| e.to_string())?,
-    );
+    analyze_faces(
+        warped_image,
+        &detections,
+        &*models.face_landmarks().map_err(|e| e.to_string())?,
+        &*models.face_segmenter().map_err(|e| e.to_string())?,
+        -(transform.orientation_steps as f32) * std::f32::consts::FRAC_PI_2,
+        cache_key.to_string(),
+    )
+    .map_err(|e| e.to_string())
+}
 
+fn reset_face_models(ai_state: &Mutex<Option<AiState>>, models: &AiModels) {
+    models.invalidate_face_models();
     if let Some(state) = ai_state.lock().unwrap().as_mut() {
-        state.face_analysis = Some(analysis.clone());
+        state.forget_face_results();
     }
-    Ok(analysis)
 }
 
 pub fn generate_face_mask(
