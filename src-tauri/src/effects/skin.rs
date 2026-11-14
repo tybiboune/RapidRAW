@@ -308,7 +308,7 @@ mod tests {
         let mut out = Vec::with_capacity((w * h) as usize);
         for y in 0..h {
             let line = &data[(y * row) as usize..(y * row + w * 8) as usize];
-            for px in line.chunks_exact(8) {
+            for px in line.as_chunks::<8>().0.iter() {
                 let c = |i: usize| f16::from_le_bytes([px[i * 2], px[i * 2 + 1]]).to_f32();
                 out.push([c(0), c(1), c(2)]);
             }
