@@ -1464,7 +1464,7 @@
     },
     "splash": {
       "addFolder": "폴더 추가",
-      "brand": "RapidRAW",
+      "brand": "RapiderRaw",
       "continueSession": "세션 계속하기",
       "contribute": "GitHub에서 기여하기",
       "descriptionAndroid": "매우 빠른 GPU 가속 RAW 이미지 편집기입니다. 라이브러리를 열어 시작하세요.",
@@ -1479,6 +1479,12 @@
       "openLibrary": "라이브러리 열기",
       "or": "또는",
       "version": "버전 {{version}}",
+      "updateAvailable": "RapiderRaw {{version}} is available",
+      "updateDownloading": "Downloading the update... {{percent}}%",
+      "updateFailed": "The update could not be installed: {{error}}",
+      "updateInstall": "Install and restart",
+      "updateInstalling": "Installing the update...",
+      "updateLater": "Later",
       "welcomeBack": "다시 오신 것을 환영합니다!",
       "welcomeBackDesc": "이전 작업을 계속하거나 새 세션을 시작하세요."
     },

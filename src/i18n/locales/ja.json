@@ -1464,7 +1464,7 @@
     },
     "splash": {
       "addFolder": "フォルダを追加",
-      "brand": "RapidRAW",
+      "brand": "RapiderRaw",
       "continueSession": "セッションを続行",
       "contribute": "GitHubで貢献する",
       "descriptionAndroid": "圧倒的に高速な、GPUアクセラレーション対応RAW画像エディタ。ライブラリを開いて始めましょう。",
@@ -1479,6 +1479,12 @@
       "openLibrary": "ライブラリを開く",
       "or": "または",
       "version": "バージョン {{version}}",
+      "updateAvailable": "RapiderRaw {{version}} is available",
+      "updateDownloading": "Downloading the update... {{percent}}%",
+      "updateFailed": "The update could not be installed: {{error}}",
+      "updateInstall": "Install and restart",
+      "updateInstalling": "Installing the update...",
+      "updateLater": "Later",
       "welcomeBack": "おかえりなさい！",
       "welcomeBackDesc": "前回の続きから始めるか、新しいセッションを開始します。"
     },

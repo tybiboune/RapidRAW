@@ -1569,7 +1569,7 @@
     },
     "splash": {
       "addFolder": "Pridėti aplanką",
-      "brand": "RapidRAW",
+      "brand": "RapiderRaw",
       "continueSession": "Tęsti seansą",
       "contribute": "Prisidėti prie GitHub",
       "descriptionAndroid": "Žaibiškai greitas, GPU spartinamas RAW nuotraukų redaktorius. Pradėkite atidarę biblioteką.",
@@ -1584,6 +1584,12 @@
       "openLibrary": "Atidaryti biblioteką",
       "or": "arba",
       "version": "Versija {{version}}",
+      "updateAvailable": "RapiderRaw {{version}} is available",
+      "updateDownloading": "Downloading the update... {{percent}}%",
+      "updateFailed": "The update could not be installed: {{error}}",
+      "updateInstall": "Install and restart",
+      "updateInstalling": "Installing the update...",
+      "updateLater": "Later",
       "welcomeBack": "Sveiki sugrįžę!",
       "welcomeBackDesc": "Tęskite nuo ten, kur baigėte, arba pradėkite naują seansą."
     },

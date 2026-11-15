@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { getVersion } from '@tauri-apps/api/app';
+import { installUpdate, useUpdaterStore } from '../../utils/appUpdater';
 import { open } from '@tauri-apps/plugin-shell';
 import {
   CheckCheck,
@@ -160,8 +161,9 @@ export default function MainLibrary(props: MainLibraryProps) {
   const { t } = useTranslation();
   const setUI = useUIStore((state) => state.setUI);
   const [appVersion, setAppVersion] = useState('');
-  const [isUpdateAvailable, setIsUpdateAvailable] = useState(false);
-  const [latestVersion, setLatestVersion] = useState('');
+  const pendingUpdate = useUpdaterStore((state) => state.update);
+  const isUpdateAvailable = pendingUpdate !== null;
+  const latestVersion = pendingUpdate?.version ?? '';
   const [isBusyDelayed, setIsBusyDelayed] = useState(false);
   const [isBusyLoaderMounted, setIsBusyLoaderMounted] = useState(false);
   const [isProgressHovered, setIsProgressHovered] = useState(false);
@@ -274,45 +276,9 @@ export default function MainLibrary(props: MainLibraryProps) {
   }, [isBusyDelayed]);
 
   useEffect(() => {
-    const compareVersions = (v1: string, v2: string) => {
-      const parts1 = v1.split('.').map(Number);
-      const parts2 = v2.split('.').map(Number);
-      const len = Math.max(parts1.length, parts2.length);
-      for (let i = 0; i < len; i++) {
-        const p1 = parts1[i] || 0;
-        const p2 = parts2[i] || 0;
-        if (p1 < p2) return -1;
-        if (p1 > p2) return 1;
-      }
-      return 0;
-    };
-
-    const checkVersion = async () => {
-      try {
-        const currentVersion = await getVersion();
-        setAppVersion(currentVersion);
-
-        const response = await fetch('https://api.github.com/repos/tybiboune/RapidRAW/releases/latest');
-        if (!response.ok) {
-          console.error('Failed to fetch latest release info from GitHub.');
-          return;
-        }
-        const data = await response.json();
-        const latestTag = data.tag_name;
-        if (!latestTag) return;
-
-        const latestVersionStr = latestTag.startsWith('v') ? latestTag.substring(1) : latestTag;
-        setLatestVersion(latestVersionStr);
-
-        if (compareVersions(currentVersion, latestVersionStr) < 0) {
-          setIsUpdateAvailable(true);
-        }
-      } catch (error) {
-        console.error('Error checking for updates:', error);
-      }
-    };
-
-    checkVersion();
+    getVersion()
+      .then(setAppVersion)
+      .catch((error) => console.error('Could not read the app version:', error));
   }, []);
 
   if (!props.rootPaths || props.rootPaths.length === 0) {
@@ -463,7 +429,7 @@ export default function MainLibrary(props: MainLibraryProps) {
                             }`}
                             onClick={() => {
                               if (isUpdateAvailable) {
-                                open('https://github.com/tybiboune/RapidRAW/releases/latest');
+                                if (pendingUpdate) void installUpdate(pendingUpdate);
                               }
                             }}
                             data-tooltip={

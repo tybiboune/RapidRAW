@@ -1464,7 +1464,7 @@
     },
     "splash": {
       "addFolder": "Ordner hinzufügen",
-      "brand": "RapidRAW",
+      "brand": "RapiderRaw",
       "continueSession": "Sitzung fortsetzen",
       "contribute": "Auf GitHub beitragen",
       "descriptionAndroid": "Ein blitzschneller, GPU-beschleunigter RAW-Bildeditor. Öffnen Sie die Bibliothek, um zu beginnen.",
@@ -1479,6 +1479,12 @@
       "openLibrary": "Bibliothek öffnen",
       "or": "oder",
       "version": "Version {{version}}",
+      "updateAvailable": "RapiderRaw {{version}} is available",
+      "updateDownloading": "Downloading the update... {{percent}}%",
+      "updateFailed": "The update could not be installed: {{error}}",
+      "updateInstall": "Install and restart",
+      "updateInstalling": "Installing the update...",
+      "updateLater": "Later",
       "welcomeBack": "Willkommen zurück!",
       "welcomeBackDesc": "Sitzung fortsetzen oder neu starten."
     },

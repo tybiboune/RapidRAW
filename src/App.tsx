@@ -4,6 +4,7 @@ import { listen } from '@tauri-apps/api/event';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import { useCloudStore } from './store/useCloudStore';
 import { ToastContainer, toast, Slide } from 'react-toastify';
+import { startUpdateChecks } from './utils/appUpdater';
 import {
   DndContext,
   DragOverlay,
@@ -227,6 +228,9 @@ function App() {
   const defaultLibraryViewMode = osPlatform === 'android' ? LibraryViewMode.Recursive : LibraryViewMode.Flat;
 
   const selectedImagePathRef = useRef<string | null>(null);
+  // look for a newer version shortly after the app opens, and again every few hours
+  useEffect(() => startUpdateChecks(), []);
+
   useEffect(() => {
     selectedImagePathRef.current = selectedImage?.path ?? null;
   }, [selectedImage?.path]);

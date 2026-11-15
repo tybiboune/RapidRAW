@@ -1530,7 +1530,7 @@
     },
     "splash": {
       "addFolder": "Додати папку",
-      "brand": "RapidRAW",
+      "brand": "RapiderRaw",
       "continueSession": "Продовжити сеанс",
       "contribute": "Долучитися на GitHub",
       "descriptionAndroid": "Надшвидкий редактор RAW-зображень із GPU-прискоренням. Відкрийте бібліотеку, щоб почати.",
@@ -1545,6 +1545,12 @@
       "openLibrary": "Відкрити бібліотеку",
       "or": "або",
       "version": "Версія {{version}}",
+      "updateAvailable": "RapiderRaw {{version}} is available",
+      "updateDownloading": "Downloading the update... {{percent}}%",
+      "updateFailed": "The update could not be installed: {{error}}",
+      "updateInstall": "Install and restart",
+      "updateInstalling": "Installing the update...",
+      "updateLater": "Later",
       "welcomeBack": "З поверненням!",
       "welcomeBackDesc": "Продовжте з того місця, де зупинилися, або почніть новий сеанс."
     },

@@ -1530,7 +1530,7 @@
     },
     "splash": {
       "addFolder": "Добавить папку",
-      "brand": "RapidRAW",
+      "brand": "RapiderRaw",
       "continueSession": "Продолжить сеанс",
       "contribute": "Участвовать на GitHub",
       "descriptionAndroid": "Невероятно быстрый редактор RAW-файлов с GPU-ускорением. Откройте библиотеку, чтобы начать.",
@@ -1545,6 +1545,12 @@
       "openLibrary": "Открыть библиотеку",
       "or": "или",
       "version": "Версия {{version}}",
+      "updateAvailable": "RapiderRaw {{version}} is available",
+      "updateDownloading": "Downloading the update... {{percent}}%",
+      "updateFailed": "The update could not be installed: {{error}}",
+      "updateInstall": "Install and restart",
+      "updateInstalling": "Installing the update...",
+      "updateLater": "Later",
       "welcomeBack": "С возвращением!",
       "welcomeBackDesc": "Продолжите работу с прошлого сеанса или начните новый."
     },

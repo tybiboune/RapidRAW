@@ -1464,7 +1464,7 @@
     },
     "splash": {
       "addFolder": "Map toevoegen",
-      "brand": "RapidRAW",
+      "brand": "RapiderRaw",
       "continueSession": "Sessie voortzetten",
       "contribute": "Bijdragen op GitHub",
       "descriptionAndroid": "Een razendsnelle, GPU-versnelde RAW-beeldeditor. Open de bibliotheek om te beginnen.",
@@ -1479,6 +1479,12 @@
       "openLibrary": "Bibliotheek openen",
       "or": "of",
       "version": "Versie {{version}}",
+      "updateAvailable": "RapiderRaw {{version}} is available",
+      "updateDownloading": "Downloading the update... {{percent}}%",
+      "updateFailed": "The update could not be installed: {{error}}",
+      "updateInstall": "Install and restart",
+      "updateInstalling": "Installing the update...",
+      "updateLater": "Later",
       "welcomeBack": "Welkom terug!",
       "welcomeBackDesc": "Ga verder waar u gebleven was of begin een nieuwe sessie."
     },

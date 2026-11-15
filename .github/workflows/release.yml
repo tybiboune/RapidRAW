@@ -11,7 +11,7 @@ jobs:
       matrix:
         include:
           - platform: 'windows-latest'
-            args: '--bundles nsis'
+            args: '--bundles nsis --config src-tauri/tauri.release.conf.json'
             target: ''
             asset-prefix: '01'
     uses: ./.github/workflows/build.yml

@@ -1530,7 +1530,7 @@
     },
     "splash": {
       "addFolder": "Přidat složku",
-      "brand": "RapidRAW",
+      "brand": "RapiderRaw",
       "continueSession": "Pokračovat v relaci",
       "contribute": "Přispějte na GitHubu",
       "descriptionAndroid": "Ohromně rychlý editor snímků RAW s akcelerací GPU. Otevřete knihovnu a začněte.",
@@ -1545,6 +1545,12 @@
       "openLibrary": "Otevřít knihovnu",
       "or": "nebo",
       "version": "Verze {{version}}",
+      "updateAvailable": "RapiderRaw {{version}} is available",
+      "updateDownloading": "Downloading the update... {{percent}}%",
+      "updateFailed": "The update could not be installed: {{error}}",
+      "updateInstall": "Install and restart",
+      "updateInstalling": "Installing the update...",
+      "updateLater": "Later",
       "welcomeBack": "Vítejte zpět!",
       "welcomeBackDesc": "Pokračujte tam, kde jste přestali, nebo začněte novou relaci."
     },
