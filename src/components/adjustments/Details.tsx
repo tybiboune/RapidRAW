@@ -3,6 +3,7 @@ import { useTranslation } from 'react-i18next';
 import { Loader2 } from 'lucide-react';
 import Slider, { SliderChangeEvent } from '../ui/Slider';
 import Text from '../ui/Text';
+import Dropdown from '../ui/Dropdown';
 import { TextVariants } from '../../types/typography';
 import { SpatialEffect } from './Effects';
 import {
@@ -188,9 +189,9 @@ function DetailsPanel({
               <SpatialEffect
                 enabled={!!adjustments.aiDenoiseEnabled}
                 label={
-                  denoiseMethod === DenoiseMethod.Ai
-                    ? t('adjustments.details.aiDenoise')
-                    : t('adjustments.details.classicDenoise')
+                  denoiseMethod === DenoiseMethod.Bm3d
+                    ? t('adjustments.details.classicDenoise')
+                    : t('adjustments.details.aiDenoise')
                 }
                 onToggle={(enabled: boolean) =>
                   setAdjustments((prev: Partial<Adjustments>) => ({
@@ -215,6 +216,28 @@ function DetailsPanel({
                   </div>
                 ) : (
                   <>
+                    {!isAiFree && (
+                      <div className="flex flex-col gap-1 mb-2">
+                        <Text variant={TextVariants.label}>{t('adjustments.details.denoiseMethod')}</Text>
+                        <Dropdown
+                          value={denoiseMethod}
+                          onChange={(method: DenoiseMethod) =>
+                            setAdjustments((prev: Partial<Adjustments>) => ({ ...prev, aiDenoiseMethod: method }))
+                          }
+                          options={[
+                            { label: t('adjustments.details.denoiseNind'), value: DenoiseMethod.Ai },
+                            { label: t('adjustments.details.denoiseRawForgeLight'), value: DenoiseMethod.RawForgeLight },
+                            { label: t('adjustments.details.denoiseRawForge'), value: DenoiseMethod.RawForge },
+                            { label: t('adjustments.details.denoiseRawForgeHeavy'), value: DenoiseMethod.RawForgeHeavy },
+                          ]}
+                        />
+                        {denoiseMethod !== DenoiseMethod.Ai && (
+                          <Text variant={TextVariants.small} className="text-text-secondary">
+                            {t('adjustments.details.denoiseRawForgeHint')}
+                          </Text>
+                        )}
+                      </div>
+                    )}
                     <Slider
                       resetKey="aiDenoiseAmount"
                       label={t('adjustments.effects.amount')}

@@ -73,6 +73,9 @@ export enum ColorGrading {
 export enum DenoiseMethod {
   Ai = 'ai',
   Bm3d = 'bm3d',
+  RawForgeLight = 'rawforge-light',
+  RawForge = 'rawforge',
+  RawForgeHeavy = 'rawforge-heavy',
 }
 
 export const getAiDenoiseEnablePatch = (aiProvider?: string): Partial<Adjustments> => ({

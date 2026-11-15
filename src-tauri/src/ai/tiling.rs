@@ -89,9 +89,24 @@ fn tile_blend_weights(params: TileParams) -> Vec<f32> {
         .collect()
 }
 
+/// Runs a network on one tile (1Ã—3Ã—csÃ—cs, floats) and returns its picture of the same or scaled size.
+type Infer<'a> = &'a (dyn Fn(Array4<f32>) -> Result<Array4<f32>> + Sync);
+
+fn run_plain(session: &Mutex<Session>, tile: Array4<f32>) -> Result<Array4<f32>> {
+    let t_input = Tensor::from_array(tile)?;
+    let mut sess = session.lock().unwrap();
+    let outputs = gpu_inference(sess.run(ort::inputs![t_input]))?;
+    outputs[0]
+        .try_extract_array::<f32>()?
+        .as_standard_layout()
+        .into_owned()
+        .into_dimensionality::<ndarray::Ix4>()
+        .map_err(|e| anyhow::anyhow!("Unexpected output shape: {}", e))
+}
+
 fn run_tiled(
     img: &Rgb32FImage,
-    session: &Mutex<Session>,
+    infer: Infer,
     params: TileParams,
     scale: u32,
     on_progress: &dyn Fn(f32),
@@ -121,18 +136,7 @@ fn run_tiled(
         let origins_ref = &origins;
         scope.spawn(move || {
             for &(y0, x0) in origins_ref {
-                let tile = (|| -> Result<Array4<f32>> {
-                    let crop = extract_tile_mirror(img, x0, y0, params.cs);
-                    let t_input = Tensor::from_array(crop)?;
-                    let mut sess = session.lock().unwrap();
-                    let outputs = gpu_inference(sess.run(ort::inputs![t_input]))?;
-                    outputs[0]
-                        .try_extract_array::<f32>()?
-                        .as_standard_layout()
-                        .into_owned()
-                        .into_dimensionality::<ndarray::Ix4>()
-                        .map_err(|e| anyhow::anyhow!("Unexpected output shape: {}", e))
-                })();
+                let tile = infer(extract_tile_mirror(img, x0, y0, params.cs));
                 let failed = tile.is_err();
                 if sender.send(tile).is_err() || failed {
                     break;
@@ -207,7 +211,8 @@ pub fn run_ai_denoise(
     session: &Mutex<Session>,
     on_progress: &dyn Fn(f32),
 ) -> Result<DynamicImage> {
-    let out = run_tiled(rgb_img, session, DENOISE_TILE, 1, on_progress)?;
+    let infer = |tile| run_plain(session, tile);
+    let out = run_tiled(rgb_img, &infer, DENOISE_TILE, 1, on_progress)?;
     Ok(DynamicImage::ImageRgb32F(out))
 }
 
@@ -217,5 +222,120 @@ pub fn run_ai_upscale(
     scale: u32,
     on_progress: &dyn Fn(f32),
 ) -> Result<Rgb32FImage> {
-    run_tiled(rgb_img, session, UPSCALE_TILE, scale, on_progress)
+    let infer = |tile| run_plain(session, tile);
+    run_tiled(rgb_img, &infer, UPSCALE_TILE, scale, on_progress)
+}
+
+pub const RAWFORGE_TILE_SIZE: usize = 256;
+
+const RAWFORGE_TILE: TileParams = TileParams {
+    cs: RAWFORGE_TILE_SIZE,
+    margin: 8,
+    overlap: 48,
+};
+
+/// RawForge's networks were trained on linear Rec. 2020 pictures, while the develop pipeline works in
+/// linear sRGB: the picture crosses over for the network and comes back after.
+const SRGB_TO_REC2020: [[f32; 3]; 3] = [
+    [0.627_403_9, 0.329_283_0, 0.043_313_1],
+    [0.069_097_3, 0.919_540_4, 0.011_362_3],
+    [0.016_391_4, 0.088_013_3, 0.895_595_3],
+];
+
+const REC2020_TO_SRGB: [[f32; 3]; 3] = [
+    [1.660_491, -0.587_641_1, -0.072_849_9],
+    [-0.124_550_5, 1.132_899_9, -0.008_349_4],
+    [-0.018_150_8, -0.100_578_9, 1.118_729_7],
+];
+
+/// Applies a 3Ã—3 colour matrix to a 1Ã—3Ã—hÃ—w tile, optionally keeping the result inside 0..1.
+fn convert_tile(tile: &mut Array4<f32>, matrix: &[[f32; 3]; 3], clamp: bool) {
+    let (h, w) = (tile.dim().2, tile.dim().3);
+    for y in 0..h {
+        for x in 0..w {
+            let px = [tile[[0, 0, y, x]], tile[[0, 1, y, x]], tile[[0, 2, y, x]]];
+            for (c, row) in matrix.iter().enumerate() {
+                let v = row[0] * px[0] + row[1] * px[1] + row[2] * px[2];
+                tile[[0, c, y, x]] = if clamp { v.clamp(0.0, 1.0) } else { v };
+            }
+        }
+    }
+}
+
+/// The ISO is passed to the network as ISO / 6400, in half precision, as RawForge does.
+pub fn run_rawforge_denoise(
+    rgb_img: &Rgb32FImage,
+    session: &Mutex<Session>,
+    iso: u32,
+    on_progress: &dyn Fn(f32),
+) -> Result<DynamicImage> {
+    use half::f16;
+
+    let cond = ndarray::Array2::from_elem((1, 1), f16::from_f32(iso as f32 / 6400.0));
+    let infer = |mut tile: Array4<f32>| -> Result<Array4<f32>> {
+        convert_tile(&mut tile, &SRGB_TO_REC2020, true);
+        let input = Tensor::from_array(tile.mapv(f16::from_f32))?;
+        let cond = Tensor::from_array(cond.clone())?;
+        let mut sess = session.lock().unwrap();
+        let outputs = gpu_inference(sess.run(ort::inputs!["input" => input, "cond" => cond]))?;
+        let mut out = outputs[0]
+            .try_extract_array::<f16>()?
+            .mapv(|v| v.to_f32())
+            .as_standard_layout()
+            .into_owned()
+            .into_dimensionality::<ndarray::Ix4>()
+            .map_err(|e| anyhow::anyhow!("Unexpected output shape: {}", e))?;
+        convert_tile(&mut out, &REC2020_TO_SRGB, false);
+        Ok(out)
+    };
+    let out = run_tiled(rgb_img, &infer, RAWFORGE_TILE, 1, on_progress)?;
+    Ok(DynamicImage::ImageRgb32F(out))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn srgb_to_linear(v: f32) -> f32 {
+        if v <= 0.04045 { v / 12.92 } else { ((v + 0.055) / 1.055).powf(2.4) }
+    }
+
+    fn linear_to_srgb(v: f32) -> f32 {
+        let v = v.clamp(0.0, 1.0);
+        if v <= 0.003_130_8 { v * 12.92 } else { 1.055 * v.powf(1.0 / 2.4) - 0.055 }
+    }
+
+    /// Runs RawForge on a PNG (RRAW_PHOTO, sRGB) with the model RRAW_MODEL at the ISO RRAW_ISO and writes
+    /// the result to RRAW_OUT. Needs the ONNX runtime library (ORT_DYLIB_PATH).
+    #[test]
+    #[ignore]
+    fn rawforge_on_a_picture() {
+        let photo = std::env::var("RRAW_PHOTO").expect("RRAW_PHOTO");
+        let out = std::env::var("RRAW_OUT").expect("RRAW_OUT");
+        let model = std::env::var("RRAW_MODEL").expect("RRAW_MODEL");
+        let iso: u32 = std::env::var("RRAW_ISO").ok().and_then(|v| v.parse().ok()).unwrap_or(6400);
+
+        let mut img = image::open(&photo).expect("open picture").to_rgb32f();
+        img.iter_mut().for_each(|v| *v = srgb_to_linear(*v));
+
+        let _ = ort::init().commit();
+        let session = Mutex::new(
+            Session::builder()
+                .unwrap()
+                .commit_from_file(&model)
+                .expect("load model"),
+        );
+        let start = std::time::Instant::now();
+        let result = run_rawforge_denoise(&img, &session, iso, &|_| {}).expect("denoise").into_rgb32f();
+        println!("rawforge took {:.1}s", start.elapsed().as_secs_f32());
+
+        let bytes: Vec<u8> = result
+            .iter()
+            .map(|v| (linear_to_srgb(*v) * 255.0 + 0.5) as u8)
+            .collect();
+        image::RgbImage::from_raw(result.width(), result.height(), bytes)
+            .unwrap()
+            .save(&out)
+            .unwrap();
+    }
 }

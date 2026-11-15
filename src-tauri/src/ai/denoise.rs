@@ -1,4 +1,5 @@
 use crate::ai::base_cache::{BaseCache, CachedBase, HALF_CHUNK, entry_key, source_string};
+use crate::ai::models::RawForgeVariant;
 use crate::app::state::{AppState, LoadedImage};
 use crate::render::adjustment_utils::is_effect_enabled;
 use half::f16;
@@ -38,14 +39,24 @@ pub fn is_enabled(adjustments: &serde_json::Value) -> bool {
 pub enum DenoiseMethod {
     Nind,
     Bm3d,
+    RawForge(RawForgeVariant),
 }
 
 impl DenoiseMethod {
-    const ALL: [Self; 2] = [Self::Nind, Self::Bm3d];
+    pub const ALL: [Self; 5] = [
+        Self::Nind,
+        Self::Bm3d,
+        Self::RawForge(RawForgeVariant::Light),
+        Self::RawForge(RawForgeVariant::Standard),
+        Self::RawForge(RawForgeVariant::Heavy),
+    ];
 
     pub fn from_adjustments(adjustments: &serde_json::Value) -> Self {
         match adjustments["aiDenoiseMethod"].as_str() {
             Some("bm3d") => Self::Bm3d,
+            Some("rawforge-light") => Self::RawForge(RawForgeVariant::Light),
+            Some("rawforge") => Self::RawForge(RawForgeVariant::Standard),
+            Some("rawforge-heavy") => Self::RawForge(RawForgeVariant::Heavy),
             _ => Self::Nind,
         }
     }
@@ -54,8 +65,31 @@ impl DenoiseMethod {
         match self {
             Self::Nind => MODEL_TAG,
             Self::Bm3d => BM3D_TAG,
+            Self::RawForge(RawForgeVariant::Light) => "rawforge-light-v1",
+            Self::RawForge(RawForgeVariant::Standard) => "rawforge-standard-v1",
+            Self::RawForge(RawForgeVariant::Heavy) => "rawforge-heavy-v1",
         }
     }
+}
+
+/// What the denoiser needs besides the picture.
+#[derive(Clone, Copy)]
+struct RunInfo {
+    method: DenoiseMethod,
+    /// The camera ISO: RawForge's models are told how noisy to expect the picture to be.
+    iso: u32,
+}
+
+/// ISO used when the file does not say (a mid value, so the model neither under- nor over-cleans).
+const FALLBACK_ISO: u32 = 800;
+
+fn read_iso_of(path: &str) -> u32 {
+    let source = source_string(path);
+    std::fs::read(&source)
+        .ok()
+        .and_then(|bytes| crate::metadata::exif_processing::read_iso(&source, &bytes))
+        .filter(|iso| *iso > 0)
+        .unwrap_or(FALLBACK_ISO)
 }
 
 type Session = Arc<Mutex<ort::session::Session>>;
@@ -191,14 +225,20 @@ fn restore_low_frequencies(denoised: &mut Rgb32FImage, source: &Rgb32FImage) {
 fn run_denoiser(
     base: &DynamicImage,
     session: Option<&Session>,
+    info: RunInfo,
     on_progress: &(dyn Fn(f32) + Sync),
 ) -> Result<Rgb32FImage, String> {
     let source = base.to_rgb32f();
-    let mut output = match session {
-        Some(session) => crate::ai::tiling::run_ai_denoise(&source, session, on_progress)
+    let mut output = match (session, info.method) {
+        (Some(session), DenoiseMethod::RawForge(_)) => {
+            crate::ai::tiling::run_rawforge_denoise(&source, session, info.iso, on_progress)
+                .map_err(|e| e.to_string())?
+                .into_rgb32f()
+        }
+        (Some(session), _) => crate::ai::tiling::run_ai_denoise(&source, session, on_progress)
             .map_err(|e| e.to_string())?
             .into_rgb32f(),
-        None => crate::ai::bm3d::denoise(&source, BM3D_INTENSITY, on_progress),
+        (None, _) => crate::ai::bm3d::denoise(&source, BM3D_INTENSITY, on_progress),
     };
 
     output
@@ -214,14 +254,27 @@ async fn load_session(
     app_handle: tauri::AppHandle,
     method: DenoiseMethod,
 ) -> Result<Option<Session>, String> {
-    if method != DenoiseMethod::Nind {
-        return Ok(None);
-    }
     let state = app_handle.state::<AppState>();
-    crate::ai::models::get_or_init_denoise_model(&app_handle, &state.ai_state, &state.ai_init_lock)
+    match method {
+        DenoiseMethod::Bm3d => Ok(None),
+        DenoiseMethod::Nind => crate::ai::models::get_or_init_denoise_model(
+            &app_handle,
+            &state.ai_state,
+            &state.ai_init_lock,
+        )
         .await
         .map(Some)
-        .map_err(|e| e.to_string())
+        .map_err(|e| e.to_string()),
+        DenoiseMethod::RawForge(variant) => crate::ai::models::get_or_init_rawforge_model(
+            &app_handle,
+            &state.ai_state,
+            &state.ai_init_lock,
+            variant,
+        )
+        .await
+        .map(Some)
+        .map_err(|e| e.to_string()),
+    }
 }
 
 pub fn ensure_generated(
@@ -243,13 +296,17 @@ pub fn ensure_generated(
         return;
     };
     let session = load_session(app_handle.clone(), method);
+    let info = RunInfo {
+        method,
+        iso: read_iso_of(&loaded_image.path),
+    };
     CACHE.spawn(
         app_handle,
         loaded_image,
         job,
         true,
         session,
-        |session, base, progress| run_denoiser(base, session.as_ref(), progress),
+        move |session, base, progress| run_denoiser(base, session.as_ref(), info, progress),
     );
 }
 
@@ -272,13 +329,17 @@ pub fn generate_for_base(
     method: DenoiseMethod,
 ) -> Result<bool, String> {
     let key = entry_key(&source_string(path), method.tag());
+    let info = RunInfo {
+        method,
+        iso: read_iso_of(path),
+    };
     CACHE.generate_blocking(
         app_handle,
         path,
         base,
         key,
         load_session(app_handle.clone(), method),
-        |session, base, progress| run_denoiser(base, session.as_ref(), progress),
+        move |session, base, progress| run_denoiser(base, session.as_ref(), info, progress),
     )
 }
 

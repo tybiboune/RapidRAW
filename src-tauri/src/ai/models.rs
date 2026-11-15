@@ -263,6 +263,46 @@ const DENOISE_ASSET: ModelAsset = ModelAsset {
     name: "NIND Denoise Model",
 };
 
+/// RawForge's denoisers (rymuelle/RawForge): networks trained on real camera noise that are told the
+/// picture's ISO. Three sizes trade speed for cleaning power.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum RawForgeVariant {
+    Light,
+    Standard,
+    Heavy,
+}
+
+const RAWFORGE_LIGHT_ASSET: ModelAsset = ModelAsset {
+    filename: "ShadowWeightedL1_light.onnx",
+    url: "https://github.com/rymuelle/RawForge/releases/download/onnx_v1.0.0/ShadowWeightedL1_light.onnx",
+    sha256: Some("082612f3de352af7353cb3de893f8dd876b8cb942c53cf5c5f8ab4ae2cc9bf78"),
+    name: "RawForge Denoise Model (light)",
+};
+
+const RAWFORGE_STANDARD_ASSET: ModelAsset = ModelAsset {
+    filename: "ShadowWeightedL1.onnx",
+    url: "https://github.com/rymuelle/RawForge/releases/download/onnx_v1.0.0/ShadowWeightedL1.onnx",
+    sha256: Some("76a07047a33dba3fa27330cec483b43bb57ecb1c1f10db8d979355ce110e34c9"),
+    name: "RawForge Denoise Model",
+};
+
+const RAWFORGE_HEAVY_ASSET: ModelAsset = ModelAsset {
+    filename: "ShadowWeightedL1_24_deep_500.onnx",
+    url: "https://github.com/rymuelle/RawForge/releases/download/onnx_v1.0.0/ShadowWeightedL1_24_deep_500.onnx",
+    sha256: Some("0074e2f7bec359c613305811c2c4e7123f738010fb3a98ce67044c48ecfc0129"),
+    name: "RawForge Denoise Model (heavy)",
+};
+
+impl RawForgeVariant {
+    fn asset(self) -> &'static ModelAsset {
+        match self {
+            Self::Light => &RAWFORGE_LIGHT_ASSET,
+            Self::Standard => &RAWFORGE_STANDARD_ASSET,
+            Self::Heavy => &RAWFORGE_HEAVY_ASSET,
+        }
+    }
+}
+
 const UPSCALE_ASSET: ModelAsset = ModelAsset {
     filename: UPSCALE_FILENAME,
     url: UPSCALE_URL,
@@ -955,6 +995,56 @@ pub async fn get_or_init_denoise_model(
     Ok(denoise_model)
 }
 
+pub async fn get_or_init_rawforge_model(
+    app_handle: &tauri::AppHandle,
+    ai_state_mutex: &Mutex<Option<AiState>>,
+    ai_init_lock: &TokioMutex<()>,
+    variant: RawForgeVariant,
+) -> Result<Arc<Mutex<Session>>> {
+    let cached = |state: &AiState| {
+        state
+            .rawforge_model
+            .as_ref()
+            .filter(|(loaded, _)| *loaded == variant)
+            .map(|(_, session)| session.clone())
+    };
+    if let Some(model) = cached_ai_state(ai_state_mutex, cached) {
+        return Ok(model);
+    }
+
+    let _guard = ai_init_lock.lock().await;
+
+    if let Some(model) = cached_ai_state(ai_state_mutex, cached) {
+        return Ok(model);
+    }
+
+    let models_dir = get_models_dir(app_handle)?;
+    let asset = variant.asset();
+    download_and_verify_model(app_handle, &models_dir, asset).await?;
+
+    let _ = ort::init().with_name("AI-Denoise").commit();
+    // The network takes any size; fixing it to the tile it is fed lets the GPU plan its work once.
+    let tile = crate::ai::tiling::RAWFORGE_TILE_SIZE as i64;
+    let session = build_session_with_dims(
+        &models_dir.join(asset.filename),
+        SessionKind::Persistent,
+        gpu_acceleration_enabled(app_handle),
+        None,
+        &[("batch_size", 1), ("height", tile), ("width", tile)],
+    )?;
+    let model = Arc::new(Mutex::new(session));
+
+    crate::register_exit_handler();
+
+    ai_state_mutex
+        .lock()
+        .unwrap()
+        .get_or_insert_with(AiState::default)
+        .rawforge_model = Some((variant, model.clone()));
+
+    Ok(model)
+}
+
 pub async fn get_or_init_upscale_model(
     app_handle: &tauri::AppHandle,
     ai_state_mutex: &Mutex<Option<AiState>>,
@@ -1132,6 +1222,8 @@ pub struct Esam3Prompt {
 pub struct AiState {
     pub models: Option<Arc<AiModels>>,
     pub denoise_model: Option<Arc<Mutex<Session>>>,
+    /// The RawForge network in use, with the size it is.
+    pub rawforge_model: Option<(RawForgeVariant, Arc<Mutex<Session>>)>,
     pub upscale_model: Option<Arc<Mutex<Session>>>,
     pub clip_models: Option<Arc<ClipModels>>,
     pub lama_model: Option<Arc<Mutex<Session>>>,
@@ -1153,6 +1245,7 @@ impl AiState {
     pub fn release_sessions(&mut self) {
         self.models = None;
         self.denoise_model = None;
+        self.rawforge_model = None;
         self.upscale_model = None;
         self.clip_models = None;
         self.lama_model = None;
