@@ -191,21 +191,23 @@ fn sk_maps(@builtin(global_invocation_id) id: vec3<u32>) {
     textureStore(out_f32, p, vec4<f32>(spots, redness, shine, skin));
 }
 
-// How much this skin varies at the size of a blemish, point by point, to be blurred into how much it
-// varies in each neighbourhood. That is the yardstick a valley is read against: a crease on skin that
-// is smooth around it is a crease, and the same depth on skin that is rough all over is only the skin.
+// How much of the finest detail this skin has - its pores, its grain, the noise of the sensor - point by
+// point, to be blurred into how much it has in each neighbourhood. That is the yardstick a crease or a
+// blemish is read against: what stands out of that detail is a fault, and what does not is only the skin.
+// It is the finest detail on purpose. Measured at the size of a wrinkle it would count the wrinkles in
+// the yardstick, and the more lined a face the less any of them would count.
 //
-// t0: the split picture blurred at the size of a blemish. t1: blurred wider. t2: the split picture.
+// t0: the split picture. t1: the split picture blurred at the finest width.
 @compute @workgroup_size(8, 8, 1)
 fn sk_band(@builtin(global_invocation_id) id: vec3<u32>) {
     if (outside(id)) { return; }
     let p = vec2<i32>(id.xy);
-    let skin = textureLoad(t2, p, 0).w;
-    let fine = textureLoad(t0, p, 0);
-    let wide = textureLoad(t1, p, 0);
-    let l_fine = fine.x / max(fine.w, 1e-4);
-    let l_wide = wide.x / max(wide.w, 1e-4);
-    textureStore(out_f32, p, vec4<f32>(abs(l_fine - l_wide) * skin, 0.0, 0.0, skin));
+    let here = textureLoad(t0, p, 0);
+    let blurred = textureLoad(t1, p, 0);
+    let skin = here.w;
+    let l_here = here.x / max(skin, 1e-4);
+    let l_blurred = blurred.x / max(blurred.w, 1e-4);
+    textureStore(out_f32, p, vec4<f32>(abs(l_here - l_blurred) * skin, 0.0, 0.0, skin));
 }
 
 // The brightness of one of the blurred copies of the picture at a point, over skin only.
@@ -219,26 +221,31 @@ fn ridge_level(which: u32, pos: vec2<f32>) -> f32 {
 }
 
 // How the brightness bends at a point, read at a step of h pixels: xx, yy and xy.
-fn bend(t: texture_2d<f32>, p: vec2<i32>, h: i32) -> vec3<f32> {
+fn bend(t: texture_2d<f32>, p: vec2<i32>, h: i32, ch: u32) -> vec3<f32> {
     let hi = vec2<i32>(params.grid.dst) - vec2<i32>(1, 1);
     let at = vec2<i32>(h, 0);
     let down = vec2<i32>(0, h);
-    let c = level_at(t, clamp(p, vec2<i32>(0, 0), hi));
-    let l = level_at(t, clamp(p - at, vec2<i32>(0, 0), hi));
-    let r = level_at(t, clamp(p + at, vec2<i32>(0, 0), hi));
-    let u = level_at(t, clamp(p - down, vec2<i32>(0, 0), hi));
-    let d = level_at(t, clamp(p + down, vec2<i32>(0, 0), hi));
-    let ur = level_at(t, clamp(p + at - down, vec2<i32>(0, 0), hi));
-    let dl = level_at(t, clamp(p - at + down, vec2<i32>(0, 0), hi));
-    let ul = level_at(t, clamp(p - at - down, vec2<i32>(0, 0), hi));
-    let dr = level_at(t, clamp(p + at + down, vec2<i32>(0, 0), hi));
+    let c = level_at(t, ch, clamp(p, vec2<i32>(0, 0), hi));
+    let l = level_at(t, ch, clamp(p - at, vec2<i32>(0, 0), hi));
+    let r = level_at(t, ch, clamp(p + at, vec2<i32>(0, 0), hi));
+    let u = level_at(t, ch, clamp(p - down, vec2<i32>(0, 0), hi));
+    let d = level_at(t, ch, clamp(p + down, vec2<i32>(0, 0), hi));
+    let ur = level_at(t, ch, clamp(p + at - down, vec2<i32>(0, 0), hi));
+    let dl = level_at(t, ch, clamp(p - at + down, vec2<i32>(0, 0), hi));
+    let ul = level_at(t, ch, clamp(p - at - down, vec2<i32>(0, 0), hi));
+    let dr = level_at(t, ch, clamp(p + at + down, vec2<i32>(0, 0), hi));
     let h2 = f32(h * h);
     return vec3<f32>((l + r - 2.0 * c) / h2, (u + d - 2.0 * c) / h2, (dr - ur - dl + ul) / (4.0 * h2));
 }
 
-fn level_at(t: texture_2d<f32>, p: vec2<i32>) -> f32 {
+// One of the three quantities a blurred copy carries - brightness, then the two colour axes - averaged over
+// skin only.
+fn level_at(t: texture_2d<f32>, ch: u32, p: vec2<i32>) -> f32 {
     let c = textureLoad(t, p, 0);
-    return c.x / max(c.w, 1e-4);
+    var v = c.x;
+    if (ch == 1u) { v = c.y; }
+    if (ch == 2u) { v = c.z; }
+    return v / max(c.w, 1e-4);
 }
 
 // What one width says about a point: how strongly a line runs through it and which way is across it.
@@ -250,7 +257,7 @@ fn level_at(t: texture_2d<f32>, p: vec2<i32>) -> f32 {
 // the two curvatures is what tells a line from the rest. The depth is in units of brightness, so it can
 // be read against how rough this skin is.
 fn ridge(t: texture_2d<f32>, p: vec2<i32>, h: i32, yardstick: f32) -> vec4<f32> {
-    let m = bend(t, p, h);
+    let m = bend(t, p, h, 0u);
     let mean = 0.5 * (m.x + m.y);
     let half_gap = 0.5 * (m.x - m.y);
     let root = sqrt(half_gap * half_gap + m.z * m.z);
@@ -270,7 +277,8 @@ fn ridge(t: texture_2d<f32>, p: vec2<i32>, h: i32, yardstick: f32) -> vec4<f32> 
     }
     let depth = strong * f32(h * h) * 2.0;
     let single = 1.0 - smooth_step(0.35, 0.95, abs(weak) / strong);
-    let clear = smooth_step(0.45, 1.6, depth / (yardstick * 1.5));
+    // a line is a line over a wide range of depths, not above one: a hard edge here is a visible edge on the skin
+    let clear = smooth_step(0.5, 2.2, depth / (yardstick * 1.5));
     return vec4<f32>(clear * single, across, depth);
 }
 
@@ -324,9 +332,121 @@ fn sk_lines(@builtin(global_invocation_id) id: vec3<u32>) {
     textureStore(out_f32, p, vec4<f32>(line, under_eye, target_level, skin));
 }
 
+// How rough this skin's finest detail is around a point, read off the blurred yardstick. A crease or a
+// blemish only counts for what stands out of it.
+fn yardstick_at(t: texture_2d<f32>, p: vec2<i32>) -> f32 {
+    let s = textureLoad(t, p, 0);
+    return max(s.x / max(s.w, 1e-4) * 1.5, 0.006);
+}
+
+// What one width says about a blemish at a point: how sure this is a dark spot, a patch of redness, or a
+// pale bump, each 0 to 1.
+//
+// A blemish is a blob. The brightness (or the colour) bends the same way in every direction at it: up for
+// a dark spot, down for a bump or a patch of red. That is read from the curvature at three widths, the
+// way a line is, and the roundness is what tells it from a line, which bends one way only. A dark spot
+// whose redness is the thing that stands out is told apart by the colour axis, which is read the same way.
+fn blob(t: texture_2d<f32>, p: vec2<i32>, h: i32, yardstick: f32, red_yardstick: f32) -> vec3<f32> {
+    let depth_scale = f32(h * h) * 2.0;
+
+    let m = bend(t, p, h, 0u);
+    let mean = 0.5 * (m.x + m.y);
+    let root = sqrt(0.25 * (m.x - m.y) * (m.x - m.y) + m.z * m.z);
+    let strong = mean + root;
+    let weak = mean - root;
+    var dark = 0.0;
+    if (weak > 0.0) {
+        let rounded = smooth_step(0.2, 0.55, weak / strong);
+        dark = smooth_step(0.6, 2.0, weak * depth_scale / (yardstick * 1.5)) * rounded;
+    }
+    var light = 0.0;
+    if (strong < 0.0) {
+        let rounded = smooth_step(0.2, 0.55, strong / weak);
+        light = smooth_step(0.6, 2.0, -strong * depth_scale / (yardstick * 1.5)) * rounded;
+    }
+
+    let c = bend(t, p, h, 2u);
+    let c_mean = 0.5 * (c.x + c.y);
+    let c_root = sqrt(0.25 * (c.x - c.y) * (c.x - c.y) + c.z * c.z);
+    let c_strong = c_mean + c_root;
+    let c_weak = c_mean - c_root;
+    var red = 0.0;
+    if (c_strong < 0.0) {
+        let rounded = smooth_step(0.2, 0.55, c_strong / c_weak);
+        red = smooth_step(0.6, 2.0, -c_strong * depth_scale / (red_yardstick * 1.5)) * rounded;
+    }
+    return vec3<f32>(dark, red, light);
+}
+
+// t0, t1, t2: the split picture blurred to the three widths. t3: the yardstick, blurred.
+// Out: how sure this is a blemish, that times the width it was found at, nothing, and the skin weight.
+// A pale bump counts for a little more than half what a dark or red one does: it is more often a
+// highlight than something anyone wants gone.
+@compute @workgroup_size(8, 8, 1)
+fn sk_blob(@builtin(global_invocation_id) id: vec3<u32>) {
+    if (outside(id)) { return; }
+    let p = vec2<i32>(id.xy);
+    let skin = textureLoad(t0, p, 0).w;
+    if (skin <= 0.05) {
+        textureStore(out_f32, p, vec4<f32>(0.0, 0.0, 0.0, skin));
+        return;
+    }
+    let yardstick = yardstick_at(t3, p);
+    let red_yardstick = max(skin_middle().w, 2.0);
+    let a = blob(t0, p, i32(params.step_a), yardstick, red_yardstick);
+    let b = blob(t1, p, i32(params.step_b), yardstick, red_yardstick);
+    let c = blob(t2, p, i32(params.step_c), yardstick, red_yardstick);
+    let sa = max(max(a.x, a.y), 0.55 * a.z);
+    let sb = max(max(b.x, b.y), 0.55 * b.z);
+    let sc = max(max(c.x, c.y), 0.55 * c.z);
+    var best = sa;
+    var reach = f32(params.step_a);
+    if (sb > best) { best = sb; reach = f32(params.step_b); }
+    if (sc > best) { best = sc; reach = f32(params.step_c); }
+    textureStore(out_f32, p, vec4<f32>(best, reach * best, 0.0, skin));
+}
+
+// The blemishes found are the middles of blobs; what is to be healed is the whole of each. So the
+// strengths are blurred out a little and the larger of the two is taken, and the width a blemish was
+// found at is carried to every pixel around it, which is what says how far out to look for clean skin.
+//
+// t0: the blemishes found. t1: the same, blurred.
+// Out: how much of this pixel is blemish, how far out clean skin is, nothing, and the skin weight.
+@compute @workgroup_size(8, 8, 1)
+fn sk_heal(@builtin(global_invocation_id) id: vec3<u32>) {
+    if (outside(id)) { return; }
+    let p = vec2<i32>(id.xy);
+    let raw = textureLoad(t0, p, 0);
+    let spread = textureLoad(t1, p, 0);
+    let mask = clamp(max(raw.x, 1.6 * spread.x), 0.0, 1.0);
+    var reach = f32(params.step_a);
+    if (spread.x > 1e-3) { reach = spread.y / spread.x; }
+    textureStore(out_f32, p, vec4<f32>(mask, reach, 0.0, raw.w));
+}
+
+// The colour around a point, a ring of samples out from it, leaving out the samples that are themselves
+// blemish or are not skin. t0 is the picture, t1 the maps (with the skin weight), t5 the blemish mask.
+// Returns the sum of the colours and the sum of their weights.
+fn clean_ring(pos: vec2<f32>, reach: f32) -> vec4<f32> {
+    var colour = vec3<f32>(0.0);
+    var weight = 0.0;
+    let dst = vec2<f32>(params.grid.dst);
+    for (var i = 0u; i < 8u; i += 1u) {
+        let angle = f32(i) * 0.78539816;
+        let q = pos + vec2<f32>(cos(angle), sin(angle)) * 3.0 * reach;
+        let tap = tap_uv((q + 0.5) / dst, params.grid.dst);
+        let on_skin = tap_sample(t1, tap).w;
+        let clean = 1.0 - tap_sample(t5, tap).x;
+        let w = on_skin * clean * clean;
+        colour += tap_sample(t0, tap).rgb * w;
+        weight += w;
+    }
+    return vec4<f32>(colour, weight);
+}
 // t0: the picture. t1: the maps. t2: the split picture blurred at the size of a blemish, which is the
 // skin with its grain taken off. t3: blurred wider, the lie of the face. t4: the lines and the
-// under-eye band, which is only read when one of those two is asked for.
+// under-eye band, which is only read when one of those two is asked for. t5: the blemishes found, only
+// read when spots are asked for.
 // Out: the picture with each fault corrected by its own slider, and nothing else touched.
 @compute @workgroup_size(8, 8, 1)
 fn sk_apply(@builtin(global_invocation_id) id: vec3<u32>) {
@@ -351,11 +471,25 @@ fn sk_apply(@builtin(global_invocation_id) id: vec3<u32>) {
     // how much any of the corrections below took hold at this pixel, which is where there is grain to give back
     var touched = 0.0;
 
-    // a blemish is a blob of brightness at its own size: take that blob away and the skin around it
-    // closes over, while anything finer than the blob stays where it was
+    // A blemish - a spot, a patch of redness, a bump - is replaced by the clean skin around it, in colour as
+    // well as brightness: a mole taken out in brightness alone is still a red mole.
     if (params.spots > 0.0) {
-        level -= (l_fine - l_wide) * maps.x * params.spots;
-        touched = max(touched, maps.x * params.spots);
+        let found = textureLoad(t5, p, 0);
+        if (found.x > 0.01) {
+            let ring = clean_ring(vec2<f32>(id.xy), found.y);
+            if (ring.w > 1.0) {
+                let clean = to_ycc(ring.xyz / ring.w);
+                let k = clamp(found.x * params.spots, 0.0, 1.0);
+                let before = level;
+                level = mix(level, (clean.x - 16.0) / 219.0, k);
+                // what was healed out is no longer grain either, or the grain put back on top would put a
+                // piece of the blemish back with it
+                grain += level - before;
+                ycc.y = mix(ycc.y, clean.y, k);
+                ycc.z = mix(ycc.z, clean.z, k);
+                touched = max(touched, k);
+            }
+        }
     }
     // A line is a valley: lift it part of the way up to the skin on either side of it. How far was worked
     // out against the brightness the picture came in with, so the spots just taken out are not counted

@@ -88,7 +88,8 @@ impl Group {
             Group::Skin => (
                 include_str!("../../shaders/skin.wgsl"),
                 &[
-                    "sk_stats", "sk_split", "sk_maps", "sk_band", "sk_lines", "sk_apply",
+                    "sk_stats", "sk_split", "sk_maps", "sk_band", "sk_blob", "sk_heal", "sk_lines",
+                    "sk_apply",
                 ],
             ),
             Group::Relight => (

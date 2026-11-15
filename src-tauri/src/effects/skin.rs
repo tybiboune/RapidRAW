@@ -40,9 +40,10 @@ struct Params {
     step_c: u32,
 }
 
-// the widths lines are looked for at, as a share of the face's width: a fine crease, a crease and a
-// fold. They are standard deviations; each copy of the picture is blurred to about this much.
-const LINE_WIDTHS: [f32; 3] = [0.004, 0.008, 0.016];
+// the widths lines and blemishes are looked for at, as a share of the face's width: a fine crease or a
+// pore-sized spot, a crease or a mole, a fold or a pimple. They are standard deviations; each copy of the
+// picture is blurred to about this much.
+const DETAIL_WIDTHS: [f32; 3] = [0.0025, 0.005, 0.010];
 
 // where a face folds and where it shades under the eyes: two soft maps made from the landmarks
 struct Regions {
@@ -66,9 +67,12 @@ pub struct Skin {
     redness_way: u32,
 }
 
-// The face as a fraction of the picture's width: the widest part of the largest blob on the map. Lines
-// are a thin fraction of a face, so they have to be looked for at a width that follows the face and not
-// the frame - a small face in a big picture has thinner lines in pixels than a large one.
+// The width of the face as a fraction of the picture's width, from the area of the largest blob on the
+// map: a face is about as tall as it is wide and a third again, with the eyes and the mouth left out, so
+// its width comes to the square root of its area over a little under one. Going by the area and not by the
+// extent along the picture's width means a head turned on its side is measured the same as an upright one.
+// Lines and blemishes are a fixed share of a face, so they have to be looked for at a size that follows the
+// face and not the frame - a small face in a big picture has thinner lines in pixels than a large one.
 fn face_fraction(map: &GrayImage) -> f32 {
     const SIDE: u32 = 128;
     const FALLBACK: f32 = 0.2;
@@ -86,7 +90,7 @@ fn face_fraction(map: &GrayImage) -> f32 {
         map.get_pixel(sx, sy)[0] > 127
     };
     let mut seen = vec![false; (gw * gh) as usize];
-    let mut best = (0u32, 0.0f32);
+    let mut best = 0u32;
     for start_y in 0..gh {
         for start_x in 0..gw {
             let start = (start_y * gw + start_x) as usize;
@@ -95,11 +99,9 @@ fn face_fraction(map: &GrayImage) -> f32 {
             }
             seen[start] = true;
             let mut stack = vec![(start_x, start_y)];
-            let (mut area, mut left, mut right) = (0u32, start_x, start_x);
+            let mut area = 0u32;
             while let Some((x, y)) = stack.pop() {
                 area += 1;
-                left = left.min(x);
-                right = right.max(x);
                 let around = [
                     (x.wrapping_sub(1), y),
                     (x + 1, y),
@@ -117,16 +119,14 @@ fn face_fraction(map: &GrayImage) -> f32 {
                     }
                 }
             }
-            if area > best.0 {
-                best = (area, (right - left + 1) as f32 / gw as f32);
-            }
+            best = best.max(area);
         }
     }
-    if best.0 == 0 {
-        FALLBACK
-    } else {
-        best.1.clamp(0.02, 1.0)
+    if best == 0 {
+        return FALLBACK;
     }
+    let area = best as f32 / (gw * gh) as f32 * (mw as f32 * mh as f32);
+    ((area / 0.92).sqrt() / mw as f32).clamp(0.02, 1.0)
 }
 
 pub fn prepare(
@@ -252,9 +252,9 @@ pub fn encode(enc: &mut ComputeEncoder, job: &Skin, src: &Slot, dst: &Slot) {
         redness_way: job.redness_way,
         lines: job.lines,
         under_eye: job.under_eye,
-        step_a: step(LINE_WIDTHS[0]),
-        step_b: step(LINE_WIDTHS[1]),
-        step_c: step(LINE_WIDTHS[2]),
+        step_a: step(DETAIL_WIDTHS[0]),
+        step_b: step(DETAIL_WIDTHS[1]),
+        step_c: step(DETAIL_WIDTHS[2]),
     };
 
     // what this face's own skin colour comes to, left in scratch for the passes that read against it
@@ -315,56 +315,96 @@ pub fn encode(enc: &mut ComputeEncoder, job: &Skin, src: &Slot, dst: &Slot) {
         },
     );
 
-    // Lines and the under-eye band, which cost several more passes, are only looked for when asked for.
+    // Lines, blemishes and the under-eye band cost several more passes, so each is only looked for when
+    // asked for. They all read the picture blurred to the same three widths.
     //
     // A line is a ridge in the brightness: dark along a thin curve, so across it the brightness bends
-    // sharply upward and along it hardly at all. That is read from the curvature of the picture blurred
-    // to three widths, which is what lets a crease (curved one way only) be told from a pore (curved
-    // every way) and from an edge (a step, not a valley). The blur is what keeps noise out of it.
-    let extras = if job.lines > 0.0 || job.under_eye > 0.0 {
+    // sharply upward and along it hardly at all. A blemish is a blob: it bends the same way in every
+    // direction. Both are read from the curvature of the blurred copies, which is what tells a crease
+    // from a spot from a pore, and the blur is what keeps noise out of it.
+    let wants_lines = job.lines > 0.0 || job.under_eye > 0.0;
+    let wants_blemishes = job.spots > 0.0;
+    let mut extras = None;
+    let mut blemishes = None;
+    if wants_lines || wants_blemishes {
         // a blur of this radius spreads about as far as a gaussian a little under it
         let radius = |share: f32| ((face_px * share * 1.2).round() as u32).clamp(1, 150);
-        let copy_a = split(enc, "Skin Ridge A");
-        let copy_b = split(enc, "Skin Ridge B");
-        let copy_c = split(enc, "Skin Ridge C");
-        let ridge_a = enc.blur(copy_a, radius(LINE_WIDTHS[0]), 2, 0);
-        let ridge_b = enc.blur(copy_b, radius(LINE_WIDTHS[1]), 2, 0);
-        let ridge_c = enc.blur(copy_c, radius(LINE_WIDTHS[2]), 2, 0);
+        let copy_a = split(enc, "Skin Detail A");
+        let copy_b = split(enc, "Skin Detail B");
+        let copy_c = split(enc, "Skin Detail C");
+        let ridge_a = enc.blur(copy_a, radius(DETAIL_WIDTHS[0]), 2, 0);
+        let ridge_b = enc.blur(copy_b, radius(DETAIL_WIDTHS[1]), 2, 0);
+        let ridge_c = enc.blur(copy_c, radius(DETAIL_WIDTHS[2]), 2, 0);
 
-        // how much this skin varies from place to place: the yardstick the valleys are read against
+        // how rough this skin's finest detail is from place to place: the yardstick a crease or a
+        // blemish is read against
         let band = enc.texture("Skin Band", size, f32x4);
         enc.run(
             Group::Skin,
             "sk_band",
             &params,
             size,
-            &[&fine.view, &wide.view, &here.view],
+            &[&here.view, &ridge_a.view],
             Out::F32(&band.view),
             Bind::default(),
         );
         let spread = enc.blur(band, radius(0.09), 2, 0);
 
-        let extras = enc.texture("Skin Extras", size, f32x4);
-        enc.run(
-            Group::Skin,
-            "sk_lines",
-            &params,
-            size,
-            &[
-                &ridge_a.view,
-                &ridge_b.view,
-                &ridge_c.view,
-                &spread.view,
-                &regions.view,
-                &wide.view,
-            ],
-            Out::F32(&extras.view),
-            Bind::default(),
-        );
-        Some(extras)
-    } else {
-        None
-    };
+        if wants_lines {
+            let lines = enc.texture("Skin Extras", size, f32x4);
+            enc.run(
+                Group::Skin,
+                "sk_lines",
+                &params,
+                size,
+                &[
+                    &ridge_a.view,
+                    &ridge_b.view,
+                    &ridge_c.view,
+                    &spread.view,
+                    &regions.view,
+                    &wide.view,
+                ],
+                Out::F32(&lines.view),
+                Bind::default(),
+            );
+            // softened a little, so where a line starts and stops is not a hard edge on the skin
+            extras = Some(enc.blur(lines, radius(DETAIL_WIDTHS[0]), 1, 0));
+        }
+
+        if wants_blemishes {
+            // the blemishes found, twice: once as they are, once to be blurred out so the whole of each
+            // blemish is covered and not only its middle
+            let found = enc.texture("Skin Blemishes", size, f32x4);
+            let found_wide = enc.texture("Skin Blemishes Wide", size, f32x4);
+            for target in [&found, &found_wide] {
+                enc.run(
+                    Group::Skin,
+                    "sk_blob",
+                    &params,
+                    size,
+                    &[&ridge_a.view, &ridge_b.view, &ridge_c.view, &spread.view],
+                    Out::F32(&target.view),
+                    Bind {
+                        scratch: Some(&stats),
+                        ..Default::default()
+                    },
+                );
+            }
+            let found_wide = enc.blur(found_wide, radius(DETAIL_WIDTHS[1]), 2, 0);
+            let healed = enc.texture("Skin Heal", size, f32x4);
+            enc.run(
+                Group::Skin,
+                "sk_heal",
+                &params,
+                size,
+                &[&found.view, &found_wide.view],
+                Out::F32(&healed.view),
+                Bind::default(),
+            );
+            blemishes = Some(healed);
+        }
+    }
 
     enc.run(
         Group::Skin,
@@ -376,8 +416,12 @@ pub fn encode(enc: &mut ComputeEncoder, job: &Skin, src: &Slot, dst: &Slot) {
             &maps.view,
             &fine.view,
             &wide.view,
-            // when neither is asked for the apply pass never reads this one
+            // when lines and the under-eye band are not asked for the apply pass never reads this one,
+            // nor the next when spots are not
             extras.as_ref().map_or(&maps.view, |extras| &extras.view),
+            blemishes
+                .as_ref()
+                .map_or(&maps.view, |blemishes| &blemishes.view),
         ],
         Out::F16(&dst.view),
         Bind {
@@ -386,7 +430,6 @@ pub fn encode(enc: &mut ComputeEncoder, job: &Skin, src: &Slot, dst: &Slot) {
         },
     );
 }
-
 #[cfg(test)]
 mod tests {
     use std::io::Cursor;
@@ -649,6 +692,7 @@ mod tests {
 
     const CREASE_Y: u32 = 290;
     const BAG: (f32, f32) = (90.0, 90.0);
+    const MOLE: (f32, f32) = (330.0, 120.0);
 
     // the flat portrait with a thin dark crease across it and a shadow under an eye
     fn portrait_with_folds() -> Rgb32FImage {
@@ -660,6 +704,14 @@ mod tests {
             let (dx, dy) = ((x as f32 - BAG.0) / 7.0, (y as f32 - BAG.1) / 3.5);
             let bag = (-(dx * dx + dy * dy)).exp();
             px.0 = px.0.map(|v| v * (1.0 - 0.25 * bag));
+            // a small dark red mole
+            let mole =
+                (-(((x as f32 - MOLE.0).powi(2) + (y as f32 - MOLE.1).powi(2)) / 18.0)).exp();
+            px.0 = [
+                px.0[0] * (1.0 - 0.4 * mole),
+                px.0[1] * (1.0 - 0.65 * mole),
+                px.0[2] * (1.0 - 0.65 * mole),
+            ];
         }
         img
     }
@@ -897,6 +949,33 @@ mod tests {
             let out = render_sized(&context, &crop, adjustments);
             eprintln!("{case}: rendered in {:?}", started.elapsed());
             save(&case.replace([':', '+'], "_"), &out);
+        }
+    }
+
+    #[test]
+    fn a_blemish_is_healed_in_colour_as_well_as_brightness() {
+        let context = gpu();
+        let img = portrait_with_folds();
+        let input: Vec<[f32; 3]> = img.pixels().map(|p| p.0).collect();
+        let out = render(&context, &img, with_regions(json!({ "skinSpots": 100 })));
+        assert!(out.iter().all(|p| p.iter().all(|v| v.is_finite())));
+
+        let beside = mean(&input, (330.0, 150.0), 6.0);
+        let mole_in = mean(&input, MOLE, 2.0);
+        let mole_out = mean(&out, MOLE, 2.0);
+        eprintln!("mole in {mole_in:?} out {mole_out:?} beside {beside:?}");
+        for c in 0..3 {
+            assert!(
+                (mole_out[c] - beside[c]).abs() < (mole_in[c] - beside[c]).abs() * 0.5,
+                "channel {c} not healed"
+            );
+        }
+
+        // and the skin far from it is left alone
+        let far_in = mean(&input, (320.0, 60.0), 25.0);
+        let far_out = mean(&out, (320.0, 60.0), 25.0);
+        for c in 0..3 {
+            assert!((far_in[c] - far_out[c]).abs() < 0.02, "clean skin changed");
         }
     }
 
