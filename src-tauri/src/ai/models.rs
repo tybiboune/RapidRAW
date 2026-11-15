@@ -342,6 +342,26 @@ pub struct AiModels {
 }
 
 impl AiModels {
+    pub fn new(models_dir: PathBuf, use_gpu: bool) -> Self {
+        Self {
+            models_dir,
+            use_gpu,
+            downloaded: Mutex::new(HashSet::new()),
+            sam_encoder: Mutex::new(None),
+            sam_decoder: Mutex::new(None),
+            birefnet: Mutex::new(None),
+            esam3_image_encoder: Mutex::new(None),
+            esam3_decoder: Mutex::new(None),
+            esam3_text_encoder: Mutex::new(None),
+            esam3_sky_prompt: Mutex::new(None),
+            esam3_face_prompt: Mutex::new(None),
+            clip_tokenizer: Mutex::new(None),
+            face_landmarks: Mutex::new(None),
+            face_segmenter: Mutex::new(None),
+            depth_anything: Mutex::new(None),
+        }
+    }
+
     /// Whether every file the model needs is still on disk. Cheap (no hashing), so it can guard the
     /// fast path; the full sha256 check only runs when this fails or the model is invalidated.
     fn assets_present(&self, model: AiMaskModel) -> bool {
@@ -868,23 +888,10 @@ pub async fn get_or_init_ai_models(
             let _ = ort::init().with_name("AI").commit();
             crate::register_exit_handler();
 
-            let models = Arc::new(AiModels {
-                models_dir: get_models_dir(app_handle)?,
-                use_gpu: gpu_acceleration_enabled(app_handle),
-                downloaded: Mutex::new(HashSet::new()),
-                sam_encoder: Mutex::new(None),
-                sam_decoder: Mutex::new(None),
-                birefnet: Mutex::new(None),
-                esam3_image_encoder: Mutex::new(None),
-                esam3_decoder: Mutex::new(None),
-                esam3_text_encoder: Mutex::new(None),
-                esam3_sky_prompt: Mutex::new(None),
-                esam3_face_prompt: Mutex::new(None),
-                clip_tokenizer: Mutex::new(None),
-                face_landmarks: Mutex::new(None),
-                face_segmenter: Mutex::new(None),
-                depth_anything: Mutex::new(None),
-            });
+            let models = Arc::new(AiModels::new(
+                get_models_dir(app_handle)?,
+                gpu_acceleration_enabled(app_handle),
+            ));
             ai_state_mutex
                 .lock()
                 .unwrap()

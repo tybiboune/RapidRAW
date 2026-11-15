@@ -345,7 +345,7 @@ fn cached_face_analysis(
     Ok(analysis)
 }
 
-fn compute_face_analysis(
+pub(crate) fn compute_face_analysis(
     ai_state: &Mutex<Option<AiState>>,
     models: &AiModels,
     cache_key: &str,

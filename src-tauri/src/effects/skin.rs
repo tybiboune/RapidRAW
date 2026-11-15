@@ -34,10 +34,15 @@ struct Params {
     redness_way: u32,
     lines: f32,
     under_eye: f32,
-    _pad0: u32,
-    _pad1: u32,
-    _pad2: u32,
+    // how far apart, in pixels, the curvature of each of the three blurred copies is read
+    step_a: u32,
+    step_b: u32,
+    step_c: u32,
 }
+
+// the widths lines are looked for at, as a share of the face's width: a fine crease, a crease and a
+// fold. They are standard deviations; each copy of the picture is blurred to about this much.
+const LINE_WIDTHS: [f32; 3] = [0.004, 0.008, 0.016];
 
 // where a face folds and where it shades under the eyes: two soft maps made from the landmarks
 struct Regions {
@@ -229,6 +234,12 @@ pub fn encode(enc: &mut ComputeEncoder, job: &Skin, src: &Slot, dst: &Slot) {
         ),
     };
 
+    // Everything a face does is measured in faces, not in pixels: a blemish, a crease and the shading of
+    // a cheek are a fixed share of its width, so a small face in a big picture and a large one are
+    // looked at the same way.
+    let face_px = (job.face_fraction * size.0 as f32).max(24.0);
+    let step = |share: f32| ((face_px * share).round() as u32).max(1);
+
     let params = Params {
         grid: Grid::new(size),
         spots: job.spots,
@@ -241,7 +252,9 @@ pub fn encode(enc: &mut ComputeEncoder, job: &Skin, src: &Slot, dst: &Slot) {
         redness_way: job.redness_way,
         lines: job.lines,
         under_eye: job.under_eye,
-        ..Default::default()
+        step_a: step(LINE_WIDTHS[0]),
+        step_b: step(LINE_WIDTHS[1]),
+        step_c: step(LINE_WIDTHS[2]),
     };
 
     // what this face's own skin colour comes to, left in scratch for the passes that read against it
@@ -280,9 +293,8 @@ pub fn encode(enc: &mut ComputeEncoder, job: &Skin, src: &Slot, dst: &Slot) {
 
     // Three sizes: the grain, the blemish, and the lie of the face. A blemish is a blob of brightness
     // at its own size, so it shows up between the first two and not in the third.
-    let long = size.0.max(size.1) as f32;
-    let fine_radius = ((long * 0.004).round() as u32).clamp(2, 24);
-    let wide_radius = ((long * 0.022).round() as u32).clamp(6, 90);
+    let fine_radius = ((face_px * 0.012).round() as u32).clamp(2, 60);
+    let wide_radius = ((face_px * 0.066).round() as u32).clamp(6, 150);
     let here = split(enc, "Skin Split");
     let fine_src = split(enc, "Skin Fine");
     let wide_src = split(enc, "Skin Wide");
@@ -304,37 +316,20 @@ pub fn encode(enc: &mut ComputeEncoder, job: &Skin, src: &Slot, dst: &Slot) {
     );
 
     // Lines and the under-eye band, which cost several more passes, are only looked for when asked for.
-    // Lines are thin valleys, so they are found at widths that follow the face: each is the picture
-    // blurred wide against the same blurred narrow, at two widths, and the strongest of the two counts.
+    //
+    // A line is a ridge in the brightness: dark along a thin curve, so across it the brightness bends
+    // sharply upward and along it hardly at all. That is read from the curvature of the picture blurred
+    // to three widths, which is what lets a crease (curved one way only) be told from a pore (curved
+    // every way) and from an edge (a step, not a valley). The blur is what keeps noise out of it.
     let extras = if job.lines > 0.0 || job.under_eye > 0.0 {
-        let face_px = (job.face_fraction * size.0 as f32).max(24.0);
         // a blur of this radius spreads about as far as a gaussian a little under it
         let radius = |share: f32| ((face_px * share * 1.2).round() as u32).clamp(1, 150);
-        let narrow_a = split(enc, "Skin Narrow A");
-        let narrow_b = split(enc, "Skin Narrow B");
-        let wide_a = split(enc, "Skin Wide A");
-        let wide_b = split(enc, "Skin Wide B");
-        let narrow_a = enc.blur(narrow_a, radius(0.0036), 2, 0);
-        let narrow_b = enc.blur(narrow_b, radius(0.0078), 2, 0);
-        let wide_a = enc.blur(wide_a, radius(0.0132), 2, 0);
-        let wide_b = enc.blur(wide_b, radius(0.0286), 2, 0);
-
-        let valleys = enc.texture("Skin Valleys", size, f32x4);
-        enc.run(
-            Group::Skin,
-            "sk_valley",
-            &params,
-            size,
-            &[
-                &here.view,
-                &narrow_a.view,
-                &narrow_b.view,
-                &wide_a.view,
-                &wide_b.view,
-            ],
-            Out::F32(&valleys.view),
-            Bind::default(),
-        );
+        let copy_a = split(enc, "Skin Ridge A");
+        let copy_b = split(enc, "Skin Ridge B");
+        let copy_c = split(enc, "Skin Ridge C");
+        let ridge_a = enc.blur(copy_a, radius(LINE_WIDTHS[0]), 2, 0);
+        let ridge_b = enc.blur(copy_b, radius(LINE_WIDTHS[1]), 2, 0);
+        let ridge_c = enc.blur(copy_c, radius(LINE_WIDTHS[2]), 2, 0);
 
         // how much this skin varies from place to place: the yardstick the valleys are read against
         let band = enc.texture("Skin Band", size, f32x4);
@@ -356,11 +351,12 @@ pub fn encode(enc: &mut ComputeEncoder, job: &Skin, src: &Slot, dst: &Slot) {
             &params,
             size,
             &[
-                &valleys.view,
+                &ridge_a.view,
+                &ridge_b.view,
+                &ridge_c.view,
                 &spread.view,
                 &regions.view,
                 &wide.view,
-                &here.view,
             ],
             Out::F32(&extras.view),
             Bind::default(),
@@ -449,7 +445,7 @@ mod tests {
             let g = noise(x, y) * 0.02;
             let (mut r, mut gr, mut b) = (0.42 + g, 0.27 + g, 0.20 + g);
             let d = |c: (f32, f32)| ((x as f32 - c.0).powi(2) + (y as f32 - c.1).powi(2)).sqrt();
-            let spot = (-(d(SPOT) / 7.0).powi(2)).exp();
+            let spot = (-(d(SPOT) / 12.0).powi(2)).exp();
             r *= 1.0 - 0.25 * spot;
             gr *= 1.0 - 0.55 * spot;
             b *= 1.0 - 0.55 * spot;
@@ -526,9 +522,18 @@ mod tests {
         img: &Rgb32FImage,
         adjustments: serde_json::Value,
     ) -> Vec<[f32; 3]> {
+        render_sized(context, img, adjustments)
+    }
+
+    fn render_sized(
+        context: &GpuContext,
+        img: &Rgb32FImage,
+        adjustments: serde_json::Value,
+    ) -> Vec<[f32; 3]> {
         assert_eq!(IMAGE_FORMAT, wgpu::TextureFormat::Rgba16Float);
         let dynamic = DynamicImage::ImageRgb32F(img.clone());
-        let slot = compute::upload_image(context, (N, N), &compute::rgba_halves(&dynamic));
+        let slot =
+            compute::upload_image(context, img.dimensions(), &compute::rgba_halves(&dynamic));
         let source = RenderSource::new(
             &dynamic,
             1,
@@ -705,6 +710,15 @@ mod tests {
             );
         }
 
+        // where, if anywhere, did Lines change the picture at all
+        let mut changed = (0.0f32, 0usize, 0u32, 0u32);
+        for (i, (a, b)) in input.iter().zip(&lines).enumerate() {
+            let d = (0..3).map(|c| (a[c] - b[c]).abs()).fold(0.0f32, f32::max);
+            if d > changed.0 {
+                changed = (d, i, i as u32 % N, i as u32 / N);
+            }
+        }
+        eprintln!("largest change by Lines {changed:?}");
         let crease = (240.0, CREASE_Y as f32 + 1.0);
         let beside = mean(&input, (240.0, 320.0), 10.0);
         let crease_in = mean(&input, crease, 1.5);
@@ -731,6 +745,158 @@ mod tests {
             for i in 0..3 {
                 assert!((far_in[i] - far_out[i]).abs() < 0.02, "clean skin changed");
             }
+        }
+    }
+
+    // Not a test: renders the skin tools on a real photograph, through the real face detection, so the
+    // result can be looked at. It writes before/after crops of the face as PNG files.
+    //
+    //   RRAW_PHOTO=<file> RRAW_OUT=<folder> ORT_DYLIB_PATH=<onnxruntime.dll> RRAW_CASES=lines:50,lines:100 \
+    //     cargo test --lib real_photo_preview -- --ignored --nocapture
+    #[test]
+    #[ignore]
+    fn real_photo_preview() {
+        use std::path::PathBuf;
+
+        use crate::ai::commands::{MaskTransform, compute_face_analysis};
+        use crate::ai::models::AiModels;
+        use crate::masks::face::{FacePart, compose_face_mask, compose_skin_regions};
+
+        let Ok(photo) = std::env::var("RRAW_PHOTO") else {
+            return;
+        };
+        let out_dir = PathBuf::from(std::env::var("RRAW_OUT").expect("RRAW_OUT"));
+        std::fs::create_dir_all(&out_dir).unwrap();
+        let app_data =
+            PathBuf::from(std::env::var("APPDATA").unwrap()).join("io.github.CyberTimon.RapidRAW");
+        let settings: crate::app::settings::AppSettings =
+            serde_json::from_slice(&std::fs::read(app_data.join("settings.json")).unwrap())
+                .unwrap();
+
+        // the raw developer is called directly: the app's full image loader pulls in dialog code that a
+        // test executable, which has no Windows manifest, cannot even start with
+        let bytes = std::fs::read(&photo).unwrap();
+        let is_raw = crate::decode::formats::is_raw_file(&photo);
+        let base = if is_raw {
+            crate::decode::raw_processing::develop_raw_image(
+                &bytes,
+                false,
+                settings.raw_highlight_compression.unwrap_or(2.5),
+                settings.linear_raw_mode.clone(),
+                settings.raw_preprocessing_color_nr.unwrap_or(0.5),
+                settings.raw_preprocessing_sharpening.unwrap_or(0.35),
+                None,
+            )
+            .unwrap()
+        } else {
+            image::load_from_memory(&bytes).unwrap()
+        };
+        let converted =
+            crate::masks::generation::build_converted_source_image(&base, is_raw, &json!({}))
+                .into_owned();
+        let (width, height) = (converted.width(), converted.height());
+        eprintln!("photo {width}x{height}");
+
+        let _ = ort::init().with_name("preview").commit();
+        let models = AiModels::new(app_data.join("models"), false);
+        let transform = MaskTransform {
+            rotation: 0.0,
+            flip_horizontal: false,
+            flip_vertical: false,
+            orientation_steps: 0,
+        };
+        let started = std::time::Instant::now();
+        let analysis =
+            compute_face_analysis(&Mutex::new(None), &models, "preview", &converted, transform)
+                .expect("face analysis");
+        eprintln!(
+            "found {} face(s) in {:?}",
+            analysis.faces.len(),
+            started.elapsed()
+        );
+        let face_map = compose_face_mask(&converted, &analysis, &[FacePart::FaceSkin]);
+        let regions = compose_skin_regions(width, height, &analysis);
+
+        // the face, with room around it
+        let (mut x0, mut y0, mut x1, mut y1) = (width, height, 0, 0);
+        for (x, y, p) in face_map.enumerate_pixels() {
+            if p[0] > 127 {
+                (x0, y0, x1, y1) = (x0.min(x), y0.min(y), x1.max(x), y1.max(y));
+            }
+        }
+        let (pad_x, pad_y) = ((x1 - x0) / 5, (y1 - y0) / 5);
+        let (x0, y0) = (x0.saturating_sub(pad_x), y0.saturating_sub(pad_y));
+        let (x1, y1) = ((x1 + pad_x).min(width - 1), (y1 + pad_y).min(height - 1));
+        let (cw, ch) = (x1 - x0 + 1, y1 - y0 + 1);
+        eprintln!("crop {x0},{y0} {cw}x{ch}");
+        let crop = converted.crop_imm(x0, y0, cw, ch).to_rgb32f();
+        let face_crop = image::imageops::crop_imm(&face_map, x0, y0, cw, ch).to_image();
+        let region_crop = |map: &image::GrayImage| {
+            let (rw, rh) = map.dimensions();
+            let (fx0, fy0) = (x0 as f32 / width as f32, y0 as f32 / height as f32);
+            let (fx1, fy1) = (
+                (x1 + 1) as f32 / width as f32,
+                (y1 + 1) as f32 / height as f32,
+            );
+            let (rx0, ry0) = ((fx0 * rw as f32) as u32, (fy0 * rh as f32) as u32);
+            let (rx1, ry1) = (
+                ((fx1 * rw as f32).ceil() as u32).min(rw),
+                ((fy1 * rh as f32).ceil() as u32).min(rh),
+            );
+            image::imageops::crop_imm(map, rx0, ry0, (rx1 - rx0).max(1), (ry1 - ry0).max(1))
+                .to_image()
+        };
+        let data_url = |map: &image::GrayImage| {
+            let mut buf = Cursor::new(Vec::new());
+            map.write_to(&mut buf, ImageFormat::Png).unwrap();
+            format!(
+                "data:image/png;base64,{}",
+                STANDARD.encode(buf.into_inner())
+            )
+        };
+        let save = |name: &str, px: &[[f32; 3]]| {
+            let mut out = image::RgbImage::new(cw, ch);
+            for (i, p) in px.iter().enumerate() {
+                let c = |v: f32| (v.clamp(0.0, 1.0) * 255.0).round() as u8;
+                out.put_pixel(
+                    i as u32 % cw,
+                    i as u32 / cw,
+                    image::Rgb([c(p[0]), c(p[1]), c(p[2])]),
+                );
+            }
+            out.save(out_dir.join(format!("{name}.png"))).unwrap();
+        };
+
+        let context = gpu();
+        let input: Vec<[f32; 3]> = crop.pixels().map(|p| p.0).collect();
+        save("before", &input);
+
+        let cases = std::env::var("RRAW_CASES").unwrap_or_else(|_| "lines:100".into());
+        for case in cases.split(',') {
+            let mut adjustments = json!({
+                "skinEnabled": true,
+                "skinFaceMap": data_url(&face_crop),
+                "skinLinesMap": data_url(&region_crop(&regions.lines)),
+                "skinUnderEyeMap": data_url(&region_crop(&regions.under_eye)),
+                "skinKeepTexture": 50,
+            });
+            for setting in case.split('+') {
+                let (key, value) = setting.split_once(':').expect("key:value");
+                let key = match key {
+                    "lines" => "skinLines",
+                    "undereye" => "skinUnderEye",
+                    "spots" => "skinSpots",
+                    "shine" => "skinShine",
+                    "redness" => "skinRedness",
+                    "texture" => "skinKeepTexture",
+                    other => other,
+                };
+                adjustments[key] = json!(value.parse::<f64>().unwrap());
+            }
+            let started = std::time::Instant::now();
+            let out = render_sized(&context, &crop, adjustments);
+            eprintln!("{case}: rendered in {:?}", started.elapsed());
+            save(&case.replace([':', '+'], "_"), &out);
         }
     }
 

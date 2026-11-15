@@ -29,9 +29,9 @@ struct Params {
     redness_way: u32,
     lines: f32,
     under_eye: f32,
-    _pad0: u32,
-    _pad1: u32,
-    _pad2: u32,
+    step_a: u32,
+    step_b: u32,
+    step_c: u32,
 }
 
 @group(0) @binding(7) var<uniform> params: Params;
@@ -191,34 +191,6 @@ fn sk_maps(@builtin(global_invocation_id) id: vec3<u32>) {
     textureStore(out_f32, p, vec4<f32>(spots, redness, shine, skin));
 }
 
-// Lines are thin dark valleys: wrinkles, creases, the folds beside the nose. A valley is brightness
-// a little way out from it against brightness right at it, so each is the picture blurred wider less the
-// same picture blurred narrower, positive where the middle is the darker. Two widths are looked at, a fine
-// crease and a deeper fold, and the stronger of the two counts.
-//
-// t0: the split picture. t1, t2: it blurred narrow, at the two widths. t3, t4: blurred wide, the same.
-// Out: the two valley strengths, the skin with its valleys filled, and the skin weight.
-@compute @workgroup_size(8, 8, 1)
-fn sk_valley(@builtin(global_invocation_id) id: vec3<u32>) {
-    if (outside(id)) { return; }
-    let p = vec2<i32>(id.xy);
-    let skin = textureLoad(t0, p, 0).w;
-    if (skin <= 0.01) {
-        textureStore(out_f32, p, vec4<f32>(0.0, 0.0, 0.0, skin));
-        return;
-    }
-    let narrow_a = textureLoad(t1, p, 0);
-    let narrow_b = textureLoad(t2, p, 0);
-    let wide_a = textureLoad(t3, p, 0);
-    let wide_b = textureLoad(t4, p, 0);
-    let l_narrow_a = narrow_a.x / max(narrow_a.w, 1e-4);
-    let l_narrow_b = narrow_b.x / max(narrow_b.w, 1e-4);
-    let l_wide_a = wide_a.x / max(wide_a.w, 1e-4);
-    let l_wide_b = wide_b.x / max(wide_b.w, 1e-4);
-    // the narrow blur of the second width is also what the skin looks like with its valleys taken out
-    textureStore(out_f32, p, vec4<f32>(l_wide_a - l_narrow_a, l_wide_b - l_narrow_b, l_narrow_b, skin));
-}
-
 // How much this skin varies at the size of a blemish, point by point, to be blurred into how much it
 // varies in each neighbourhood. That is the yardstick a valley is read against: a crease on skin that
 // is smooth around it is a crease, and the same depth on skin that is rough all over is only the skin.
@@ -236,42 +208,120 @@ fn sk_band(@builtin(global_invocation_id) id: vec3<u32>) {
     textureStore(out_f32, p, vec4<f32>(abs(l_fine - l_wide) * skin, 0.0, 0.0, skin));
 }
 
-// t0: the valleys. t1: the yardstick, blurred. t2: the regions of the face, the folds in the first channel
-// and the band under each eye in the second. t3: the split picture blurred wide, the lie of the face.
-// t4: the split picture.
-// Out: how much of each pixel is a line, how much is under-eye shadow, the skin with its valleys filled,
-// and the skin weight.
+// The brightness of one of the blurred copies of the picture at a point, over skin only.
+fn ridge_level(which: u32, pos: vec2<f32>) -> f32 {
+    let uv = (pos + 0.5) / vec2<f32>(params.grid.dst);
+    let tap = tap_uv(uv, params.grid.dst);
+    var c = tap_sample(t0, tap);
+    if (which == 1u) { c = tap_sample(t1, tap); }
+    if (which == 2u) { c = tap_sample(t2, tap); }
+    return c.x / max(c.w, 1e-4);
+}
+
+// How the brightness bends at a point, read at a step of h pixels: xx, yy and xy.
+fn bend(t: texture_2d<f32>, p: vec2<i32>, h: i32) -> vec3<f32> {
+    let hi = vec2<i32>(params.grid.dst) - vec2<i32>(1, 1);
+    let at = vec2<i32>(h, 0);
+    let down = vec2<i32>(0, h);
+    let c = level_at(t, clamp(p, vec2<i32>(0, 0), hi));
+    let l = level_at(t, clamp(p - at, vec2<i32>(0, 0), hi));
+    let r = level_at(t, clamp(p + at, vec2<i32>(0, 0), hi));
+    let u = level_at(t, clamp(p - down, vec2<i32>(0, 0), hi));
+    let d = level_at(t, clamp(p + down, vec2<i32>(0, 0), hi));
+    let ur = level_at(t, clamp(p + at - down, vec2<i32>(0, 0), hi));
+    let dl = level_at(t, clamp(p - at + down, vec2<i32>(0, 0), hi));
+    let ul = level_at(t, clamp(p - at - down, vec2<i32>(0, 0), hi));
+    let dr = level_at(t, clamp(p + at + down, vec2<i32>(0, 0), hi));
+    let h2 = f32(h * h);
+    return vec3<f32>((l + r - 2.0 * c) / h2, (u + d - 2.0 * c) / h2, (dr - ur - dl + ul) / (4.0 * h2));
+}
+
+fn level_at(t: texture_2d<f32>, p: vec2<i32>) -> f32 {
+    let c = textureLoad(t, p, 0);
+    return c.x / max(c.w, 1e-4);
+}
+
+// What one width says about a point: how strongly a line runs through it and which way is across it.
+// Returns (strength, across.x, across.y, depth).
+//
+// Across a dark line the brightness bends sharply upward, along it hardly at all: of the two curvatures
+// the larger is positive and large and the other is near nothing. A pore bends both ways, an edge bends
+// up on one side and down on the other, and noise bends every which way at a small size, so the ratio of
+// the two curvatures is what tells a line from the rest. The depth is in units of brightness, so it can
+// be read against how rough this skin is.
+fn ridge(t: texture_2d<f32>, p: vec2<i32>, h: i32, yardstick: f32) -> vec4<f32> {
+    let m = bend(t, p, h);
+    let mean = 0.5 * (m.x + m.y);
+    let half_gap = 0.5 * (m.x - m.y);
+    let root = sqrt(half_gap * half_gap + m.z * m.z);
+    let strong = mean + root;
+    let weak = mean - root;
+    if (strong <= 0.0) { return vec4<f32>(0.0, 1.0, 0.0, 0.0); }
+    // The direction across the line is the one the strong curvature belongs to. Either of two forms of it
+    // gives that, and each is empty in the case the other handles best (a line running exactly along an
+    // axis), so the longer of the two is the one to trust.
+    let by_x = vec2<f32>(m.z, strong - m.x);
+    let by_y = vec2<f32>(strong - m.y, m.z);
+    var across = vec2<f32>(1.0, 0.0);
+    if (max(dot(by_x, by_x), dot(by_y, by_y)) > 1e-18) {
+        across = normalize(select(by_y, by_x, dot(by_x, by_x) >= dot(by_y, by_y)));
+    } else if (m.x < m.y) {
+        across = vec2<f32>(0.0, 1.0);
+    }
+    let depth = strong * f32(h * h) * 2.0;
+    let single = 1.0 - smooth_step(0.35, 0.95, abs(weak) / strong);
+    let clear = smooth_step(0.45, 1.6, depth / (yardstick * 1.5));
+    return vec4<f32>(clear * single, across, depth);
+}
+
+// t0, t1, t2: the split picture blurred to the three widths lines are looked for at. t3: the yardstick,
+// blurred. t4: the regions of the face, the folds in the first channel and the band under each eye in the
+// second. t5: the split picture blurred wide, the lie of the face.
+// Out: how sure this is a line, how much of it is under-eye shadow, the brightness of the skin on either
+// side of the line (what it is lifted towards), and the skin weight.
 @compute @workgroup_size(8, 8, 1)
 fn sk_lines(@builtin(global_invocation_id) id: vec3<u32>) {
     if (outside(id)) { return; }
     let p = vec2<i32>(id.xy);
-    let valleys = textureLoad(t0, p, 0);
-    let skin = valleys.w;
-    if (skin <= 0.01) {
+    let skin = textureLoad(t0, p, 0).w;
+    if (skin <= 0.05) {
         textureStore(out_f32, p, vec4<f32>(0.0, 0.0, 0.0, skin));
         return;
     }
-    let spread = textureLoad(t1, p, 0);
+    let spread = textureLoad(t3, p, 0);
     let yardstick = max(spread.x / max(spread.w, 1e-4), 0.004);
     let uv = (vec2<f32>(id.xy) + 0.5) / vec2<f32>(params.grid.dst);
-    let region = tap_sample(t2, tap_uv(uv, params.region_size));
+    let region = tap_sample(t4, tap_uv(uv, params.region_size));
 
-    // a valley counts for most where a face folds anyway - beside the nose, under the eyes, across the
+    // the three widths, and the one that finds the strongest line here
+    let a = ridge(t0, p, i32(params.step_a), yardstick);
+    let b = ridge(t1, p, i32(params.step_b), yardstick);
+    let c = ridge(t2, p, i32(params.step_c), yardstick);
+    var best = a;
+    var which = 0u;
+    var reach = f32(params.step_a);
+    if (b.x > best.x) { best = b; which = 1u; reach = f32(params.step_b); }
+    if (c.x > best.x) { best = c; which = 2u; reach = f32(params.step_c); }
+
+    // The valley is filled from the skin on either side of it, found by going across the line: its own
+    // brightness is replaced by the average of the two sides. Blurring it instead would smear it into the
+    // skin along its length, which is what makes a healed line look like a smudge.
+    let pos = vec2<f32>(id.xy);
+    let across = best.yz;
+    let side = 2.2 * reach;
+    let target_level = 0.5 * (ridge_level(which, pos + across * side) + ridge_level(which, pos - across * side));
+
+    // a line counts for most where a face folds anyway - beside the nose, under the eyes, across the
     // forehead - and still counts for something everywhere else on the skin
     let folds = 0.45 + 0.55 * clamp(region.x, 0.0, 1.0);
-    let thin = smooth_step(0.45, 1.6, valleys.x / (yardstick * 1.5));
-    let deep = smooth_step(0.45, 1.6, valleys.y / (yardstick * 1.5));
-    let lines = skin * max(thin, deep) * folds;
+    let line = skin * best.x * folds;
 
     // under the eye is darker than the cheek below it, inside the band where that happens
-    let here = textureLoad(t4, p, 0);
-    let wide = textureLoad(t3, p, 0);
-    let l_here = here.x / max(here.w, 1e-4);
-    let l_wide = wide.x / max(wide.w, 1e-4);
-    let deficit = (l_wide - l_here) / max(l_wide, 0.02);
+    let l_wide = textureLoad(t5, p, 0).x / max(textureLoad(t5, p, 0).w, 1e-4);
+    let deficit = (l_wide - ridge_level(0u, pos)) / max(l_wide, 0.02);
     let under_eye = clamp(region.y, 0.0, 1.0) * smooth_step(0.015, 0.16, deficit);
 
-    textureStore(out_f32, p, vec4<f32>(lines, under_eye, valleys.z, skin));
+    textureStore(out_f32, p, vec4<f32>(line, under_eye, target_level, skin));
 }
 
 // t0: the picture. t1: the maps. t2: the split picture blurred at the size of a blemish, which is the
@@ -296,7 +346,7 @@ fn sk_apply(@builtin(global_invocation_id) id: vec3<u32>) {
     let l_fine = fine.x / max(fine.w, 1e-4);
     let l_wide = wide.x / max(wide.w, 1e-4);
     // the pores, the grain, the stubble: everything finer than a blemish, kept aside to go back on top
-    let grain = l0 - l_fine;
+    var grain = l0 - l_fine;
     var level = l0;
 
     // a blemish is a blob of brightness at its own size: take that blob away and the skin around it
@@ -304,11 +354,17 @@ fn sk_apply(@builtin(global_invocation_id) id: vec3<u32>) {
     if (params.spots > 0.0) {
         level -= (l_fine - l_wide) * maps.x * params.spots;
     }
-    // A line is a valley: fill it part of the way back up to the skin beside it. It is read from the
-    // brightness the picture came in with, so the spots just taken out are not counted twice.
+    // A line is a valley: lift it part of the way up to the skin on either side of it. How far was worked
+    // out against the brightness the picture came in with, so the spots just taken out are not counted
+    // twice.
     let extra = textureLoad(t4, p, 0);
     if (params.lines > 0.0) {
-        level += (extra.z - l0) * extra.x * params.lines;
+        // up towards the skin on either side, as far as the slider and how sure this is a line allow
+        let lift = max(extra.z - l0, 0.0) * extra.x * params.lines;
+        level += lift;
+        // what was lifted out of the valley is no longer grain either, or putting the grain back on top
+        // would put the line back with it
+        grain += lift;
     }
     // shine is brightness above what the face is doing around it, moved back towards it, never past it
     if (params.shine > 0.0) {
