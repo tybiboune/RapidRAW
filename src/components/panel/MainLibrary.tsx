@@ -292,7 +292,7 @@ export default function MainLibrary(props: MainLibraryProps) {
         const currentVersion = await getVersion();
         setAppVersion(currentVersion);
 
-        const response = await fetch('https://api.github.com/repos/CyberTimon/RapidRAW/releases/latest');
+        const response = await fetch('https://api.github.com/repos/tybiboune/RapidRAW/releases/latest');
         if (!response.ok) {
           console.error('Failed to fetch latest release info from GitHub.');
           return;
@@ -440,6 +440,18 @@ export default function MainLibrary(props: MainLibraryProps) {
                         {'Timon Käch'}
                       </a>
                     </p>
+                    <p>
+                      {'RapiderRaw by tybiboune - a fork of '}
+                      <a
+                        href="https://github.com/CyberTimon/RapidRAW"
+                        className="hover:underline"
+                        target="_blank"
+                        rel="noopener noreferrer"
+                      >
+                        {'RapidRAW'}
+                      </a>
+                      {' by Timon Käch'}
+                    </p>
                     {appVersion && (
                       <div className="flex items-center space-x-2">
                         <p>
@@ -451,7 +463,7 @@ export default function MainLibrary(props: MainLibraryProps) {
                             }`}
                             onClick={() => {
                               if (isUpdateAvailable) {
-                                open('https://github.com/CyberTimon/RapidRAW/releases/latest');
+                                open('https://github.com/tybiboune/RapidRAW/releases/latest');
                               }
                             }}
                             data-tooltip={
@@ -482,7 +494,7 @@ export default function MainLibrary(props: MainLibraryProps) {
                           </a>
                           <span className="mx-1">{t('library.splash.or')}</span>
                           <a
-                            href="https://github.com/CyberTimon/RapidRAW"
+                            href="https://github.com/tybiboune/RapidRAW"
                             className="hover:underline"
                             target="_blank"
                             rel="noopener noreferrer"

@@ -566,7 +566,7 @@ pub fn collect_metadata_from_source(
         apply_sidecar_field_overrides(&mut metadata, &map);
     }
 
-    metadata.set_tag(ExifTag::Software("RapidRAW".to_string()));
+    metadata.set_tag(ExifTag::Software("RapiderRaw".to_string()));
     metadata.set_tag(ExifTag::Orientation(vec![1u16]));
     metadata.set_tag(ExifTag::ColorSpace(vec![1u16]));
     metadata.set_tag(ExifTag::ExifVersion(b"0232".to_vec()));
