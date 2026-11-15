@@ -772,7 +772,9 @@ fn segment_probabilities(
 /// What a face does around its skin, for the skin tools: where it tends to fold, and the band under
 /// each eye that tends to go dark. Both are soft, so they are kept small and read at any size.
 pub struct SkinRegions {
-    /// where lines are likely: the folds beside the nose, under the eyes and across the forehead
+    /// how much a valley counts as a line at each place, 0 to 1: most where a face folds anyway - beside the
+    /// nose, under the eyes, across the forehead - something everywhere else on the skin, and little where
+    /// the shadows are the shape of the face and not wrinkles, under the nose
     pub lines: GrayImage,
     /// the shadowed band under each eye
     pub under_eye: GrayImage,
@@ -783,6 +785,11 @@ const RIGHT_EYE_INNER_CORNER: usize = 133;
 const LEFT_EYE_INNER_CORNER: usize = 362;
 const MOUTH_CORNERS: [usize; 2] = [61, 291];
 const NOSE_TIP: usize = 1;
+const NOSE_BASE: usize = 2;
+const NOSTRIL_CORNERS: [usize; 2] = [98, 327];
+// what a valley counts for on skin nothing says anything about, and under the nose
+const PLAIN_LINE_WEIGHT: f32 = 0.45;
+const NOSE_SHADOW_LINE_WEIGHT: f32 = 0.12;
 
 fn mean_point(points: &[[f32; 2]], indices: impl Iterator<Item = usize>) -> [f32; 2] {
     let (sum, count) = indices.fold(([0.0f32; 2], 0.0f32), |(sum, count), i| {
@@ -814,7 +821,8 @@ pub fn compose_skin_regions(width: u32, height: u32, analysis: &FaceAnalysis) ->
     let scale = (REGION_MAP_SIDE / width.max(height) as f32).min(1.0);
     let w = ((width as f32 * scale).round() as usize).max(1);
     let h = ((height as f32 * scale).round() as usize).max(1);
-    let mut lines = vec![0.0f32; w * h];
+    let mut lines = vec![PLAIN_LINE_WEIGHT; w * h];
+    let mut counted = vec![false; w * h];
     let mut under_eye = vec![0.0f32; w * h];
 
     for face in &analysis.faces {
@@ -842,6 +850,11 @@ pub fn compose_skin_regions(width: u32, height: u32, analysis: &FaceAnalysis) ->
         let mouth = mean_point(&upright, MOUTH_CORNERS.iter().copied());
         let mouth_half = distance(upright[MOUTH_CORNERS[0]], upright[MOUTH_CORNERS[1]]) / 2.0;
         let nose = upright[NOSE_TIP];
+        // The shadow under the nose and around the nostrils is the shape of the nose, not a wrinkle, and a
+        // line healed out of it floats on the skin as a pale ribbon.
+        let base = upright[NOSE_BASE];
+        let nostril_half = distance(upright[NOSTRIL_CORNERS[0]], upright[NOSTRIL_CORNERS[1]]) / 2.0;
+        let nose_shadow = [base[0], base[1] + nostril_half * 0.15];
 
         let blob = |u: [f32; 2], centre: [f32; 2], rx: f32, ry: f32| {
             let (dx, dy) = ((u[0] - centre[0]) / rx, (u[1] - centre[1]) / ry);
@@ -878,8 +891,17 @@ pub fn compose_skin_regions(width: u32, height: u32, analysis: &FaceAnalysis) ->
                     eye_radius * 0.85,
                 ));
                 let folds = fold(u, 1.0).max(fold(u, -1.0));
+                let fold_share = (folds + under * 0.8 + forehead * 0.6).clamp(0.0, 1.0);
+                let weight = PLAIN_LINE_WEIGHT + (1.0 - PLAIN_LINE_WEIGHT) * fold_share;
+                let guard = blob(u, nose_shadow, nostril_half * 1.4, nostril_half * 0.5);
+                let weight = weight + (NOSE_SHADOW_LINE_WEIGHT - weight) * guard;
                 let i = y * w + x;
-                lines[i] = lines[i].max((folds + under * 0.8 + forehead * 0.6).clamp(0.0, 1.0));
+                lines[i] = if counted[i] {
+                    lines[i].max(weight)
+                } else {
+                    weight
+                };
+                counted[i] = true;
                 under_eye[i] = under_eye[i].max(under);
             }
         }

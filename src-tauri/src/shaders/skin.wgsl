@@ -210,14 +210,21 @@ fn sk_band(@builtin(global_invocation_id) id: vec3<u32>) {
     textureStore(out_f32, p, vec4<f32>(abs(l_here - l_blurred) * skin, 0.0, 0.0, skin));
 }
 
-// The brightness of one of the blurred copies of the picture at a point, over skin only.
-fn ridge_level(which: u32, pos: vec2<f32>) -> f32 {
+// One quantity of one of the blurred copies of the picture at a point, over skin only: 0 the brightness,
+// 2 the red axis.
+fn ridge_channel(which: u32, pos: vec2<f32>, ch: u32) -> f32 {
     let uv = (pos + 0.5) / vec2<f32>(params.grid.dst);
     let tap = tap_uv(uv, params.grid.dst);
     var c = tap_sample(t0, tap);
     if (which == 1u) { c = tap_sample(t1, tap); }
     if (which == 2u) { c = tap_sample(t2, tap); }
-    return c.x / max(c.w, 1e-4);
+    var v = c.x;
+    if (ch == 2u) { v = c.z; }
+    return v / max(c.w, 1e-4);
+}
+
+fn ridge_level(which: u32, pos: vec2<f32>) -> f32 {
+    return ridge_channel(which, pos, 0u);
 }
 
 // How the brightness bends at a point, read at a step of h pixels: xx, yy and xy.
@@ -236,6 +243,15 @@ fn bend(t: texture_2d<f32>, p: vec2<i32>, h: i32, ch: u32) -> vec3<f32> {
     let dr = level_at(t, ch, clamp(p + at + down, vec2<i32>(0, 0), hi));
     let h2 = f32(h * h);
     return vec3<f32>((l + r - 2.0 * c) / h2, (u + d - 2.0 * c) / h2, (dr - ur - dl + ul) / (4.0 * h2));
+}
+
+// How far inside the skin a point is, at the width of a blurred copy: 1 when the copy there is made of skin
+// and nothing else, falling to 0 at the edge of the skin map. The blurred copies are averages over skin only,
+// so next to a nostril, an eye, a lip or the outline of the face the average is stretched out of the skin that
+// is left and bends sharply where the skin ends. That bend is not a crease or a blemish, so nothing is read
+// from it.
+fn inside_skin(t: texture_2d<f32>, p: vec2<i32>) -> f32 {
+    return smooth_step(0.8, 0.98, textureLoad(t, p, 0).w);
 }
 
 // One of the three quantities a blurred copy carries - brightness, then the two colour axes - averaged over
@@ -279,7 +295,9 @@ fn ridge(t: texture_2d<f32>, p: vec2<i32>, h: i32, yardstick: f32) -> vec4<f32> 
     let single = 1.0 - smooth_step(0.35, 0.95, abs(weak) / strong);
     // a line is a line over a wide range of depths, not above one: a hard edge here is a visible edge on the skin
     let clear = smooth_step(0.5, 2.2, depth / (yardstick * 1.5));
-    return vec4<f32>(clear * single, across, depth);
+    // and not a feature: a nostril, the shadow under a nose or a lip is far deeper than any wrinkle
+    let wrinkle = 1.0 - smooth_step(0.2, 0.35, depth);
+    return vec4<f32>(clear * single * wrinkle * inside_skin(t, p), across, depth);
 }
 
 // t0, t1, t2: the split picture blurred to the three widths lines are looked for at. t3: the yardstick,
@@ -317,12 +335,22 @@ fn sk_lines(@builtin(global_invocation_id) id: vec3<u32>) {
     let pos = vec2<f32>(id.xy);
     let across = best.yz;
     let side = 2.2 * reach;
-    let target_level = 0.5 * (ridge_level(which, pos + across * side) + ridge_level(which, pos - across * side));
+    let side_a = ridge_level(which, pos + across * side);
+    let side_b = ridge_level(which, pos - across * side);
+    let target_level = 0.5 * (side_a + side_b);
+    // A line is a valley between two stretches of skin of the same brightness. If the two sides differ it is
+    // the foot of a step - the edge of a nostril, the shadow under a nose - and filling it would only smear
+    // the step. The same goes for colour: a valley between pink skin and stubble is the edge of the stubble.
+    let red_gap = abs(ridge_channel(which, pos + across * side, 2u) - ridge_channel(which, pos - across * side, 2u));
+    let red_spread = max(skin_middle().w, 2.0);
+    let balanced = (1.0 - smooth_step(0.025, 0.07, abs(side_a - side_b)))
+        * (1.0 - smooth_step(1.2 * red_spread, 3.0 * red_spread, red_gap));
 
-    // a line counts for most where a face folds anyway - beside the nose, under the eyes, across the
-    // forehead - and still counts for something everywhere else on the skin
-    let folds = 0.45 + 0.55 * clamp(region.x, 0.0, 1.0);
-    let line = skin * best.x * folds;
+    // how much a valley counts as a line here: most where a face folds anyway - beside the nose, under the
+    // eyes, across the forehead - something everywhere else on the skin, little under the nose, where the
+    // shadows are the shape of the face
+    let folds = clamp(region.x, 0.0, 1.0);
+    let line = skin * best.x * folds * balanced;
 
     // under the eye is darker than the cheek below it, inside the band where that happens
     let l_wide = textureLoad(t5, p, 0).x / max(textureLoad(t5, p, 0).w, 1e-4);
@@ -375,7 +403,8 @@ fn blob(t: texture_2d<f32>, p: vec2<i32>, h: i32, yardstick: f32, red_yardstick:
         let rounded = smooth_step(0.2, 0.55, c_strong / c_weak);
         red = smooth_step(0.6, 2.0, -c_strong * depth_scale / (red_yardstick * 1.5)) * rounded;
     }
-    return vec3<f32>(dark, red, light);
+    let inside = inside_skin(t, p);
+    return vec3<f32>(dark, red, light) * inside;
 }
 
 // t0, t1, t2: the split picture blurred to the three widths. t3: the yardstick, blurred.
@@ -424,24 +453,59 @@ fn sk_heal(@builtin(global_invocation_id) id: vec3<u32>) {
     textureStore(out_f32, p, vec4<f32>(mask, reach, 0.0, raw.w));
 }
 
+struct Ring {
+    colour: vec3<f32>,
+    weight: f32,
+    // how much the brightness differs from sample to sample around the ring
+    spread: f32,
+}
+
 // The colour around a point, a ring of samples out from it, leaving out the samples that are themselves
 // blemish or are not skin. t0 is the picture, t1 the maps (with the skin weight), t5 the blemish mask.
-// Returns the sum of the colours and the sum of their weights.
-fn clean_ring(pos: vec2<f32>, reach: f32) -> vec4<f32> {
-    var colour = vec3<f32>(0.0);
-    var weight = 0.0;
+// The spread says whether the ring is clean skin all the way round: a blemish sitting on a ridge, a
+// nostril, the edge of a lip has a bright side and a dark one, and there is nothing clean to heal it with.
+fn clean_ring(pos: vec2<f32>, reach: f32) -> Ring {
+    var rgbs: array<vec3<f32>, 8>;
+    var weights: array<f32, 8>;
+    var lumas: array<f32, 8>;
+    var total = 0.0;
+    var luma_sum = 0.0;
+    var luma_sq = 0.0;
     let dst = vec2<f32>(params.grid.dst);
     for (var i = 0u; i < 8u; i += 1u) {
         let angle = f32(i) * 0.78539816;
-        let q = pos + vec2<f32>(cos(angle), sin(angle)) * 3.0 * reach;
+        let q = pos + vec2<f32>(cos(angle), sin(angle)) * 2.2 * reach;
         let tap = tap_uv((q + 0.5) / dst, params.grid.dst);
         let on_skin = tap_sample(t1, tap).w;
         let clean = 1.0 - tap_sample(t5, tap).x;
         let w = on_skin * clean * clean;
-        colour += tap_sample(t0, tap).rgb * w;
+        let rgb = tap_sample(t0, tap).rgb;
+        let luma = plain_luma(rgb);
+        rgbs[i] = rgb;
+        weights[i] = w;
+        lumas[i] = luma;
+        total += w;
+        luma_sum += luma * w;
+        luma_sq += luma * luma * w;
+    }
+    let mean = luma_sum / max(total, 1e-4);
+    let spread = sqrt(max(luma_sq / max(total, 1e-4) - mean * mean, 0.0));
+
+    // Then the same again, with the samples that sit far from the rest counted for less: a hair across
+    // the ring, a freckle, the pale edge of the hairline. The middle of the ring is what the skin is doing.
+    var colour = vec3<f32>(0.0);
+    var weight = 0.0;
+    let scale = max(spread, 0.02);
+    for (var i = 0u; i < 8u; i += 1u) {
+        let off = (lumas[i] - mean) / scale;
+        let w = weights[i] * exp(-0.5 * off * off);
+        colour += rgbs[i] * w;
         weight += w;
     }
-    return vec4<f32>(colour, weight);
+    // the weight that goes back is the one the ring had to begin with, so a ring with little skin in it
+    // still counts as one
+    let kept = weight / max(total, 1e-4);
+    return Ring(colour / max(kept, 1e-4), total, spread);
 }
 // t0: the picture. t1: the maps. t2: the split picture blurred at the size of a blemish, which is the
 // skin with its grain taken off. t3: blurred wider, the lie of the face. t4: the lines and the
@@ -477,9 +541,10 @@ fn sk_apply(@builtin(global_invocation_id) id: vec3<u32>) {
         let found = textureLoad(t5, p, 0);
         if (found.x > 0.01) {
             let ring = clean_ring(vec2<f32>(id.xy), found.y);
-            if (ring.w > 1.0) {
-                let clean = to_ycc(ring.xyz / ring.w);
-                let k = clamp(found.x * params.spots, 0.0, 1.0);
+            if (ring.weight > 1.0) {
+                let clean = to_ycc(ring.colour / ring.weight);
+                let even = 1.0 - smooth_step(0.05, 0.12, ring.spread);
+                let k = clamp(found.x * params.spots, 0.0, 1.0) * even;
                 let before = level;
                 level = mix(level, (clean.x - 16.0) / 219.0, k);
                 // what was healed out is no longer grain either, or the grain put back on top would put a

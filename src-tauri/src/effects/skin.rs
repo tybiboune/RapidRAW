@@ -230,7 +230,7 @@ pub fn encode(enc: &mut ComputeEncoder, job: &Skin, src: &Slot, dst: &Slot) {
         }
         None => (
             (1, 1),
-            enc.cached_map("Skin Regions", 0, (1, 1), rg32, || vec![0.0, 0.0]),
+            enc.cached_map("Skin Regions", 0, (1, 1), rg32, || vec![0.45, 0.0]),
         ),
     };
 
@@ -366,7 +366,10 @@ pub fn encode(enc: &mut ComputeEncoder, job: &Skin, src: &Slot, dst: &Slot) {
                     &wide.view,
                 ],
                 Out::F32(&lines.view),
-                Bind::default(),
+                Bind {
+                    scratch: Some(&stats),
+                    ..Default::default()
+                },
             );
             // softened a little, so where a line starts and stops is not a hard edge on the skin
             extras = Some(enc.blur(lines, radius(DETAIL_WIDTHS[0]), 1, 0));
