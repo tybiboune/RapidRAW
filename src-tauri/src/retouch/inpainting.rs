@@ -436,6 +436,17 @@ pub async fn generate_manual_cleanup_patch(
 
     let crop_w = (max_x - min_x + 1) as u32;
     let crop_h = (max_y - min_y + 1) as u32;
+    log::info!(
+        "[patch-trace] cleanup patch {}: heal={} area={}x{} at ({}, {}) source offset {:?} skin={}",
+        patch_definition.id,
+        is_heal,
+        crop_w,
+        crop_h,
+        min_x,
+        min_y,
+        offset,
+        current_adjustments["skinEnabled"].as_bool().unwrap_or(false)
+    );
     let output_mask =
         image::imageops::crop_imm(&mask_bitmap, min_x as u32, min_y as u32, crop_w, crop_h)
             .to_image();

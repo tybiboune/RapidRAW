@@ -70,6 +70,36 @@ fn process_preview_job(
     hydrate_adjustments(&state, &mut adjustments_json);
     let adjustments_clone = adjustments_json;
 
+    if let Some(patches) = adjustments_clone
+        .get("aiPatches")
+        .and_then(|v| v.as_array())
+        .filter(|patches| !patches.is_empty())
+    {
+        let summary: Vec<String> = patches
+            .iter()
+            .map(|patch| {
+                let color_len = patch
+                    .get("patchData")
+                    .and_then(|data| data.get("color"))
+                    .and_then(|color| color.as_str())
+                    .map_or(0, str::len);
+                format!(
+                    "{}:visible={},loading={},color={}",
+                    patch.get("id").and_then(|v| v.as_str()).unwrap_or("?"),
+                    patch.get("visible").and_then(|v| v.as_bool()).unwrap_or(true),
+                    patch.get("isLoading").and_then(|v| v.as_bool()).unwrap_or(false),
+                    color_len
+                )
+            })
+            .collect();
+        log::info!(
+            "[patch-trace] render: skin={} patches=[{}] patch_hash={:x}",
+            adjustments_clone["skinEnabled"].as_bool().unwrap_or(false),
+            summary.join("; "),
+            content.patch_hash
+        );
+    }
+
     crate::ai::denoise::ensure_generated(app_handle, &loaded_image, &adjustments_clone);
     crate::ai::upscale::ensure_generated(app_handle, &loaded_image, &adjustments_clone);
 

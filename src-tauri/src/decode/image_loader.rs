@@ -657,6 +657,11 @@ fn composite_patches_cow<'a>(
         })
         .collect();
 
+    log::info!(
+        "[patch-trace] composite: {} of {} patches have data and are visible",
+        visible_patches.len(),
+        patches_arr.len()
+    );
     if visible_patches.is_empty() {
         return Ok(base_image);
     }

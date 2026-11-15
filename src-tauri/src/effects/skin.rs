@@ -644,6 +644,49 @@ mod tests {
         v
     }
 
+    // A blemish healed by the Heal brush before the skin pass (the patch is composited first, the
+    // skin effect runs on the result): the spot must stay gone, and the skin pass must not bring back or
+    // darken what was healed.
+    #[test]
+    #[ignore]
+    fn a_healed_blemish_stays_healed_under_the_skin_pass() {
+        let context = gpu();
+        let original = portrait();
+        // heal: the area around the blemish is overwritten with skin copied from 70 px to the right
+        let mut healed = original.clone();
+        for y in 0..N {
+            for x in 0..N {
+                let d = ((x as f32 - SPOT.0).powi(2) + (y as f32 - SPOT.1).powi(2)).sqrt();
+                if d <= 22.0 {
+                    healed.put_pixel(x, y, *original.get_pixel(x + 70, y));
+                }
+            }
+        }
+        let all = adj(json!({
+            "skinSpots": 100, "skinRedness": 100, "skinShine": 100,
+            "skinLines": 100, "skinUnderEye": 100,
+        }));
+        let on_original = render(&context, &original, all.clone());
+        let on_healed = render(&context, &healed, all);
+        let healed_px: Vec<[f32; 3]> = healed.pixels().map(|p| p.0).collect();
+        let original_px: Vec<[f32; 3]> = original.pixels().map(|p| p.0).collect();
+        let around = (SPOT.0, SPOT.1 + 60.0);
+        for (name, px) in [
+            ("original input", &original_px),
+            ("healed input", &healed_px),
+            ("skin on original", &on_original),
+            ("skin on healed", &on_healed),
+        ] {
+            let spot = mean(px, SPOT, 8.0);
+            let skin = mean(px, around, 8.0);
+            eprintln!(
+                "{name:18} spot luma {:.4} skin luma {:.4} contrast {:+.4}",
+                luma(spot),
+                luma(skin),
+                luma(spot) - luma(skin)
+            );
+        }
+    }
     #[test]
     fn skin_runs_on_the_gpu_and_corrects_each_fault() {
         let context = gpu();

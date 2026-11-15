@@ -64,6 +64,18 @@ pub fn prepare_preview_source(
         compute_patched(loaded_image, adjustments)
     })?;
 
+    if adjustments
+        .get("aiPatches")
+        .and_then(|v| v.as_array())
+        .is_some_and(|patches| !patches.is_empty())
+    {
+        log::info!(
+            "[patch-trace] preview source: patches applied={} patched_key={:x}",
+            !Arc::ptr_eq(&patched, &loaded_image.image),
+            patched_key
+        );
+    }
+
     let (full_w_px, full_h_px) = patched.dimensions();
     let base_scale = crate::ai::upscale::scale_between(&loaded_image.image, &patched) as f64;
     let orientation_steps = adjustments["orientationSteps"].as_u64().unwrap_or(0);
