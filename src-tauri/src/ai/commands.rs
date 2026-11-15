@@ -23,6 +23,7 @@ use crate::app::state::{AiTaskGuard, AppState, LoadedImage};
 use crate::effects::maps::EffectMapKind;
 use crate::masks::face::{FaceAnalysis, FacePart, analyze_faces, compose_face_mask};
 use crate::render::cache_utils::GEOMETRY_KEYS;
+use crate::render::geometry::{get_geometry_params_from_json, is_geometry_identity};
 use crate::render::preview::get_cached_full_warped_image;
 
 const NO_FOREGROUND_FOUND: &str = "No foreground found";
@@ -138,6 +139,21 @@ pub fn ai_cache_key(path: &str, adjustments: &serde_json::Value) -> String {
     }
     hasher.update(&geo_hasher.finish().to_le_bytes());
     hasher.finalize().to_hex().to_string()
+}
+
+/// The key the skin tools keep their face analysis under. The mask panel finds faces in the picture
+/// after geometry (crop, rotation, perspective), the skin tools in the picture before it, so the two
+/// can only share one analysis, and with it the face detection already done, while geometry leaves the
+/// picture as it is. Otherwise the skin tools get a key of their own, so neither is handed landmarks
+/// that sit in the other's space.
+fn skin_cache_key(path: &str, adjustments: &serde_json::Value) -> String {
+    let key = ai_cache_key(path, adjustments);
+    let geometry = get_geometry_params_from_json(path, adjustments);
+    if is_geometry_identity(&geometry) {
+        key
+    } else {
+        format!("{key}-source")
+    }
 }
 
 fn loaded_source_id(state: &tauri::State<'_, AppState>) -> Option<String> {
@@ -1042,7 +1058,7 @@ pub async fn generate_full_image_face_map(
     let analysis = cached_face_analysis(
         &state.ai_state,
         &models,
-        &ai_cache_key(&path, &js_adjustments),
+        &skin_cache_key(&path, &js_adjustments),
         &source_image,
         MaskTransform::from_adjustments(&js_adjustments),
     )?;

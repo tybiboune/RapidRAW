@@ -791,9 +791,7 @@ function EffectsPanel({
                         max={100}
                         min={0}
                         defaultValue={0}
-                        onChange={(e: SliderChangeEvent) =>
-                          handleAdjustmentChange(Effect.SkinSpots, e.target.value)
-                        }
+                        onChange={(e: SliderChangeEvent) => handleAdjustmentChange(Effect.SkinSpots, e.target.value)}
                         step={1}
                         value={adjustments.skinSpots ?? 0}
                         onDragStateChange={onDragStateChange}
@@ -805,9 +803,7 @@ function EffectsPanel({
                         max={100}
                         min={0}
                         defaultValue={0}
-                        onChange={(e: SliderChangeEvent) =>
-                          handleAdjustmentChange(Effect.SkinRedness, e.target.value)
-                        }
+                        onChange={(e: SliderChangeEvent) => handleAdjustmentChange(Effect.SkinRedness, e.target.value)}
                         step={1}
                         value={adjustments.skinRedness ?? 0}
                         onDragStateChange={onDragStateChange}
@@ -843,9 +839,7 @@ function EffectsPanel({
                         max={100}
                         min={0}
                         defaultValue={0}
-                        onChange={(e: SliderChangeEvent) =>
-                          handleAdjustmentChange(Effect.SkinShine, e.target.value)
-                        }
+                        onChange={(e: SliderChangeEvent) => handleAdjustmentChange(Effect.SkinShine, e.target.value)}
                         step={1}
                         value={adjustments.skinShine ?? 0}
                         onDragStateChange={onDragStateChange}
@@ -857,9 +851,7 @@ function EffectsPanel({
                         max={100}
                         min={0}
                         defaultValue={0}
-                        onChange={(e: SliderChangeEvent) =>
-                          handleAdjustmentChange(Effect.SkinLines, e.target.value)
-                        }
+                        onChange={(e: SliderChangeEvent) => handleAdjustmentChange(Effect.SkinLines, e.target.value)}
                         step={1}
                         value={adjustments.skinLines ?? 0}
                         onDragStateChange={onDragStateChange}
@@ -871,9 +863,7 @@ function EffectsPanel({
                         max={100}
                         min={0}
                         defaultValue={0}
-                        onChange={(e: SliderChangeEvent) =>
-                          handleAdjustmentChange(Effect.SkinUnderEye, e.target.value)
-                        }
+                        onChange={(e: SliderChangeEvent) => handleAdjustmentChange(Effect.SkinUnderEye, e.target.value)}
                         step={1}
                         value={adjustments.skinUnderEye ?? 0}
                         onDragStateChange={onDragStateChange}
