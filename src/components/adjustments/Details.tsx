@@ -16,6 +16,7 @@ import {
 } from '../../utils/adjustments';
 import { AppSettings } from '../../types/settings';
 import AdjustmentSubSection from './AdjustmentSubSection';
+import DxoDenoise from './DxoDenoise';
 import { canvasToolState, useEditorStore } from '../../store/useEditorStore';
 import { selectAiModelDownloadStatus, useProcessStore } from '../../store/useProcessStore';
 
@@ -243,6 +244,7 @@ function DetailsPanel({
                   </>
                 )}
               </SpatialEffect>
+              <DxoDenoise />
             </div>
           )}
         </AdjustmentSubSection>

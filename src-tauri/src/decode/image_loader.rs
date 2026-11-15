@@ -156,6 +156,40 @@ pub fn load_base_image_from_bytes(
         }
     }
 
+    // A photo that PhotoLab has denoised is developed from its denoised DNG, so the denoising sits under
+    // every edit. See integrations::dxo.
+    if is_raw_file(path_for_ext_check)
+        && let Some(denoised) =
+            crate::integrations::dxo::existing_denoised(&parse_virtual_path(path_for_ext_check).0)
+        && let Ok(dng_bytes) = fs::read(&denoised)
+    {
+        let dng_linear_mode = linear_mode.clone();
+        let dng_cancel_token = cancel_token.clone();
+        match panic::catch_unwind(move || {
+            crate::decode::raw_processing::develop_raw_image(
+                &dng_bytes,
+                use_fast_raw_dev,
+                highlight_compression,
+                dng_linear_mode,
+                color_nr_amount,
+                sharpening_amount,
+                dng_cancel_token,
+            )
+        }) {
+            Ok(Ok(image)) => {
+                log::info!(
+                    "Developing '{}' from its DxO denoised DNG",
+                    path_for_ext_check
+                );
+                return Ok(image);
+            }
+            _ => log::warn!(
+                "The DxO denoised DNG of '{}' could not be developed, using the raw",
+                path_for_ext_check
+            ),
+        }
+    }
+
     if is_raw_file(path_for_ext_check) {
         let he_linear_mode = linear_mode.clone();
         let he_cancel_token = cancel_token.clone();
