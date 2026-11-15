@@ -882,6 +882,82 @@ function EffectsPanel({
                         value={adjustments.skinKeepTexture ?? 0}
                         onDragStateChange={onDragStateChange}
                       />
+
+                      <div className="pt-2">
+                        <Text variant={TextVariants.small} className="text-text-secondary">
+                          {t('adjustments.effects.skinDetection')}
+                        </Text>
+                      </div>
+
+                      <Slider
+                        resetKey="skinSensitivity"
+                        label={t('adjustments.effects.skinDetectionAll')}
+                        max={100}
+                        min={0}
+                        defaultValue={50}
+                        onChange={(e: SliderChangeEvent) =>
+                          handleAdjustmentChange(Effect.SkinSensitivity, e.target.value)
+                        }
+                        step={1}
+                        value={adjustments.skinSensitivity ?? 50}
+                        onDragStateChange={onDragStateChange}
+                      />
+
+                      <Slider
+                        resetKey="skinSpotsSensitivity"
+                        label={t('adjustments.effects.skinDetectionSpots')}
+                        max={100}
+                        min={0}
+                        defaultValue={50}
+                        onChange={(e: SliderChangeEvent) =>
+                          handleAdjustmentChange(Effect.SkinSpotsSensitivity, e.target.value)
+                        }
+                        step={1}
+                        value={adjustments.skinSpotsSensitivity ?? 50}
+                        onDragStateChange={onDragStateChange}
+                      />
+
+                      <Slider
+                        resetKey="skinLinesSensitivity"
+                        label={t('adjustments.effects.skinDetectionLines')}
+                        max={100}
+                        min={0}
+                        defaultValue={50}
+                        onChange={(e: SliderChangeEvent) =>
+                          handleAdjustmentChange(Effect.SkinLinesSensitivity, e.target.value)
+                        }
+                        step={1}
+                        value={adjustments.skinLinesSensitivity ?? 50}
+                        onDragStateChange={onDragStateChange}
+                      />
+
+                      <Slider
+                        resetKey="skinRednessSensitivity"
+                        label={t('adjustments.effects.skinDetectionRedness')}
+                        max={100}
+                        min={0}
+                        defaultValue={50}
+                        onChange={(e: SliderChangeEvent) =>
+                          handleAdjustmentChange(Effect.SkinRednessSensitivity, e.target.value)
+                        }
+                        step={1}
+                        value={adjustments.skinRednessSensitivity ?? 50}
+                        onDragStateChange={onDragStateChange}
+                      />
+
+                      <Slider
+                        resetKey="skinUnderEyeSensitivity"
+                        label={t('adjustments.effects.skinDetectionUnderEye')}
+                        max={100}
+                        min={0}
+                        defaultValue={50}
+                        onChange={(e: SliderChangeEvent) =>
+                          handleAdjustmentChange(Effect.SkinUnderEyeSensitivity, e.target.value)
+                        }
+                        step={1}
+                        value={adjustments.skinUnderEyeSensitivity ?? 50}
+                        onDragStateChange={onDragStateChange}
+                      />
                     </>
                   )}
                 </SpatialEffect>

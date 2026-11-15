@@ -245,6 +245,12 @@
         "smooth": "부드럽게"
       },
       "skin": "Skin",
+      "skinDetection": "Detection (higher finds fainter faults)",
+      "skinDetectionAll": "Overall",
+      "skinDetectionLines": "Lines",
+      "skinDetectionRedness": "Redness",
+      "skinDetectionSpots": "Spots",
+      "skinDetectionUnderEye": "Under eyes",
       "skinFindingFace": "Finding the face",
       "skinKeepTexture": "Keep texture",
       "skinLines": "Lines",

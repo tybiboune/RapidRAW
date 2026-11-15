@@ -32,6 +32,12 @@ struct Params {
     step_a: u32,
     step_b: u32,
     step_c: u32,
+    // how far a fault has to stand out before it is one, for each kind: 1 is the usual, below it picks up
+    // fainter faults, above it only the plain ones
+    thr_spots: f32,
+    thr_lines: f32,
+    thr_redness: f32,
+    thr_under_eye: f32,
 }
 
 @group(0) @binding(7) var<uniform> params: Params;
@@ -183,7 +189,7 @@ fn sk_maps(@builtin(global_invocation_id) id: vec3<u32>) {
     // be a flush or a patch of irritation rather than one noisy pixel. A patch a spread and a half
     // above the middle is as red as this face gets, so that is where the map reads full.
     let over = (cr_fine - middle.y) / max(middle.w, 2.0);
-    let redness = skin * smooth_step(0.3, 1.5, over);
+    let redness = skin * smooth_step(0.3 * params.thr_redness, 1.5 * params.thr_redness, over);
 
     // Shine is brightness above what the face is doing around it, never below.
     let shine = skin * smooth_step(0.05, 0.22, l_here - l_wide);
@@ -315,7 +321,7 @@ fn sk_lines(@builtin(global_invocation_id) id: vec3<u32>) {
         return;
     }
     let spread = textureLoad(t3, p, 0);
-    let yardstick = max(spread.x / max(spread.w, 1e-4), 0.004);
+    let yardstick = max(spread.x / max(spread.w, 1e-4), 0.004) * params.thr_lines;
     let uv = (vec2<f32>(id.xy) + 0.5) / vec2<f32>(params.grid.dst);
     let region = tap_sample(t4, tap_uv(uv, params.region_size));
 
@@ -355,7 +361,8 @@ fn sk_lines(@builtin(global_invocation_id) id: vec3<u32>) {
     // under the eye is darker than the cheek below it, inside the band where that happens
     let l_wide = textureLoad(t5, p, 0).x / max(textureLoad(t5, p, 0).w, 1e-4);
     let deficit = (l_wide - ridge_level(0u, pos)) / max(l_wide, 0.02);
-    let under_eye = clamp(region.y, 0.0, 1.0) * smooth_step(0.015, 0.16, deficit);
+    let under_eye = clamp(region.y, 0.0, 1.0)
+        * smooth_step(0.015 * params.thr_under_eye, 0.16 * params.thr_under_eye, deficit);
 
     textureStore(out_f32, p, vec4<f32>(line, under_eye, target_level, skin));
 }
@@ -420,8 +427,8 @@ fn sk_blob(@builtin(global_invocation_id) id: vec3<u32>) {
         textureStore(out_f32, p, vec4<f32>(0.0, 0.0, 0.0, skin));
         return;
     }
-    let yardstick = yardstick_at(t3, p);
-    let red_yardstick = max(skin_middle().w, 2.0);
+    let yardstick = yardstick_at(t3, p) * params.thr_spots;
+    let red_yardstick = max(skin_middle().w, 2.0) * params.thr_spots;
     let a = blob(t0, p, i32(params.step_a), yardstick, red_yardstick);
     let b = blob(t1, p, i32(params.step_b), yardstick, red_yardstick);
     let c = blob(t2, p, i32(params.step_c), yardstick, red_yardstick);

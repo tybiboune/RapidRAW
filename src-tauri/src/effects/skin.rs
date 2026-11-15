@@ -38,6 +38,11 @@ struct Params {
     step_a: u32,
     step_b: u32,
     step_c: u32,
+    // how far a fault has to stand out before it is one, for each kind, from the detection sliders
+    thr_spots: f32,
+    thr_lines: f32,
+    thr_redness: f32,
+    thr_under_eye: f32,
 }
 
 // the widths lines and blemishes are looked for at, as a share of the face's width: a fine crease or a
@@ -65,6 +70,8 @@ pub struct Skin {
     under_eye: f32,
     keep_texture: f32,
     redness_way: u32,
+    // the threshold of each kind of fault, as a factor of the usual one: spots, lines, redness, under eyes
+    thresholds: [f32; 4],
 }
 
 // The width of the face as a fraction of the picture's width, from the area of the largest blob on the
@@ -142,6 +149,13 @@ pub fn prepare(
         .as_str()
         .filter(|map| !map.is_empty())?;
     let get = |key: &str| (adjustments[key].as_f64().unwrap_or(0.0) as f32 / 100.0).clamp(0.0, 1.0);
+    // A detection slider at 50 is the usual threshold; each 25 either way doubles or halves it, so the whole
+    // range runs from a quarter to four times as demanding. The overall slider moves all four together.
+    let threshold = |key: &str| {
+        let level = |key: &str| adjustments[key].as_f64().unwrap_or(50.0).clamp(0.0, 100.0) as f32;
+        2.0f32.powf((50.0 - level(key)) / 25.0)
+            * 2.0f32.powf((50.0 - level("skinSensitivity")) / 25.0)
+    };
     let spots = get("skinSpots");
     let redness = get("skinRedness");
     let shine = get("skinShine");
@@ -189,6 +203,12 @@ pub fn prepare(
         under_eye,
         keep_texture: get("skinKeepTexture"),
         redness_way: adjustments["skinRednessWay"].as_u64().unwrap_or(0).min(3) as u32,
+        thresholds: [
+            threshold("skinSpotsSensitivity"),
+            threshold("skinLinesSensitivity"),
+            threshold("skinRednessSensitivity"),
+            threshold("skinUnderEyeSensitivity"),
+        ],
     })
 }
 
@@ -255,6 +275,10 @@ pub fn encode(enc: &mut ComputeEncoder, job: &Skin, src: &Slot, dst: &Slot) {
         step_a: step(DETAIL_WIDTHS[0]),
         step_b: step(DETAIL_WIDTHS[1]),
         step_c: step(DETAIL_WIDTHS[2]),
+        thr_spots: job.thresholds[0],
+        thr_lines: job.thresholds[1],
+        thr_redness: job.thresholds[2],
+        thr_under_eye: job.thresholds[3],
     };
 
     // what this face's own skin colour comes to, left in scratch for the passes that read against it
@@ -982,6 +1006,56 @@ mod tests {
         }
     }
 
+    #[test]
+    fn the_detection_sliders_decide_how_faint_a_fault_still_counts() {
+        let context = gpu();
+        // a crease so faint it is barely there: 3.5% darker, three pixels thick
+        let mut img = portrait();
+        for (x, y, px) in img.enumerate_pixels_mut() {
+            if (60..330).contains(&x) && (350..353).contains(&y) {
+                px.0 = px.0.map(|v| v * 0.965);
+            }
+        }
+        let input: Vec<[f32; 3]> = img.pixels().map(|p| p.0).collect();
+        let crease = (240.0, 351.0);
+        let lift = |extra: serde_json::Value| {
+            let out = render(&context, &img, adj(extra));
+            luma(mean(&out, crease, 1.5)) - luma(mean(&input, crease, 1.5))
+        };
+
+        let demanding = lift(json!({ "skinLines": 100, "skinLinesSensitivity": 0 }));
+        let usual = lift(json!({ "skinLines": 100 }));
+        let sensitive = lift(json!({ "skinLines": 100, "skinLinesSensitivity": 100 }));
+        let overall = lift(json!({ "skinLines": 100, "skinSensitivity": 100 }));
+        eprintln!(
+            "lift: demanding {demanding}, usual {usual}, sensitive {sensitive}, overall {overall}"
+        );
+        // a slider at 50 is the same as not having one
+        let explicit = lift(json!({ "skinLines": 100, "skinLinesSensitivity": 50 }));
+        assert!(
+            (usual - explicit).abs() < 1e-6,
+            "50 is not the usual threshold"
+        );
+        assert!(sensitive > demanding + 0.001, "sensitivity changes nothing");
+        assert!(sensitive >= usual && usual >= demanding, "not in order");
+        // the overall slider moves the lines threshold too
+        assert!(
+            overall > demanding + 0.002,
+            "overall slider changes nothing"
+        );
+
+        // and redness: a face with a flush shows more of it corrected when the detection is sensitive
+        let img = portrait();
+        let input: Vec<[f32; 3]> = img.pixels().map(|p| p.0).collect();
+        let ratio = |p: [f32; 3]| p[0] / (p[0] + p[1] + p[2]);
+        let corrected = |extra: serde_json::Value| {
+            let out = render(&context, &img, adj(extra));
+            ratio(mean(&input, FLUSH, 10.0)) - ratio(mean(&out, FLUSH, 10.0))
+        };
+        let strict = corrected(json!({ "skinRedness": 100, "skinRednessSensitivity": 0 }));
+        let keen = corrected(json!({ "skinRedness": 100, "skinRednessSensitivity": 100 }));
+        assert!(keen >= strict, "redness detection not in order");
+    }
     #[test]
     fn the_face_fraction_follows_the_largest_blob() {
         let mut map = image::GrayImage::new(400, 400);

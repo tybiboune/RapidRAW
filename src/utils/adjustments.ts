@@ -134,6 +134,11 @@ export enum Effect {
   SkinLinesMap = 'skinLinesMap',
   SkinUnderEye = 'skinUnderEye',
   SkinUnderEyeMap = 'skinUnderEyeMap',
+  SkinSensitivity = 'skinSensitivity',
+  SkinSpotsSensitivity = 'skinSpotsSensitivity',
+  SkinLinesSensitivity = 'skinLinesSensitivity',
+  SkinRednessSensitivity = 'skinRednessSensitivity',
+  SkinUnderEyeSensitivity = 'skinUnderEyeSensitivity',
   LensBlurEnabled = 'lensBlurEnabled',
   LensBlurAmount = 'lensBlurAmount',
   lensBlurDiffusion = 'lensBlurDiffusion',
@@ -348,6 +353,11 @@ export interface Adjustments {
   skinLinesMap: string | null;
   skinUnderEye: number;
   skinUnderEyeMap: string | null;
+  skinSensitivity: number;
+  skinSpotsSensitivity: number;
+  skinLinesSensitivity: number;
+  skinRednessSensitivity: number;
+  skinUnderEyeSensitivity: number;
   lensBlurAmount: number;
   lensBlurDiffusion: number;
   lensBlurShape: 'circle' | 'hexagon' | 'octagon' | 'ring';
@@ -842,6 +852,11 @@ export const normalizeLoadedAdjustments = (loadedAdjustments: Adjustments): any 
     skinLinesMap: loadedAdjustments.skinLinesMap ?? INITIAL_ADJUSTMENTS.skinLinesMap,
     skinUnderEye: loadedAdjustments.skinUnderEye ?? INITIAL_ADJUSTMENTS.skinUnderEye,
     skinUnderEyeMap: loadedAdjustments.skinUnderEyeMap ?? INITIAL_ADJUSTMENTS.skinUnderEyeMap,
+    skinSensitivity: loadedAdjustments.skinSensitivity ?? INITIAL_ADJUSTMENTS.skinSensitivity,
+    skinSpotsSensitivity: loadedAdjustments.skinSpotsSensitivity ?? INITIAL_ADJUSTMENTS.skinSpotsSensitivity,
+    skinLinesSensitivity: loadedAdjustments.skinLinesSensitivity ?? INITIAL_ADJUSTMENTS.skinLinesSensitivity,
+    skinRednessSensitivity: loadedAdjustments.skinRednessSensitivity ?? INITIAL_ADJUSTMENTS.skinRednessSensitivity,
+    skinUnderEyeSensitivity: loadedAdjustments.skinUnderEyeSensitivity ?? INITIAL_ADJUSTMENTS.skinUnderEyeSensitivity,
     lensBlurAmount: loadedAdjustments.lensBlurAmount ?? INITIAL_ADJUSTMENTS.lensBlurAmount,
     lensBlurDiffusion: loadedAdjustments.lensBlurDiffusion ?? INITIAL_ADJUSTMENTS.lensBlurDiffusion,
     lensBlurShape: loadedAdjustments.lensBlurShape ?? INITIAL_ADJUSTMENTS.lensBlurShape,
@@ -1050,6 +1065,11 @@ export const ADJUSTMENT_GROUPS: Record<string, AdjustmentGroup[]> = {
         Effect.SkinLines,
         Effect.SkinUnderEye,
         Effect.SkinKeepTexture,
+        Effect.SkinSensitivity,
+        Effect.SkinSpotsSensitivity,
+        Effect.SkinLinesSensitivity,
+        Effect.SkinRednessSensitivity,
+        Effect.SkinUnderEyeSensitivity,
       ],
     },
     {
@@ -1256,6 +1276,11 @@ export const ADJUSTMENT_SECTIONS: Sections = {
     Effect.SkinLinesMap,
     Effect.SkinUnderEye,
     Effect.SkinUnderEyeMap,
+    Effect.SkinSensitivity,
+    Effect.SkinSpotsSensitivity,
+    Effect.SkinLinesSensitivity,
+    Effect.SkinRednessSensitivity,
+    Effect.SkinUnderEyeSensitivity,
     Effect.LensBlurEnabled,
     Effect.LensBlurAmount,
     Effect.lensBlurDiffusion,
