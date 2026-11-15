@@ -348,11 +348,14 @@ fn sk_apply(@builtin(global_invocation_id) id: vec3<u32>) {
     // the pores, the grain, the stubble: everything finer than a blemish, kept aside to go back on top
     var grain = l0 - l_fine;
     var level = l0;
+    // how much any of the corrections below took hold at this pixel, which is where there is grain to give back
+    var touched = 0.0;
 
     // a blemish is a blob of brightness at its own size: take that blob away and the skin around it
     // closes over, while anything finer than the blob stays where it was
     if (params.spots > 0.0) {
         level -= (l_fine - l_wide) * maps.x * params.spots;
+        touched = max(touched, maps.x * params.spots);
     }
     // A line is a valley: lift it part of the way up to the skin on either side of it. How far was worked
     // out against the brightness the picture came in with, so the spots just taken out are not counted
@@ -365,20 +368,24 @@ fn sk_apply(@builtin(global_invocation_id) id: vec3<u32>) {
         // what was lifted out of the valley is no longer grain either, or putting the grain back on top
         // would put the line back with it
         grain += lift;
+        touched = max(touched, extra.x * params.lines);
     }
     // shine is brightness above what the face is doing around it, moved back towards it, never past it
     if (params.shine > 0.0) {
         let over = level - l_wide;
         if (over > 0.0) { level -= over * maps.z * params.shine * 0.85; }
+        touched = max(touched, maps.z * params.shine);
     }
     // the shadow under an eye is brightness below what the cheek is doing, brought back up towards it
     if (params.under_eye > 0.0) {
         let under = l_wide - level;
         if (under > 0.0) { level += under * extra.y * params.under_eye * 0.8; }
+        touched = max(touched, extra.y * params.under_eye);
     }
-    // and the skin's own grain goes back on top of whatever was done to it
+    // and the skin's own grain goes back on top of whatever was done to it - only where something was, or
+    // the grain would be added to skin nothing had touched and the picture would just get noisier
     if (params.keep_texture > 0.0) {
-        level += grain * params.keep_texture * skin;
+        level += grain * params.keep_texture * skin * touched;
     }
 
     // Redness comes out along the colour axes alone, with the brightness left exactly as it is. Where
