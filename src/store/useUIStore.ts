@@ -360,7 +360,7 @@ export interface UIState {
   setPanel: (panel: Panel | null) => void;
   customEscapeHandler: (() => void) | null;
   setCustomEscapeHandler: (handler: (() => void) | null) => void;
-  imageSelectHandler: ((path: string, openInEditor?: boolean) => void) | null;
+  imageSelectHandler: ((path: string, openInEditor?: boolean, force?: boolean) => void) | null;
   setImageSelectHandler: (handler: ((path: string, openInEditor?: boolean) => void) | null) => void;
   searchFocusRequest: number;
   requestSearchFocus: () => void;

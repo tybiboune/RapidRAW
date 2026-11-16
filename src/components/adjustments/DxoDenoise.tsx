@@ -44,7 +44,7 @@ export default function DxoDenoise() {
 
   // the photo is developed from a different file now, so it is opened again
   const reopen = () => {
-    if (path) useUIStore.getState().imageSelectHandler?.(path, true);
+    if (path) useUIStore.getState().imageSelectHandler?.(path, true, true);
   };
 
   const run = async () => {
