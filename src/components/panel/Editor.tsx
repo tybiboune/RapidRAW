@@ -197,7 +197,7 @@ export default function Editor({ onBackToLibrary, onContextMenu, onImageSelect, 
   const compareView = useEditorStore((s) => s.compareView);
   const splitPosition = useEditorStore((s) => s.splitPosition);
   const focusPeaking = useUIStore((s) => s.focusPeaking);
-  const focusPeakingSensitivity = useUIStore((s) => s.focusPeakingSensitivity);
+  const focusPeakingSensitivity = appSettings?.focusPeakingSensitivity ?? 0.5;
   const originalPreview = useEditorStore((s) => s.originalPreview);
   const isSliderDragging = useEditorStore((s) => s.isSliderDragging);
   const targetZoom = useEditorStore((s) => s.zoom);

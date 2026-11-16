@@ -666,6 +666,8 @@ pub struct AppSettings {
     #[serde(default)]
     pub editor_neutral_grey_bg: Option<bool>,
     #[serde(default)]
+    pub focus_peaking_sensitivity: Option<f32>,
+    #[serde(default)]
     pub canvas_input_mode: Option<String>,
     #[serde(default)]
     pub compare_mode: Option<String>,
@@ -889,6 +891,7 @@ impl Default for AppSettings {
             #[cfg(not(any(target_os = "linux", target_os = "android")))]
             use_wgpu_renderer: Some(true),
             editor_neutral_grey_bg: Some(false),
+            focus_peaking_sensitivity: None,
             canvas_input_mode: Some("mouse".to_string()),
             compare_mode: None,
             white_balance_mode: None,

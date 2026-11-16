@@ -298,7 +298,6 @@ export interface UIState {
   isInstantTransition: boolean;
   // focus peaking: an overlay on what is sharp, not an edit - it never reaches the adjustments
   focusPeaking: boolean;
-  focusPeakingSensitivity: number;
   isLayoutReady: boolean;
   uiVisibility: UiVisibility;
   isLibraryExportPanelVisible: boolean;
@@ -377,7 +376,6 @@ export const useUIStore = create<UIState>((set, get) => ({
   isViewerOpen: false,
   isInstantTransition: false,
   focusPeaking: false,
-  focusPeakingSensitivity: 0.5,
   isLayoutReady: false,
   uiVisibility: { filmstrip: true, leftPanel: true, rightPanel: true, quickFilter: false },
   isLibraryExportPanelVisible: false,
