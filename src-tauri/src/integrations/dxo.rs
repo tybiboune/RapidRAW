@@ -88,6 +88,22 @@ pub fn find_photolab() -> Option<PathBuf> {
     found.pop()
 }
 
+/// Whether PhotoLab is open already.
+#[cfg(target_os = "windows")]
+fn photolab_running() -> bool {
+    let mut sys = sysinfo::System::new();
+    sys.refresh_processes_specifics(
+        sysinfo::ProcessesToUpdate::All,
+        true,
+        sysinfo::ProcessRefreshKind::nothing(),
+    );
+    sys.processes().values().any(|p| {
+        p.name()
+            .to_string_lossy()
+            .eq_ignore_ascii_case("DxO.PhotoLab.exe")
+    })
+}
+
 #[cfg(not(target_os = "windows"))]
 pub fn find_photolab() -> Option<PathBuf> {
     None
@@ -126,6 +142,9 @@ pub async fn run_dxo_denoise(path: String) -> Result<String, String> {
             find_photolab().ok_or_else(|| "DxO PhotoLab is not installed".to_string())?;
         let output = denoised_path(&source);
 
+        // a PhotoLab that starts up now may show its DxO Hub window, which the driver then closes
+        let fresh_start = !photolab_running();
+
         // PhotoLab opens the photo given to it, starting up first if it is not running
         std::process::Command::new(&photolab)
             .arg(&source)
@@ -139,7 +158,8 @@ pub async fn run_dxo_denoise(path: String) -> Result<String, String> {
         std::fs::write(&script, text).map_err(|e| format!("Could not write the driver: {e}"))?;
 
         let started = std::time::Instant::now();
-        let result = std::process::Command::new("powershell.exe")
+        let mut driver = std::process::Command::new("powershell.exe");
+        driver
             .args([
                 "-NoProfile",
                 "-NonInteractive",
@@ -153,7 +173,11 @@ pub async fn run_dxo_denoise(path: String) -> Result<String, String> {
             .arg("-Method")
             .arg(method_for(&source))
             .arg("-Output")
-            .arg(&output)
+            .arg(&output);
+        if fresh_start {
+            driver.arg("-FreshStart");
+        }
+        let result = driver
             .output()
             .map_err(|e| format!("Could not run PowerShell: {e}"))?;
         let _ = std::fs::remove_file(&script);
@@ -164,15 +188,24 @@ pub async fn run_dxo_denoise(path: String) -> Result<String, String> {
             .rev()
             .find(|l| !l.trim().is_empty())
             .unwrap_or("");
-        if let Some(reason) = last.strip_prefix("error ") {
-            return Err(reason.to_string());
-        }
-        if !last.starts_with("ok ") || existing_denoised(&source).is_none() {
-            return Err(format!(
+        let failure = if let Some(reason) = last.strip_prefix("error ") {
+            Some(reason.to_string())
+        } else if !last.starts_with("ok ") || existing_denoised(&source).is_none() {
+            Some(format!(
                 "PhotoLab gave no result ({}): {}",
                 result.status,
                 String::from_utf8_lossy(&result.stderr).trim()
-            ));
+            ))
+        } else {
+            None
+        };
+        if let Some(reason) = failure {
+            log::warn!(
+                "DxO denoise of '{}' failed after {:.0}s: {reason}",
+                source.display(),
+                started.elapsed().as_secs_f32()
+            );
+            return Err(reason);
         }
         log::info!(
             "Denoised '{}' with {} in {:.0}s",
