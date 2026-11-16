@@ -102,11 +102,6 @@ fn peak_box(corner: vec2<f32>) -> f32 {
     return peak_luma(textureSampleLevel(tex, samp, uv, 0.0).rgb);
 }
 
-// Sharpness is read as the second difference of the brightness across each axis, not the first. A
-// gradient - a soft shoulder of light on a cheek, the sky shading off - has a large first difference
-// everywhere and is not sharp at all; only detail that turns, rather than merely leans, raises the
-// second. That is what separates an edge in focus from a bright slope out of it.
-//
 // The 4x4 texels around a texel corner: four 2x2 reads.
 fn peak_box4(corner: vec2<f32>) -> f32 {
     return 0.25 * (peak_box(corner + vec2<f32>(-1.0, -1.0)) + peak_box(corner + vec2<f32>(1.0, -1.0))
@@ -122,6 +117,13 @@ fn peak_turn(here: f32, right: f32, left: f32, below: f32, above: f32) -> f32 {
     return min(turn, lean);
 }
 
+// How much visible detail the picture on screen has at a point.
+//
+// Detail is read as the second difference of the brightness across each axis, not the first. A
+// gradient - a soft shoulder of light on a cheek, the sky shading off - has a large first difference
+// everywhere and is not sharp at all; only detail that turns, rather than merely leans, raises the
+// second. That is what separates an edge in focus from a bright slope out of it.
+//
 // Noise turns too, from one texel to the next, so read on single texels it looks as sharp as an edge
 // (at high ISO, sharper: a smooth sky lit up all over). Three things keep it out:
 // - the differences are taken on 2x2 averages two texels apart, which halves the noise and keeps an
@@ -134,7 +136,7 @@ fn peak_turn(here: f32, right: f32, left: f32, below: f32, above: f32) -> f32 {
 // On synthetic pictures with noise of 0.02 (in display brightness, 0 to 1), single texels read the
 // noise at up to 0.37, far above an edge in focus of 0.1 contrast (0.03); this reads the noise at up
 // to 0.027 and that edge at 0.045.
-fn peak_strength(uv: vec2<f32>) -> f32 {
+fn peak_detail(uv: vec2<f32>) -> f32 {
     let corner = floor(uv * transform.image_size + vec2<f32>(0.5));
     let fine = peak_turn(
         peak_box(corner),
@@ -151,12 +153,31 @@ fn peak_strength(uv: vec2<f32>) -> f32 {
         peak_box4(corner - vec2<f32>(0.0, 4.0))
     );
     // a coarser reading of the same edge is about half as strong, so it backs the finer one at twice
-    let detail = min(fine, 2.0 * coarse);
-    // how little detail counts as sharp: the sensitivity runs from taking only the plainest edges
-    // (0.12) to taking almost anything (0.008), evenly in ratio, so that each step of the slider does
-    // as much as the last
+    return min(fine, 2.0 * coarse);
+}
+
+// Peaking read from the screen alone, until the photo's focus map is there: how little detail counts as
+// sharp runs with the sensitivity from only the plainest edges (0.12) to almost anything (0.008), evenly
+// in ratio, so that each step of the slider does as much as the last.
+fn screen_peak(detail: f32) -> f32 {
     let bar = 0.12 * pow(0.008 / 0.12, clamp(transform.peak.y, 0.0, 1.0));
     return smoothstep(bar, bar * 2.5, detail);
+}
+
+// Peaking from the focus map, crossed with the screen. The map says how blurred an edge is, whatever its
+// contrast, but taken alone it also passes the odd noise spike whose blur reads small, and marks every
+// texel of a finely textured area in focus; the screen says whether there is visible detail at all, but
+// takes contrast for focus. A texel is marked as far as both agree: in focus by the map (up to a blur of
+// 0.6 to 2.4 pixels of the full photo, by the slider, evenly in ratio), and detail on screen that stands
+// clear of noise (a fixed bar, so the slider means one thing only).
+fn map_peak(blur: f32, detail: f32) -> f32 {
+    if (blur < 0.0) {
+        return 0.0;
+    }
+    let limit = 0.6 * pow(4.0, clamp(transform.peak.y, 0.0, 1.0));
+    let in_focus = 1.0 - smoothstep(limit, limit * 1.5, blur);
+    let visible = smoothstep(0.012, 0.03, detail);
+    return in_focus * visible;
 }
 
 // Where the picture's uv falls on the focus map, in texels of its finest level.
@@ -208,16 +229,12 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
         return colour;
     }
     // over the edited side only: the point of it is to judge the picture being worked on
+    let detail = peak_detail(uv);
     var strength: f32;
     if (transform.peak_map.x > 0.5) {
-        // the photo's focus map: an edge counts as in focus up to a blur of 0.6 to 2.4 pixels of the full
-        // photo, by the slider, evenly in ratio
-        let blur = map_blur(map_at, footprint);
-        let limit = 0.6 * pow(4.0, clamp(transform.peak.y, 0.0, 1.0));
-        strength = select(0.0, 1.0 - smoothstep(limit, limit * 1.5, blur), blur >= 0.0);
+        strength = map_peak(map_blur(map_at, footprint), detail);
     } else {
-        // until the map is ready: read from the screen
-        strength = peak_strength(uv);
+        strength = screen_peak(detail);
     }
     let marked = mix(colour.rgb, transform.peak_color.rgb, strength * transform.peak.x);
     return vec4<f32>(marked, colour.a);

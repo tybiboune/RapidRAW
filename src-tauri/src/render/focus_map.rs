@@ -42,6 +42,9 @@ const POOL_SIGMA: f32 = 3.0;
 const DIFFERENCE_VARIANCE: f32 = 0.4;
 /// An edge counts once its gradient stands this many times above the gradient of the flattest areas.
 const EDGE_OVER_NOISE: f32 = 5.0;
+/// ... and this many times above the gradient level of its own area, for areas noisier than the flattest
+/// (deep shadows): the largest of a thousand noise texels stands about 3.2 times above their median.
+const LOCAL_OVER_NOISE: f32 = 4.0;
 /// ... and above this in any case (in square-root brightness), for photos with hardly any noise.
 const EDGE_FLOOR: f32 = 0.004;
 /// The noise is read on blocks of this size ...
@@ -165,30 +168,76 @@ fn gradient_magnitude(plane: &[f32], width: usize, height: usize) -> Vec<f32> {
     out
 }
 
-/// The gradient level of the flattest areas: the median gradient of each block, at a low rank among blocks.
-fn noise_level(magnitude: &[f32], width: usize, height: usize) -> f32 {
-    let blocks_x = width / NOISE_BLOCK;
-    let blocks_y = height / NOISE_BLOCK;
-    if blocks_x == 0 || blocks_y == 0 {
-        let mut all = magnitude.to_vec();
-        let mid = all.len() / 2;
-        return *all.select_nth_unstable_by(mid, f32::total_cmp).1;
+/// The median gradient of every block of the photo: in a flat block that is its noise, and the noise is
+/// not the same everywhere. Square-root brightness evens out the shot noise, but in deep shadows the
+/// sensor's read noise takes over and the root makes it larger, so dark areas are noisier than the flat
+/// mid-tones the photo's noise is measured on.
+struct NoiseBlocks {
+    medians: Vec<f32>,
+    across: usize,
+    down: usize,
+    block_width: usize,
+    block_height: usize,
+}
+
+impl NoiseBlocks {
+    fn measure(magnitude: &[f32], width: usize, height: usize) -> Self {
+        let across = (width / NOISE_BLOCK).max(1);
+        let down = (height / NOISE_BLOCK).max(1);
+        let (block_width, block_height) = (width / across, height / down);
+        let medians = (0..across * down)
+            .into_par_iter()
+            .map(|b| {
+                let (bx, by) = (b % across, b / across);
+                // the last block of a row or column takes what is left over
+                let xs = bx * block_width..if bx + 1 == across {
+                    width
+                } else {
+                    (bx + 1) * block_width
+                };
+                let ys = by * block_height..if by + 1 == down {
+                    height
+                } else {
+                    (by + 1) * block_height
+                };
+                let mut values = Vec::with_capacity(xs.len() * ys.len());
+                for y in ys {
+                    values.extend_from_slice(&magnitude[y * width + xs.start..y * width + xs.end]);
+                }
+                let mid = values.len() / 2;
+                *values.select_nth_unstable_by(mid, f32::total_cmp).1
+            })
+            .collect();
+        Self {
+            medians,
+            across,
+            down,
+            block_width,
+            block_height,
+        }
     }
-    let mut medians: Vec<f32> = (0..blocks_x * blocks_y)
-        .into_par_iter()
-        .map(|b| {
-            let (bx, by) = (b % blocks_x, b / blocks_x);
-            let mut values = Vec::with_capacity(NOISE_BLOCK * NOISE_BLOCK);
-            for y in by * NOISE_BLOCK..(by + 1) * NOISE_BLOCK {
-                let start = y * width + bx * NOISE_BLOCK;
-                values.extend_from_slice(&magnitude[start..start + NOISE_BLOCK]);
-            }
-            let mid = values.len() / 2;
-            *values.select_nth_unstable_by(mid, f32::total_cmp).1
-        })
-        .collect();
-    let rank = ((medians.len() as f32 * NOISE_RANK) as usize).min(medians.len() - 1);
-    *medians.select_nth_unstable_by(rank, f32::total_cmp).1
+
+    /// The photo's noise: the median of its flattest blocks, at a low rank among them.
+    fn flattest(&self) -> f32 {
+        let mut medians = self.medians.clone();
+        let rank = ((medians.len() as f32 * NOISE_RANK) as usize).min(medians.len() - 1);
+        *medians.select_nth_unstable_by(rank, f32::total_cmp).1
+    }
+
+    /// The gradient level around a texel, drawn smoothly between the centres of the blocks.
+    fn around(&self, x: usize, y: usize) -> f32 {
+        let place = |p: usize, size: usize, count: usize| {
+            let f = (p as f32 / size as f32 - 0.5).clamp(0.0, (count - 1) as f32);
+            let first = f.floor() as usize;
+            (first, (first + 1).min(count - 1), f - first as f32)
+        };
+        let (x0, x1, tx) = place(x, self.block_width, self.across);
+        let (y0, y1, ty) = place(y, self.block_height, self.down);
+        let at = |bx: usize, by: usize| self.medians[by * self.across + bx];
+        let top = at(x0, y0) * (1.0 - tx) + at(x1, y0) * tx;
+        let bottom = at(x0, y1) * (1.0 - tx) + at(x1, y1) * tx;
+        top * (1.0 - ty) + bottom * ty
+    }
 }
 
 /// The blur of every edge texel of a brightness plane, stored as `round(blur * BLUR_SCALE)` or `NO_EDGE`,
@@ -206,14 +255,16 @@ fn blur_map(plane: Vec<f32>, width: usize, height: usize) -> (Vec<u8>, f32, usiz
     );
     drop(plane);
     let magnitude = gradient_magnitude(&fine, width, height);
-    let noise = noise_level(&magnitude, width, height);
+    let blocks = NoiseBlocks::measure(&magnitude, width, height);
+    let noise = blocks.flattest();
     // Noise adds to every gradient, more to the finer one, which would make a blurred edge in noise read
     // sharp. Its power is taken out of both before their ratio is read: in flat areas the gradient
     // magnitude follows a Rayleigh law, whose median is 1.177 sigma and mean square 2 sigma^2.
     let noise_power = |median: f32| 2.0 * (median / 1.177).powi(2);
     let fine_noise = noise_power(noise);
     let coarse_magnitude = gradient_magnitude(&coarse, width, height);
-    let coarse_noise = noise_power(noise_level(&coarse_magnitude, width, height));
+    let coarse_noise =
+        noise_power(NoiseBlocks::measure(&coarse_magnitude, width, height).flattest());
     drop(coarse);
     let threshold = (EDGE_OVER_NOISE * noise).max(EDGE_FLOOR);
 
@@ -255,7 +306,7 @@ fn blur_map(plane: Vec<f32>, width: usize, height: usize) -> (Vec<u8>, f32, usiz
             for x in 1..width - 1 {
                 let i = y * width + x;
                 let m = magnitude[i];
-                if m < threshold {
+                if m < threshold || m < LOCAL_OVER_NOISE * blocks.around(x, y) {
                     continue;
                 }
                 // the crest of an edge, where the gradient peaks across it, is where its blur is written
@@ -427,6 +478,24 @@ mod tests {
     fn noise_alone_has_no_edges() {
         let mut noise = Noise(7);
         let plane: Vec<f32> = (0..W * H).map(|_| 0.3 + 0.02 * noise.normal()).collect();
+        let (_, _, edges) = blur_map(plane, W, H);
+        assert!(
+            edges <= W * H / 1000,
+            "{edges} texels of noise taken for edges"
+        );
+    }
+
+    // a clean half sets the photo's noise; the other half is ten times noisier, like a deep shadow, and
+    // its noise must not pass for edges
+    #[test]
+    fn noise_in_a_noisier_area_is_not_taken_for_edges() {
+        let mut noise = Noise(11);
+        let plane: Vec<f32> = (0..W * H)
+            .map(|i| {
+                let sigma = if i % W < W / 2 { 0.003 } else { 0.03 };
+                0.3 + sigma * noise.normal()
+            })
+            .collect();
         let (_, _, edges) = blur_map(plane, W, H);
         assert!(
             edges <= W * H / 1000,
