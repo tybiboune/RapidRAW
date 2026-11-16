@@ -168,6 +168,8 @@ interface WgpuRenderState {
   splitPosition: number;
   bgPrimary: [number, number, number, number];
   bgSecondary: [number, number, number, number];
+  focusPeaking: boolean;
+  focusPeakingSensitivity: number;
 }
 
 interface EditorProps {
@@ -194,6 +196,8 @@ export default function Editor({ onBackToLibrary, onContextMenu, onImageSelect, 
   const showOriginal = useEditorStore((s) => s.showOriginal);
   const compareView = useEditorStore((s) => s.compareView);
   const splitPosition = useEditorStore((s) => s.splitPosition);
+  const focusPeaking = useUIStore((s) => s.focusPeaking);
+  const focusPeakingSensitivity = useUIStore((s) => s.focusPeakingSensitivity);
   const originalPreview = useEditorStore((s) => s.originalPreview);
   const isSliderDragging = useEditorStore((s) => s.isSliderDragging);
   const targetZoom = useEditorStore((s) => s.zoom);
@@ -1685,6 +1689,8 @@ export default function Editor({ onBackToLibrary, onContextMenu, onImageSelect, 
     splitPosition,
     bgPrimary: [24 / 255, 24 / 255, 24 / 255, 1.0],
     bgSecondary: [35 / 255, 35 / 255, 35 / 255, 1.0],
+    focusPeaking,
+    focusPeakingSensitivity,
   });
   const syncWgpuRef = useRef<() => void>(() => {});
 
@@ -1706,6 +1712,8 @@ export default function Editor({ onBackToLibrary, onContextMenu, onImageSelect, 
       splitPosition,
       bgPrimary: parseRgb(bgPrimaryStr),
       bgSecondary: isNeutralGrey ? NEUTRAL_GREY_RGB : parseRgb(bgSecondaryStr),
+      focusPeaking,
+      focusPeakingSensitivity,
     };
   }, [
     appSettings?.useWgpuRenderer,
@@ -1718,6 +1726,8 @@ export default function Editor({ onBackToLibrary, onContextMenu, onImageSelect, 
     showOriginal,
     activeCompareView,
     splitPosition,
+    focusPeaking,
+    focusPeakingSensitivity,
     appSettings?.theme,
     finalPreviewUrl,
   ]);
@@ -1735,6 +1745,8 @@ export default function Editor({ onBackToLibrary, onContextMenu, onImageSelect, 
     showOriginal,
     activeCompareView,
     splitPosition,
+    focusPeaking,
+    focusPeakingSensitivity,
     appSettings?.theme,
     finalPreviewUrl,
     imageRenderSize,
@@ -1873,7 +1885,7 @@ export default function Editor({ onBackToLibrary, onContextMenu, onImageSelect, 
               : NO_SPLIT;
 
       const isArming = state.wgpuPhase === 'arming';
-      const currentTransform = `${state.path},${isArming},${windowWidth},${windowHeight},${screenX},${screenY},${screenW},${screenH},${clipX},${clipY},${clipW},${clipH},${state.bgPrimary?.join(',')},${state.bgSecondary?.join(',')},${split.splitOrigin},${split.splitNormal},${split.splitOffset}`;
+      const currentTransform = `${state.path},${isArming},${windowWidth},${windowHeight},${screenX},${screenY},${screenW},${screenH},${clipX},${clipY},${clipW},${clipH},${state.bgPrimary?.join(',')},${state.bgSecondary?.join(',')},${split.splitOrigin},${split.splitNormal},${split.splitOffset},${state.focusPeaking},${state.focusPeakingSensitivity}`;
 
       if (lastWgpuTransformRef.current !== currentTransform && !isInvoking) {
         lastWgpuTransformRef.current = currentTransform;
@@ -1898,6 +1910,8 @@ export default function Editor({ onBackToLibrary, onContextMenu, onImageSelect, 
             bgPrimary: state.bgPrimary || [0, 0, 0, 1],
             bgSecondary: state.bgSecondary || [0, 0, 0, 1],
             pixelated: isZoomedIn,
+            focusPeaking: state.focusPeaking ? 1 : 0,
+            focusPeakingSensitivity: state.focusPeakingSensitivity,
             ...split,
             path: sentPath,
             awaitPresent: isArming,

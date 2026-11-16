@@ -2057,6 +2057,7 @@
         "toggle_folder_tree": "Toggle Folder Tree panel",
         "toggle_fullscreen": "Toggle fullscreen",
         "toggle_left_panel": "Toggle Left Panel",
+        "toggle_focus_peaking": "Toggle focus peaking",
         "toggle_library_exif": "Toggle EXIF overlay",
         "toggle_masks": "Toggle Masks panel",
         "toggle_metadata": "Toggle Metadata panel",

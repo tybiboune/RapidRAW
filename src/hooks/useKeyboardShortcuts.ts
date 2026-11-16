@@ -346,6 +346,13 @@ export const useKeyboardShortcuts = ({
           s.ui.toggleViewerWindow();
         },
       },
+      toggle_focus_peaking: {
+        shouldFire: (s: any) => s.ui.activeView === 'editor' && !!s.editor.selectedImage,
+        execute: (e: any, s: any) => {
+          e.preventDefault();
+          s.ui.setUI((ui: any) => ({ focusPeaking: !ui.focusPeaking }));
+        },
+      },
       show_original: {
         shouldFire: (s: any) => s.ui.activeView === 'editor' && !!s.editor.selectedImage,
         execute: (e: any) => {

@@ -60,6 +60,14 @@ pub struct WgpuTransformPayload {
     pub split_origin: [f32; 2],
     pub split_normal: [f32; 2],
     pub split_offset: [f32; 2],
+    // Focus peaking rides on the transform because that is what it is: something about how the picture
+    // is shown, not about the picture. It reaches no adjustment, no hash and no export.
+    #[serde(default)]
+    pub focus_peaking: f32,
+    #[serde(default)]
+    pub focus_peaking_sensitivity: f32,
+    #[serde(default)]
+    pub focus_peaking_color: Option<[f32; 4]>,
     #[serde(default)]
     pub path: Option<String>,
     #[serde(default)]
@@ -112,6 +120,15 @@ pub async fn update_wgpu_transform(
         display.latest_transform.split_origin = payload.split_origin;
         display.latest_transform.split_normal = payload.split_normal;
         display.latest_transform.split_offset = payload.split_offset;
+        display.latest_transform.peak = [
+            payload.focus_peaking.clamp(0.0, 1.0),
+            payload.focus_peaking_sensitivity.clamp(0.0, 1.0),
+            0.0,
+            0.0,
+        ];
+        if let Some(color) = payload.focus_peaking_color {
+            display.latest_transform.peak_color = color;
+        }
         let presented = display.flush(&context.device, &context.queue);
         drop(display_lock);
         if presented && payload.await_present {

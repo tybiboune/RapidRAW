@@ -130,6 +130,12 @@ export const KEYBIND_DEFINITIONS: KeybindDefinition[] = [
     section: 'view',
   },
   {
+    action: 'toggle_focus_peaking',
+    description: 'settings.keybinds.actions.toggle_focus_peaking',
+    defaultCombo: ['KeyP'],
+    section: 'view',
+  },
+  {
     action: 'show_original',
     description: 'settings.keybinds.actions.show_original',
     defaultCombo: ['KeyB'],

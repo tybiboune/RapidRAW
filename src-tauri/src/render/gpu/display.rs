@@ -20,6 +20,10 @@ pub struct DisplayTransform {
     pub split_origin: [f32; 2],
     pub split_normal: [f32; 2],
     pub split_offset: [f32; 2],
+    // focus peaking: how strongly it is drawn, how little detail it takes to count, and in what colour.
+    // Both are vec4 and sit on the end, where the sixteen-byte alignment is already met.
+    pub peak: [f32; 4],
+    pub peak_color: [f32; 4],
 }
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
@@ -44,6 +48,8 @@ impl Default for DisplayTransform {
             split_origin: [0.0, 0.0],
             split_normal: [0.0, 0.0],
             split_offset: [0.0, 0.0],
+            peak: [0.0, 0.5, 0.0, 0.0],
+            peak_color: [1.0, 0.16, 0.36, 1.0],
         }
     }
 }

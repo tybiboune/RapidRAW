@@ -12,6 +12,8 @@ struct Transform {
     split_origin: vec2<f32>,
     split_normal: vec2<f32>,
     split_offset: vec2<f32>,
+    peak: vec4<f32>,
+    peak_color: vec4<f32>,
 };
 
 @group(0) @binding(0) var<uniform> transform: Transform;
@@ -76,6 +78,35 @@ fn sample_layer(layer: texture_2d<f32>, uv: vec2<f32>, image_size: vec2<f32>, te
     }
 }
 
+fn peak_luma(rgb: vec3<f32>) -> f32 {
+    return dot(rgb, vec3<f32>(0.2126, 0.7152, 0.0722));
+}
+
+// What is in focus here, drawn over the picture and changing nothing about it: no adjustment, no
+// hash, nothing that reaches the export.
+//
+// Sharpness is read as the second difference of the brightness across each axis, not the first. A
+// gradient - a soft shoulder of light on a cheek, the sky shading off - has a large first difference
+// everywhere and is not sharp at all; only detail that turns, rather than merely leans, raises the
+// second. That is what separates an edge in focus from a bright slope out of it.
+fn peak_strength(uv: vec2<f32>) -> f32 {
+    // a step of one texel of the picture, whatever the zoom: the uv runs over the image, and the
+    // sample converts to the texture's own scale
+    let step = 1.0 / max(transform.image_size, vec2<f32>(1.0, 1.0));
+    let size = transform.image_size;
+    let tex_size = transform.texture_size;
+    let here = peak_luma(sample_layer(tex, uv, size, tex_size).rgb);
+    let right = peak_luma(sample_layer(tex, uv + vec2<f32>(step.x, 0.0), size, tex_size).rgb);
+    let left = peak_luma(sample_layer(tex, uv - vec2<f32>(step.x, 0.0), size, tex_size).rgb);
+    let below = peak_luma(sample_layer(tex, uv + vec2<f32>(0.0, step.y), size, tex_size).rgb);
+    let above = peak_luma(sample_layer(tex, uv - vec2<f32>(0.0, step.y), size, tex_size).rgb);
+    let detail = abs(right + left - 2.0 * here) + abs(below + above - 2.0 * here);
+    // how little detail counts as sharp: the sensitivity runs from taking only the plainest edges to
+    // taking almost anything
+    let bar = mix(0.14, 0.004, clamp(transform.peak.y, 0.0, 1.0));
+    return smoothstep(bar, bar * 2.5, detail);
+}
+
 @fragment
 fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     let is_original = dot(in.pos.xy - transform.split_origin, transform.split_normal) < 0.0;
@@ -88,5 +119,11 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     if (is_original) {
         return sample_layer(original_tex, uv, transform.original_size, transform.original_size);
     }
-    return sample_layer(tex, uv, transform.image_size, transform.texture_size);
+    let colour = sample_layer(tex, uv, transform.image_size, transform.texture_size);
+    if (transform.peak.x <= 0.0) {
+        return colour;
+    }
+    // over the edited side only: the point of it is to judge the picture being worked on
+    let marked = mix(colour.rgb, transform.peak_color.rgb, peak_strength(uv) * transform.peak.x);
+    return vec4<f32>(marked, colour.a);
 }
