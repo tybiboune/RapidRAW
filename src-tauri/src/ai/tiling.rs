@@ -297,12 +297,20 @@ mod tests {
     use super::*;
 
     fn srgb_to_linear(v: f32) -> f32 {
-        if v <= 0.04045 { v / 12.92 } else { ((v + 0.055) / 1.055).powf(2.4) }
+        if v <= 0.04045 {
+            v / 12.92
+        } else {
+            ((v + 0.055) / 1.055).powf(2.4)
+        }
     }
 
     fn linear_to_srgb(v: f32) -> f32 {
         let v = v.clamp(0.0, 1.0);
-        if v <= 0.003_130_8 { v * 12.92 } else { 1.055 * v.powf(1.0 / 2.4) - 0.055 }
+        if v <= 0.003_130_8 {
+            v * 12.92
+        } else {
+            1.055 * v.powf(1.0 / 2.4) - 0.055
+        }
     }
 
     /// Runs RawForge on a PNG (RRAW_PHOTO, sRGB) with the model RRAW_MODEL at the ISO RRAW_ISO and writes
@@ -313,7 +321,10 @@ mod tests {
         let photo = std::env::var("RRAW_PHOTO").expect("RRAW_PHOTO");
         let out = std::env::var("RRAW_OUT").expect("RRAW_OUT");
         let model = std::env::var("RRAW_MODEL").expect("RRAW_MODEL");
-        let iso: u32 = std::env::var("RRAW_ISO").ok().and_then(|v| v.parse().ok()).unwrap_or(6400);
+        let iso: u32 = std::env::var("RRAW_ISO")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(6400);
 
         let mut img = image::open(&photo).expect("open picture").to_rgb32f();
         img.iter_mut().for_each(|v| *v = srgb_to_linear(*v));
@@ -326,7 +337,9 @@ mod tests {
                 .expect("load model"),
         );
         let start = std::time::Instant::now();
-        let result = run_rawforge_denoise(&img, &session, iso, &|_| {}).expect("denoise").into_rgb32f();
+        let result = run_rawforge_denoise(&img, &session, iso, &|_| {})
+            .expect("denoise")
+            .into_rgb32f();
         println!("rawforge took {:.1}s", start.elapsed().as_secs_f32());
 
         let bytes: Vec<u8> = result

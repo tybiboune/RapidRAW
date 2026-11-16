@@ -86,8 +86,14 @@ fn process_preview_job(
                 format!(
                     "{}:visible={},loading={},color={}",
                     patch.get("id").and_then(|v| v.as_str()).unwrap_or("?"),
-                    patch.get("visible").and_then(|v| v.as_bool()).unwrap_or(true),
-                    patch.get("isLoading").and_then(|v| v.as_bool()).unwrap_or(false),
+                    patch
+                        .get("visible")
+                        .and_then(|v| v.as_bool())
+                        .unwrap_or(true),
+                    patch
+                        .get("isLoading")
+                        .and_then(|v| v.as_bool())
+                        .unwrap_or(false),
                     color_len
                 )
             })

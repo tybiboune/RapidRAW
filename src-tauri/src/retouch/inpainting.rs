@@ -445,7 +445,9 @@ pub async fn generate_manual_cleanup_patch(
         min_x,
         min_y,
         offset,
-        current_adjustments["skinEnabled"].as_bool().unwrap_or(false)
+        current_adjustments["skinEnabled"]
+            .as_bool()
+            .unwrap_or(false)
     );
     let output_mask =
         image::imageops::crop_imm(&mask_bitmap, min_x as u32, min_y as u32, crop_w, crop_h)
