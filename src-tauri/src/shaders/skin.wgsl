@@ -568,19 +568,25 @@ fn sk_apply(@builtin(global_invocation_id) id: vec3<u32>) {
     // twice.
     let extra = textureLoad(t4, p, 0);
     if (params.lines > 0.0) {
+        // The map carries the skin weight and the whole correction is faded by that same weight at the
+        // end, so it is divided back out here - the same reason the redness below divides it out. Left
+        // in, a full slider only ever arrived at the square of it, and least where the mask is softest.
+        let strength = clamp(extra.x / max(skin, 0.05), 0.0, 1.0) * params.lines;
         // up towards the skin on either side, as far as the slider and how sure this is a line allow
-        let lift = max(extra.z - l0, 0.0) * extra.x * params.lines;
+        let lift = max(extra.z - l0, 0.0) * strength;
         level += lift;
         // what was lifted out of the valley is no longer grain either, or putting the grain back on top
         // would put the line back with it
         grain += lift;
-        touched = max(touched, extra.x * params.lines);
+        touched = max(touched, strength);
     }
     // shine is brightness above what the face is doing around it, moved back towards it, never past it
     if (params.shine > 0.0) {
+        // the skin weight divided back out, as above
+        let strength = clamp(maps.z / max(skin, 0.05), 0.0, 1.0) * params.shine;
         let over = level - l_wide;
-        if (over > 0.0) { level -= over * maps.z * params.shine * 0.85; }
-        touched = max(touched, maps.z * params.shine);
+        if (over > 0.0) { level -= over * strength * 0.85; }
+        touched = max(touched, strength);
     }
     // the shadow under an eye is brightness below what the cheek is doing, brought back up towards it
     if (params.under_eye > 0.0) {
