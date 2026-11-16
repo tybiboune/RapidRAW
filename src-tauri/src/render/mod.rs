@@ -3,6 +3,7 @@ pub mod analytics;
 pub mod cache_utils;
 pub mod color_space;
 pub mod commands;
+pub mod focus_map;
 pub mod geometry;
 pub mod gpu;
 pub mod image_processing;

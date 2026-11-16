@@ -143,6 +143,63 @@ pub async fn update_wgpu_transform(
     .map_err(|e| format!("Task panicked: {}", e))
 }
 
+/// Builds the shown photo's focus map (see `render::focus_map`) and hands it to the display, for focus
+/// peaking to draw from. It reads the whole photo at full size, a second or so for a large raw, so it is
+/// asked for when peaking is turned on and when the photo or its geometry changes, not on every frame.
+#[tauri::command]
+pub async fn compute_focus_map(
+    path: String,
+    js_adjustments: Value,
+    state: tauri::State<'_, AppState>,
+) -> Result<(), String> {
+    let loaded = state
+        .original_image
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .clone()
+        .ok_or("No original image loaded")?;
+    if parse_virtual_path(&path).0 != parse_virtual_path(&loaded.path).0 {
+        return Err(format!("'{path}' is not the loaded image"));
+    }
+    let mut adjustments = js_adjustments;
+    hydrate_adjustments(&state, &mut adjustments);
+    let Some(context) = crate::render::gpu::context::current_gpu_context(&state) else {
+        return Ok(());
+    };
+
+    tokio::task::spawn_blocking(move || {
+        let started = std::time::Instant::now();
+        // the photo as the frame step receives it: decoded, before any edit, with its lens and perspective
+        // corrections; the matrix then follows the crop, rotation, flips and quarter turns
+        let warped =
+            crate::render::geometry::apply_geometry_warp(&loaded.image, &loaded.path, &adjustments);
+        let map = crate::render::focus_map::build(&warped, loaded.is_raw);
+        let uv_to_map = Frame::from_adjustments(&adjustments).uv_to_source(warped.dimensions());
+        log::info!(
+            "Focus map of '{}': {}x{}, {} edge texels, gradient noise {:.4}, in {:.2}s",
+            loaded.path,
+            map.levels[0].width,
+            map.levels[0].height,
+            map.edges,
+            map.noise,
+            started.elapsed().as_secs_f32()
+        );
+        drop(warped);
+        let mut display = context.display.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some(display) = display.as_mut() {
+            display.set_focus_map(
+                &context.device,
+                &context.queue,
+                crate::render::gpu::display::display_content_key(&path),
+                &map,
+                uv_to_map,
+            );
+        }
+    })
+    .await
+    .map_err(|e| format!("Task panicked: {}", e))
+}
+
 #[tauri::command]
 pub async fn release_original_preview(state: tauri::State<'_, AppState>) -> Result<(), String> {
     let Some(context) = state

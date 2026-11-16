@@ -58,6 +58,29 @@ const NO_SPLIT = { splitOrigin: [0, 0], splitNormal: [0, 0], splitOffset: [0, 0]
 
 const MASK_OVERLAY_MARGIN = 0.1;
 
+// what the focus map depends on beyond the photo: its lens and perspective corrections and its frame
+const FOCUS_MAP_GEOMETRY_KEYS = [
+  'lensDistortionAmount',
+  'lensDistortionEnabled',
+  'lensTcaAmount',
+  'lensTcaEnabled',
+  'lensVignetteAmount',
+  'lensVignetteEnabled',
+  'transformAspect',
+  'transformDistortion',
+  'transformHorizontal',
+  'transformRotate',
+  'transformScale',
+  'transformVertical',
+  'transformXOffset',
+  'transformYOffset',
+  'crop',
+  'rotation',
+  'orientationSteps',
+  'flipHorizontal',
+  'flipVertical',
+];
+
 interface MaskOverlayView {
   width: number;
   height: number;
@@ -216,6 +239,25 @@ export default function Editor({ onBackToLibrary, onContextMenu, onImageSelect, 
   const activeAiPatchContainerId = useEditorStore((s) => s.activeAiPatchContainerId);
   const activeAiSubMaskId = useEditorStore((s) => s.activeAiSubMaskId);
   const isMaskControlHovered = useEditorStore((s) => s.isMaskControlHovered);
+
+  // Focus peaking draws from the photo's focus map (render/focus_map.rs): built once peaking is on, and
+  // again when the photo or its geometry changes, which is all the map depends on. Until it is there the
+  // display reads peaking from the screen.
+  const focusMapGeometry = useMemo(
+    () => JSON.stringify(FOCUS_MAP_GEOMETRY_KEYS.map((key) => (adjustments as Record<string, unknown>)[key] ?? null)),
+    [adjustments],
+  );
+  useEffect(() => {
+    const path = selectedImage?.path;
+    if (!focusPeaking || !path || !selectedImage?.isReady) return;
+    const timer = setTimeout(() => {
+      const { payload } = prepareAdjustmentsPayload(useEditorStore.getState().adjustments);
+      invoke(Invokes.ComputeFocusMap, { path, jsAdjustments: payload }).catch((error) =>
+        console.warn('Could not build the focus map:', error),
+      );
+    }, 400);
+    return () => clearTimeout(timer);
+  }, [focusPeaking, selectedImage?.path, selectedImage?.isReady, focusMapGeometry]);
   const wgpuPhase = useEditorStore((s) => s.wgpuPhase);
 
   const setEditor = useEditorStore((s) => s.setEditor);

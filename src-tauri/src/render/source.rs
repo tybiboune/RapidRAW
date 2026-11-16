@@ -116,6 +116,76 @@ impl Frame {
         (w, h)
     }
 
+    /// Where a point of the framed picture comes from in the picture before framing (`src` in size): the
+    /// rows of a 2x3 matrix taking `(u, v, 1)` on the framed picture to `(u, v)` on the source, both from
+    /// 0 to 1. The same steps as `tf_frame`, in the same order: crop origin, rotation about the centre,
+    /// flips, then the quarter turns.
+    pub fn uv_to_source(&self, src: (u32, u32)) -> [[f64; 3]; 2] {
+        type M = [[f64; 3]; 3];
+        fn mul(a: M, b: M) -> M {
+            let mut out = [[0.0; 3]; 3];
+            for (r, row) in out.iter_mut().enumerate() {
+                for (c, v) in row.iter_mut().enumerate() {
+                    *v = (0..3).map(|k| a[r][k] * b[k][c]).sum();
+                }
+            }
+            out
+        }
+        let oriented = self.oriented_size(src);
+        let (cx, cy, cw, ch) = self.crop_rect(oriented);
+        let (ow, oh) = (oriented.0 as f64, oriented.1 as f64);
+        let (sw, sh) = (src.0 as f64, src.1 as f64);
+        // uv to the framed picture's texel index (texel centres at whole numbers), then the crop origin
+        let mut m: M = [
+            [cw as f64, 0.0, cx as f64 - 0.5],
+            [0.0, ch as f64, cy as f64 - 0.5],
+            [0.0, 0.0, 1.0],
+        ];
+        if self.rotates() {
+            let (sin, cos) = (self.rotation as f64 * std::f64::consts::PI / 180.0).sin_cos();
+            let (ccx, ccy) = (ow / 2.0, oh / 2.0);
+            let offset = [
+                ccx - (cos * ccx + sin * ccy),
+                ccy - (-sin * ccx + cos * ccy),
+            ];
+            m = mul(
+                [
+                    [cos, sin, offset[0]],
+                    [-sin, cos, offset[1]],
+                    [0.0, 0.0, 1.0],
+                ],
+                m,
+            );
+        }
+        if self.flip_horizontal {
+            m = mul([[-1.0, 0.0, ow - 1.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]], m);
+        }
+        if self.flip_vertical {
+            m = mul([[1.0, 0.0, 0.0], [0.0, -1.0, oh - 1.0], [0.0, 0.0, 1.0]], m);
+        }
+        let turn: M = match self.orientation {
+            1 => [[0.0, 1.0, 0.0], [-1.0, 0.0, sh - 1.0], [0.0, 0.0, 1.0]],
+            2 => [
+                [-1.0, 0.0, sw - 1.0],
+                [0.0, -1.0, sh - 1.0],
+                [0.0, 0.0, 1.0],
+            ],
+            3 => [[0.0, -1.0, sw - 1.0], [1.0, 0.0, 0.0], [0.0, 0.0, 1.0]],
+            _ => [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]],
+        };
+        m = mul(turn, m);
+        // the source texel index back to uv
+        m = mul(
+            [
+                [1.0 / sw, 0.0, 0.5 / sw],
+                [0.0, 1.0 / sh, 0.5 / sh],
+                [0.0, 0.0, 1.0],
+            ],
+            m,
+        );
+        [m[0], m[1]]
+    }
+
     fn is_identity(&self, size: (u32, u32)) -> bool {
         self.orientation == 0
             && !self.flip_horizontal
@@ -444,4 +514,86 @@ fn downscale(enc: &mut ComputeEncoder, src: &Slot, dst: &Slot) {
         Out::F16(&dst.view),
         Bind::default(),
     );
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // tf_frame's own steps for one texel of the framed picture: the source position it reads
+    fn frame_source(frame: &Frame, src: (u32, u32), id: (u32, u32)) -> (f64, f64) {
+        let oriented = frame.oriented_size(src);
+        let (cx, cy, _, _) = frame.crop_rect(oriented);
+        let (ow, oh) = (oriented.0 as f64, oriented.1 as f64);
+        let mut p = ((id.0 + cx) as f64, (id.1 + cy) as f64);
+        if frame.rotates() {
+            let (sin, cos) = (frame.rotation as f64 * std::f64::consts::PI / 180.0).sin_cos();
+            let (ccx, ccy) = (ow / 2.0, oh / 2.0);
+            let offset = (
+                ccx - (cos * ccx + sin * ccy),
+                ccy - (-sin * ccx + cos * ccy),
+            );
+            p = (
+                cos * p.0 + sin * p.1 + offset.0,
+                -sin * p.0 + cos * p.1 + offset.1,
+            );
+        }
+        if frame.flip_horizontal {
+            p.0 = ow - 1.0 - p.0;
+        }
+        if frame.flip_vertical {
+            p.1 = oh - 1.0 - p.1;
+        }
+        let (sw, sh) = (src.0 as f64, src.1 as f64);
+        match frame.orientation {
+            1 => (p.1, sh - 1.0 - p.0),
+            2 => (sw - 1.0 - p.0, sh - 1.0 - p.1),
+            3 => (sw - 1.0 - p.1, p.0),
+            _ => p,
+        }
+    }
+
+    #[test]
+    fn the_uv_matrix_lands_where_the_frame_shader_reads() {
+        let src = (9, 6);
+        for orientation in 0..4u8 {
+            for flips in 0..4u8 {
+                for rotation in [0.0f32, 7.5] {
+                    for crop in [
+                        None,
+                        Some(Crop {
+                            x: 1.0,
+                            y: 2.0,
+                            width: 4.0,
+                            height: 3.0,
+                        }),
+                    ] {
+                        let frame = Frame {
+                            orientation,
+                            flip_horizontal: flips & 1 != 0,
+                            flip_vertical: flips & 2 != 0,
+                            rotation,
+                            crop,
+                        };
+                        let m = frame.uv_to_source(src);
+                        let (w, h) = frame.size(src);
+                        for y in 0..h {
+                            for x in 0..w {
+                                let (u, v) =
+                                    ((x as f64 + 0.5) / w as f64, (y as f64 + 0.5) / h as f64);
+                                let su = m[0][0] * u + m[0][1] * v + m[0][2];
+                                let sv = m[1][0] * u + m[1][1] * v + m[1][2];
+                                let got = (su * src.0 as f64 - 0.5, sv * src.1 as f64 - 0.5);
+                                let want = frame_source(&frame, src, (x, y));
+                                assert!(
+                                    (got.0 - want.0).abs() < 1e-9 && (got.1 - want.1).abs() < 1e-9,
+                                    "{frame:?} texel ({x},{y}): matrix {got:?}, shader {want:?}"
+                                );
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
 }

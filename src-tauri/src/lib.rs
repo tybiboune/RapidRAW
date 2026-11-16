@@ -646,6 +646,7 @@ pub fn run() {
             platform::main_window::frontend_ready,
             library::thumbnails::cancel_thumbnail_generation,
             render::commands::update_wgpu_transform,
+            render::commands::compute_focus_map,
             render::commands::release_original_preview,
             platform::viewer_window::open_viewer_window,
             platform::viewer_window::close_viewer_window,
