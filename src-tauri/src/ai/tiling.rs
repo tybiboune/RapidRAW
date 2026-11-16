@@ -237,7 +237,7 @@ const RAWFORGE_TILE: TileParams = TileParams {
 /// RawForge's networks were trained on linear Rec. 2020 pictures, while the develop pipeline works in
 /// linear sRGB: the picture crosses over for the network and comes back after.
 const SRGB_TO_REC2020: [[f32; 3]; 3] = [
-    [0.627_403_9, 0.329_283_0, 0.043_313_1],
+    [0.627_403_9, 0.329_283, 0.043_313_1],
     [0.069_097_3, 0.919_540_4, 0.011_362_3],
     [0.016_391_4, 0.088_013_3, 0.895_595_3],
 ];

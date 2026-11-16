@@ -12,6 +12,8 @@ use std::path::{Path, PathBuf};
 
 use serde::Serialize;
 
+// only the Windows side drives PhotoLab, and only it reads the script
+#[cfg(target_os = "windows")]
 const DRIVER_SCRIPT: &str = include_str!("dxo_driver.ps1");
 const SUFFIX: &str = "_DxO";
 
