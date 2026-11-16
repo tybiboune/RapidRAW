@@ -266,7 +266,13 @@ On branch `skin-by-fault` (`src-tauri/src/effects/skin.rs`, `src-tauri/src/shade
 | skin smoothing, skin tone, spotlight, eye clarity | not ported, and arguably should not be: RapidRAW can already do all four through its existing adjustments on a face-part mask |
 | the brush tool | not ported; RapidRAW's own brush masks cover it |
 
-The regions are the real piece of work left. RapidRAW's `masks/face.rs` already fits the 478-point mesh
-and knows the landmark index lists for the eyes, brows, lips and nose, so the five regions can be built
-from what is there rather than from the anchor-and-oval scheme above - which existed in PixTune only
-because it had to cope with having no mesh at all.
+The regions were the piece of work left when this was written, and they are now done, built from the
+478-point mesh in the face's own upright frame rather than from the anchor-and-oval scheme described
+above - which existed in PixTune only because it had to cope with having no mesh at all. Two of the five
+have no reader: Cheeks and NoseChin serve in PixTune only to fit the skin colour and to steer the line
+weight, and the ported version arrives at both another way.
+
+So every fault PixTune corrects is now corrected here. What is left of this document is reference
+rather than plan: the numbers to compare against when a ported map behaves differently from the
+original, and the reasoning behind the choices that look arbitrary until you know what they were
+measured against.
