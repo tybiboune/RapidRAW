@@ -23,6 +23,25 @@ public static class DxoWin {
     [DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr h, int cmd);
     [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr h);
     [DllImport("user32.dll")] public static extern bool IsIconic(IntPtr h);
+    [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();
+    [DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr h, out uint pid);
+    [DllImport("kernel32.dll")] public static extern uint GetCurrentThreadId();
+    [DllImport("user32.dll")] public static extern bool AttachThreadInput(uint a, uint b, bool attach);
+    [DllImport("user32.dll")] public static extern bool SetWindowPos(IntPtr h, IntPtr after, int x, int y, int cx, int cy, uint flags);
+    // Windows does not let a background process take the foreground, which is what happens when PhotoLab was
+    // already running: attaching to the foreground window's input and flipping the window to topmost and back
+    // gets it forward all the same.
+    public static void BringToFront(IntPtr h) {
+        if (IsIconic(h)) ShowWindow(h, 9);
+        uint pid;
+        uint foreground = GetWindowThreadProcessId(GetForegroundWindow(), out pid);
+        uint me = GetCurrentThreadId();
+        if (foreground != me) AttachThreadInput(me, foreground, true);
+        SetWindowPos(h, new IntPtr(-1), 0, 0, 0, 0, 0x0003);
+        SetWindowPos(h, new IntPtr(-2), 0, 0, 0, 0, 0x0003);
+        SetForegroundWindow(h);
+        if (foreground != me) AttachThreadInput(me, foreground, false);
+    }
     public static void Click(int x, int y) {
         SetCursorPos(x, y);
         mouse_event(2, 0, 0, 0, UIntPtr.Zero);
@@ -41,32 +60,41 @@ $expand = [System.Windows.Automation.ExpandCollapsePattern]::Pattern
 $toggle = [System.Windows.Automation.TogglePattern]::Pattern
 function Prop($prop, $value) { [System.Windows.Automation.PropertyCondition]::new($prop, $value) }
 
-# PhotoLab is started by RapiderRaw with the photo as its argument; wait for its window.
-$proc = $null
-for ($i = 0; $i -lt 90 -and -not $proc; $i++) {
-    $proc = Get-Process -Name 'DxO.PhotoLab' -ErrorAction SilentlyContinue | Where-Object { $_.MainWindowHandle -ne 0 } | Select-Object -First 1
-    if (-not $proc) { Start-Sleep 1 }
-}
-if (-not $proc) { Fail 'PhotoLab did not open' }
-$wasMinimized = [DxoWin]::IsIconic($proc.MainWindowHandle)
-if ($wasMinimized) { [void][DxoWin]::ShowWindow($proc.MainWindowHandle, 9) }
-[void][DxoWin]::SetForegroundWindow($proc.MainWindowHandle)
-
-function TopWindow {
-    $ae::RootElement.FindAll($Scope::Children, (Prop $ae::ProcessIdProperty $proc.Id)) | Select-Object -First 1
-}
-$top = TopWindow
-if (-not $top) { Fail 'PhotoLab window not found' }
-
-# wait until the photo is the open one: the film strip names it
+# PhotoLab is started by RapiderRaw with the photo as its argument. It shows a splash window first and its
+# real window some time later, so the real window is looked for until it is there and names the photo in
+# its film strip: it is the one with the Customize button.
 $stem = [IO.Path]::GetFileName($Photo)
-$ready = $false
-for ($i = 0; $i -lt 120 -and -not $ready; $i++) {
-    $texts = $top.FindAll($Scope::Descendants, (Prop $ae::ControlTypeProperty $Types::Text))
-    foreach ($t in $texts) { if ($t.Current.Name -like "*$stem") { $ready = $true; break } }
-    if (-not $ready) { Start-Sleep 1 }
+$proc = $null
+$top = $null
+$sawProcess = $false
+$wasMinimized = $false
+$deadline = (Get-Date).AddSeconds(300)
+while ((Get-Date) -lt $deadline -and -not $top) {
+    foreach ($p in @(Get-Process -Name 'DxO.PhotoLab*' -ErrorAction SilentlyContinue)) {
+        $sawProcess = $true
+        # a minimized window does not show its contents to automation
+        if ($p.MainWindowHandle -ne 0 -and [DxoWin]::IsIconic($p.MainWindowHandle)) {
+            $wasMinimized = $true
+            [void][DxoWin]::ShowWindow($p.MainWindowHandle, 9)
+        }
+        foreach ($w in @($ae::RootElement.FindAll($Scope::Children, (Prop $ae::ProcessIdProperty $p.Id)))) {
+            try {
+                if (-not $w.FindFirst($Scope::Descendants, (Prop $ae::AutomationIdProperty 'CustomizeButton'))) { continue }
+                foreach ($t in $w.FindAll($Scope::Descendants, (Prop $ae::ControlTypeProperty $Types::Text))) {
+                    if ($t.Current.Name -like "*$stem") { $top = $w; $proc = $p; break }
+                }
+            } catch { }
+            if ($top) { break }
+        }
+        if ($top) { break }
+    }
+    if (-not $top) { Start-Sleep 2 }
 }
-if (-not $ready) { Fail 'PhotoLab did not open the photo' }
+if (-not $top) {
+    if ($sawProcess) { Fail 'PhotoLab did not open the photo' } else { Fail 'PhotoLab did not open' }
+}
+$hwnd = [IntPtr]$top.Current.NativeWindowHandle
+[DxoWin]::BringToFront($hwnd)
 
 # Customize tab, Detail palette
 $customize = $top.FindFirst($Scope::Descendants, (Prop $ae::AutomationIdProperty 'CustomizeButton'))
@@ -81,10 +109,31 @@ $label = $top.FindFirst($Scope::Descendants, (Prop $ae::NameProperty $Method))
 if (-not $label) { Fail "denoiser '$Method' is not offered by this PhotoLab" }
 $radio = $walker.GetParent($label)
 if (-not $radio.Current.IsEnabled) { Fail "denoiser '$Method' is not available in this PhotoLab edition" }
-$rect = $radio.Current.BoundingRectangle
-[DxoWin]::Click([int]($rect.X + 20), [int]($rect.Y + $rect.Height / 2))
-Start-Sleep 4
-if (-not $radio.GetCurrentPattern($selItem).Current.IsSelected) { Fail 'the denoiser could not be selected' }
+
+# The click only counts if PhotoLab's window is what is under the pointer, so it is brought forward and
+# checked first; a click that did not take is repeated.
+function ClickRadio {
+    $rect = $radio.Current.BoundingRectangle
+    $x = [int]($rect.X + 20)
+    $y = [int]($rect.Y + $rect.Height / 2)
+    for ($try = 0; $try -lt 4; $try++) {
+        [DxoWin]::BringToFront($hwnd)
+        Start-Sleep 1
+        $under = $ae::FromPoint([System.Windows.Point]::new($x, $y))
+        if ($under -and $under.Current.ProcessId -eq $proc.Id) {
+            [DxoWin]::Click($x, $y)
+            return $true
+        }
+    }
+    return $false
+}
+$selected = $radio.GetCurrentPattern($selItem).Current.IsSelected
+for ($attempt = 0; $attempt -lt 3 -and -not $selected; $attempt++) {
+    if (-not (ClickRadio)) { Fail 'PhotoLab is covered by another window that could not be moved aside' }
+    Start-Sleep 4
+    $selected = $radio.GetCurrentPattern($selItem).Current.IsSelected
+}
+if (-not $selected) { Fail 'the denoiser could not be selected' }
 
 # File > Export to disk
 $file = $top.FindFirst($Scope::Descendants, (Prop $ae::AutomationIdProperty 'MenuFile'))

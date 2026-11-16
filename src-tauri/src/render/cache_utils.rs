@@ -548,6 +548,9 @@ pub struct DecodeFingerprint {
     len: u64,
     modified: Option<SystemTime>,
     settings_hash: u64,
+    // a photo that DxO PhotoLab has denoised is developed from its denoised DNG, so that file is part of what
+    // the decoded picture is; without it a photo denoised (or restored) while open would be served from the cache
+    denoised: Option<(u64, Option<SystemTime>)>,
 }
 
 impl DecodeFingerprint {
@@ -569,10 +572,14 @@ impl DecodeFingerprint {
             .hash(&mut hasher);
         settings.apply_preprocessing_to_non_raws.hash(&mut hasher);
         settings.use_apple_raw9.hash(&mut hasher);
+        let denoised = crate::integrations::dxo::existing_denoised(path)
+            .and_then(|dng| dng.metadata().ok())
+            .map(|meta| (meta.len(), meta.modified().ok()));
         Some(Self {
             len: metadata.len(),
             modified: metadata.modified().ok(),
             settings_hash: hasher.finish(),
+            denoised,
         })
     }
 }
@@ -866,5 +873,40 @@ pub fn clear_session_caches(state: tauri::State<AppState>) {
     }
     if let Ok(mut uncropped_source_cache) = state.uncropped_source_cache.lock() {
         uncropped_source_cache.clear();
+    }
+}
+
+#[cfg(test)]
+mod dxo_fingerprint_tests {
+    use super::DecodeFingerprint;
+    use crate::app::settings::AppSettings;
+
+    // denoising a photo while it is open, or going back to the original, must change what the cache sees
+    #[test]
+    fn the_denoised_dng_is_part_of_the_fingerprint() {
+        let dir = std::env::temp_dir().join("rapiderraw_fingerprint_test");
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let photo = dir.join("a.nef");
+        std::fs::write(&photo, b"raw").unwrap();
+        let settings = AppSettings::default();
+
+        let plain = DecodeFingerprint::for_file(&photo, &settings).unwrap();
+        assert_eq!(
+            plain,
+            DecodeFingerprint::for_file(&photo, &settings).unwrap()
+        );
+
+        std::fs::write(crate::integrations::dxo::denoised_path(&photo), b"dng").unwrap();
+        let denoised = DecodeFingerprint::for_file(&photo, &settings).unwrap();
+        assert_ne!(plain, denoised, "a new denoised DNG must miss the cache");
+
+        std::fs::remove_file(crate::integrations::dxo::denoised_path(&photo)).unwrap();
+        assert_eq!(
+            plain,
+            DecodeFingerprint::for_file(&photo, &settings).unwrap(),
+            "removing it must go back to the original"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

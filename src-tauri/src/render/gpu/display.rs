@@ -713,3 +713,36 @@ pub static WGPU_DISPLAY_FAILED: AtomicBool = AtomicBool::new(false);
 pub fn wgpu_display_failed() -> bool {
     WGPU_DISPLAY_FAILED.load(Ordering::Acquire)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::DisplayTransform;
+
+    // the shader's `Transform` block is 160 bytes (the last two vec4 sit on 16-byte boundaries, at 128 and
+    // 144), and the card reads exactly what is written from `DisplayTransform`
+    #[test]
+    fn display_transform_matches_the_shader_block() {
+        assert_eq!(std::mem::size_of::<DisplayTransform>(), 160);
+        assert_eq!(std::mem::offset_of!(DisplayTransform, peak), 128);
+        assert_eq!(std::mem::offset_of!(DisplayTransform, peak_color), 144);
+    }
+
+    // WGSL compiles when it first runs, so run it: build the display shader on a real device and fail on
+    // any validation error
+    #[test]
+    fn display_shader_compiles() {
+        let instance =
+            wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle_from_env());
+        let adapter = pollster::block_on(instance.request_adapter(&Default::default()))
+            .expect("no wgpu adapter (install a Vulkan driver, e.g. mesa lavapipe)");
+        let (device, _queue) =
+            pollster::block_on(adapter.request_device(&Default::default())).expect("device");
+        let scope = device.push_error_scope(wgpu::ErrorFilter::Validation);
+        let _module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("display"),
+            source: wgpu::ShaderSource::Wgsl(include_str!("../../shaders/display.wgsl").into()),
+        });
+        let error = pollster::block_on(scope.pop());
+        assert!(error.is_none(), "display.wgsl failed to compile: {error:?}");
+    }
+}

@@ -170,7 +170,7 @@ export function useAppNavigation({ clearThumbnailQueue, refs }: AppNavigationPro
   }, [refs]);
 
   const handleImageSelect = useCallback(
-    async (path: string, openInEditor: boolean = true) => {
+    async (path: string, openInEditor: boolean = true, force: boolean = false) => {
       const generation = ++imageSelectGeneration;
       const { selectedImage, isSliderDragging, resetHistory, setEditor } = useEditorStore.getState();
       const { setLibrary } = useLibraryStore.getState();
@@ -181,13 +181,16 @@ export function useAppNavigation({ clearThumbnailQueue, refs }: AppNavigationPro
         setUI({ activeView: 'editor' });
       }
 
-      if (selectedImage?.path === path) return;
+      // `force` opens the photo again although it is the one already open: it is developed from a different
+      // file now (DxO denoise), so what was kept of it is dropped first
+      if (selectedImage?.path === path && !force) return;
+      if (force) globalImageCache.delete(path);
 
       useEditorStore.getState().patchesSentToBackend.clear();
       debouncedSave.flush();
       debouncedSetHistory.cancel();
 
-      if (selectedImage?.path && cachedEditStateRef.current) {
+      if (!force && selectedImage?.path && cachedEditStateRef.current) {
         globalImageCache.set(selectedImage.path, cachedEditStateRef.current);
       }
 

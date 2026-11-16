@@ -39,7 +39,7 @@ import ConfirmModal from '../modals/ConfirmModal';
 import Dropdown, { OptionItem } from '../ui/Dropdown';
 import Switch from '../ui/Switch';
 import Input from '../ui/Input';
-import Slider from '../ui/Slider';
+import Slider, { SliderChangeEvent } from '../ui/Slider';
 import { ThemeProps, THEMES, DEFAULT_THEME_ID } from '../../utils/themes';
 import { useTranslation } from 'react-i18next';
 import { Invokes } from '../../types/invokes';
@@ -1196,6 +1196,27 @@ export default function SettingsPanel({
                           id="neutral-grey-bg-toggle"
                           label={t('settings.general.enableNeutralGreyCanvas')}
                           onChange={(checked) => onSettingsChange({ ...appSettings, editorNeutralGreyBg: checked })}
+                        />
+                      </SettingItem>
+
+                      <SettingItem
+                        label={t('settings.general.focusPeakingSensitivity')}
+                        description={t('settings.general.focusPeakingSensitivityDesc')}
+                      >
+                        <Slider
+                          label={t('settings.general.focusPeakingAmount')}
+                          min={0}
+                          max={100}
+                          step={1}
+                          value={Math.round((appSettings?.focusPeakingSensitivity ?? 0.5) * 100)}
+                          defaultValue={50}
+                          onChange={(e: SliderChangeEvent) =>
+                            onSettingsChange({
+                              ...appSettings,
+                              focusPeakingSensitivity: Number(e.target.value) / 100,
+                            })
+                          }
+                          fillOrigin="min"
                         />
                       </SettingItem>
 
