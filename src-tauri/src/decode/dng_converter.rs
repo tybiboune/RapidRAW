@@ -149,6 +149,20 @@ pub fn convert_to_dng(app: &AppHandle, converter: &Path, src: &Path) -> Result<P
     Ok(dng)
 }
 
+/// The DNG an HE NEF has already been converted to, if there is one; converts nothing. For what the NEF
+/// keeps in its image data - the camera's as-shot neutral and colour matrices, the size of the picture -
+/// which rawler cannot read from an HE NEF but reads from this DNG without decoding a pixel.
+pub fn converted_dng(src: &Path) -> Option<PathBuf> {
+    let app = crate::render::gpu::context::app_handle()?;
+    let dng = app
+        .path()
+        .app_cache_dir()
+        .ok()?
+        .join("dng_converted")
+        .join(format!("{}.dng", cache_key(src).ok()?));
+    dng.metadata().is_ok_and(|m| m.len() > 0).then_some(dng)
+}
+
 /// Returns the DNG for an HE NEF, converting if needed. When the converter is not installed, asks the user
 /// (once per session) whether to download and install it and returns an error so the caller can fall back.
 pub fn dng_for_he_nef(configured: Option<&str>, path: &str) -> Result<PathBuf> {

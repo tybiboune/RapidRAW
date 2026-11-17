@@ -57,26 +57,33 @@ fn snapshot_images(dir: &Path) -> HashMap<PathBuf, Fingerprint> {
         .collect()
 }
 
-fn raw_size(path: &Path) -> Option<(usize, usize)> {
+fn dng_size(path: &Path) -> Option<(usize, usize)> {
     let source = RawSource::new(path).ok()?;
     let decoder = rawler::get_decoder(&source).ok()?;
+    let ifd = decoder.ifd(WellKnownIFD::Raw).ok()??;
+    Some(match ifd.get_entry(DngTag::DefaultCropSize) {
+        Some(size) => (size.force_usize(0), size.force_usize(1)),
+        None => (
+            ifd.get_entry(TiffCommonTag::ImageWidth)?.force_usize(0),
+            ifd.get_entry(TiffCommonTag::ImageLength)?.force_usize(0),
+        ),
+    })
+}
+
+fn raw_size(path: &Path) -> Option<(usize, usize)> {
     if is_dng(path) {
-        let ifd = decoder.ifd(WellKnownIFD::Raw).ok()??;
-        return Some(match ifd.get_entry(DngTag::DefaultCropSize) {
-            Some(size) => (size.force_usize(0), size.force_usize(1)),
-            None => (
-                ifd.get_entry(TiffCommonTag::ImageWidth)?.force_usize(0),
-                ifd.get_entry(TiffCommonTag::ImageLength)?.force_usize(0),
-            ),
-        });
+        return dng_size(path);
     }
-    let raw = decoder
-        .raw_image(&source, &RawDecodeParams::default(), true)
-        .ok()?;
-    Some(
-        raw.crop_area
-            .map_or((raw.width, raw.height), |area| (area.d.w, area.d.h)),
-    )
+    let source = RawSource::new(path).ok()?;
+    let decoder = rawler::get_decoder(&source).ok()?;
+    match decoder.raw_image(&source, &RawDecodeParams::default(), true) {
+        Ok(raw) => Some(
+            raw.crop_area
+                .map_or((raw.width, raw.height), |area| (area.d.w, area.d.h)),
+        ),
+        // an HE NEF, whose image data rawler cannot read: the size of the DNG it was developed from
+        Err(_) => crate::decode::dng_converter::converted_dng(path).and_then(|dng| dng_size(&dng)),
+    }
 }
 
 fn image_size(path: &Path) -> Option<(usize, usize)> {
