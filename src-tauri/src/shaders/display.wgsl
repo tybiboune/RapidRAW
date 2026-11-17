@@ -156,14 +156,6 @@ fn peak_detail(uv: vec2<f32>) -> f32 {
     return min(fine, 2.0 * coarse);
 }
 
-// Peaking read from the screen alone, until the photo's focus map is there: how little detail counts as
-// sharp runs with the sensitivity from only the plainest edges (0.12) to almost anything (0.008), evenly
-// in ratio, so that each step of the slider does as much as the last.
-fn screen_peak(detail: f32) -> f32 {
-    let bar = 0.12 * pow(0.008 / 0.12, clamp(transform.peak.y, 0.0, 1.0));
-    return smoothstep(bar, bar * 2.5, detail);
-}
-
 // Peaking from the focus map, crossed with the screen. The map says how blurred an edge is, whatever its
 // contrast, but taken alone it also passes the odd noise spike whose blur reads small, and marks every
 // texel of a finely textured area in focus; the screen says whether there is visible detail at all, but
@@ -225,17 +217,13 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
         return sample_layer(original_tex, uv, transform.original_size, transform.original_size);
     }
     let colour = sample_layer(tex, uv, transform.image_size, transform.texture_size);
-    if (transform.peak.x <= 0.0) {
+    // Nothing is marked until the photo's focus map is there and fits the picture shown: marks read some
+    // other way first and then replaced would be two different answers in a second.
+    if (transform.peak.x <= 0.0 || transform.peak_map.x <= 0.5) {
         return colour;
     }
     // over the edited side only: the point of it is to judge the picture being worked on
-    let detail = peak_detail(uv);
-    var strength: f32;
-    if (transform.peak_map.x > 0.5) {
-        strength = map_peak(map_blur(map_at, footprint), detail);
-    } else {
-        strength = screen_peak(detail);
-    }
+    let strength = map_peak(map_blur(map_at, footprint), peak_detail(uv));
     let marked = mix(colour.rgb, transform.peak_color.rgb, strength * transform.peak.x);
     return vec4<f32>(marked, colour.a);
 }

@@ -58,8 +58,9 @@ const NO_SPLIT = { splitOrigin: [0, 0], splitNormal: [0, 0], splitOffset: [0, 0]
 
 const MASK_OVERLAY_MARGIN = 0.1;
 
-// what the focus map depends on beyond the photo: its lens and perspective corrections and its frame
-const FOCUS_MAP_GEOMETRY_KEYS = [
+// what the focus map depends on beyond the photo: its lens and perspective corrections. Not the framing -
+// crop, rotation, flips - which the display follows by itself with every frame it shows.
+const FOCUS_MAP_WARP_KEYS = [
   'lensDistortionAmount',
   'lensDistortionEnabled',
   'lensTcaAmount',
@@ -74,11 +75,6 @@ const FOCUS_MAP_GEOMETRY_KEYS = [
   'transformVertical',
   'transformXOffset',
   'transformYOffset',
-  'crop',
-  'rotation',
-  'orientationSteps',
-  'flipHorizontal',
-  'flipVertical',
 ];
 
 interface MaskOverlayView {
@@ -240,24 +236,34 @@ export default function Editor({ onBackToLibrary, onContextMenu, onImageSelect, 
   const activeAiSubMaskId = useEditorStore((s) => s.activeAiSubMaskId);
   const isMaskControlHovered = useEditorStore((s) => s.isMaskControlHovered);
 
-  // Focus peaking draws from the photo's focus map (render/focus_map.rs): built once peaking is on, and
-  // again when the photo or its geometry changes, which is all the map depends on. Until it is there the
-  // display reads peaking from the screen.
-  const focusMapGeometry = useMemo(
-    () => JSON.stringify(FOCUS_MAP_GEOMETRY_KEYS.map((key) => (adjustments as Record<string, unknown>)[key] ?? null)),
+  // Focus peaking draws from the photo's focus map (render/focus_map.rs), and marks nothing until it is
+  // there. It is built as soon as peaking is turned on or another photo comes up, and again when the lens
+  // or perspective corrections change, which is all it depends on - after a pause then, so that dragging
+  // one of those sliders does not build a map at every step.
+  const focusMapWarp = useMemo(
+    () => JSON.stringify(FOCUS_MAP_WARP_KEYS.map((key) => (adjustments as Record<string, unknown>)[key] ?? null)),
     [adjustments],
   );
+  const focusMapRequested = useRef<string | null>(null);
   useEffect(() => {
     const path = selectedImage?.path;
-    if (!focusPeaking || !path || !selectedImage?.isReady) return;
-    const timer = setTimeout(() => {
-      const { payload } = prepareAdjustmentsPayload(useEditorStore.getState().adjustments);
-      invoke(Invokes.ComputeFocusMap, { path, jsAdjustments: payload }).catch((error) =>
-        console.warn('Could not build the focus map:', error),
-      );
-    }, 400);
+    if (!focusPeaking || !path || !selectedImage?.isReady) {
+      focusMapRequested.current = null;
+      return;
+    }
+    const firstForThisPhoto = focusMapRequested.current !== path;
+    focusMapRequested.current = path;
+    const timer = setTimeout(
+      () => {
+        const { payload } = prepareAdjustmentsPayload(useEditorStore.getState().adjustments);
+        invoke(Invokes.ComputeFocusMap, { path, jsAdjustments: payload }).catch((error) =>
+          console.warn('Could not build the focus map:', error),
+        );
+      },
+      firstForThisPhoto ? 0 : 400,
+    );
     return () => clearTimeout(timer);
-  }, [focusPeaking, selectedImage?.path, selectedImage?.isReady, focusMapGeometry]);
+  }, [focusPeaking, selectedImage?.path, selectedImage?.isReady, focusMapWarp]);
   const wgpuPhase = useEditorStore((s) => s.wgpuPhase);
 
   const setEditor = useEditorStore((s) => s.setEditor);

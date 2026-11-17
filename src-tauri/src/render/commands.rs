@@ -144,8 +144,10 @@ pub async fn update_wgpu_transform(
 }
 
 /// Builds the shown photo's focus map (see `render::focus_map`) and hands it to the display, for focus
-/// peaking to draw from. It reads the whole photo at full size, a second or so for a large raw, so it is
-/// asked for when peaking is turned on and when the photo or its geometry changes, not on every frame.
+/// peaking to draw from. It reads the whole photo at full size, under a second for a 24 MP raw, so it is
+/// asked for when peaking is turned on and when the photo or its lens and perspective corrections change,
+/// not on every frame. The framing (crop, rotation, flips) does not change the map: the display places it
+/// by the framing of each frame it shows.
 #[tauri::command]
 pub async fn compute_focus_map(
     path: String,
@@ -170,11 +172,11 @@ pub async fn compute_focus_map(
     tokio::task::spawn_blocking(move || {
         let started = std::time::Instant::now();
         // the photo as the frame step receives it: decoded, before any edit, with its lens and perspective
-        // corrections; the matrix then follows the crop, rotation, flips and quarter turns
+        // corrections, the same ones the preview is rendered with
+        let warp_key = SourceTransform::from_adjustments(&loaded.path, &adjustments).warp_key();
         let warped =
             crate::render::geometry::apply_geometry_warp(&loaded.image, &loaded.path, &adjustments);
         let map = crate::render::focus_map::build(&warped, loaded.is_raw);
-        let uv_to_map = Frame::from_adjustments(&adjustments).uv_to_source(warped.dimensions());
         log::info!(
             "Focus map of '{}': {}x{}, {} edge texels, gradient noise {:.4}, in {:.2}s",
             loaded.path,
@@ -191,8 +193,8 @@ pub async fn compute_focus_map(
                 &context.device,
                 &context.queue,
                 crate::render::gpu::display::display_content_key(&path),
+                warp_key,
                 &map,
-                uv_to_map,
             );
         }
     })

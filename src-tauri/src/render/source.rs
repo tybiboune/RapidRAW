@@ -221,6 +221,14 @@ impl SourceTransform {
         }
     }
 
+    /// What the lens and perspective corrections come to, as one number: two sources with the same key
+    /// are warped alike. The framing (crop, rotation, flips) is not part of it.
+    pub fn warp_key(&self) -> u64 {
+        let mut hasher = DefaultHasher::new();
+        format!("{:?}", self.warp).hash(&mut hasher);
+        hasher.finish()
+    }
+
     pub fn working_size(&self, source: (u32, u32)) -> (u32, u32) {
         fit(source, self.working_fit)
     }

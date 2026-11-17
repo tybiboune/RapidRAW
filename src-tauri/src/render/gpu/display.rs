@@ -31,13 +31,23 @@ pub struct DisplayTransform {
     pub peak_v: [f32; 4],
 }
 
-/// A photo's focus map on the GPU (see `render::focus_map`), with the photo it belongs to.
+/// A photo's focus map on the GPU (see `render::focus_map`), with the photo and the lens and perspective
+/// corrections it was made for.
 pub struct FocusMapTexture {
     _texture: wgpu::Texture,
     view: wgpu::TextureView,
     content: u64,
+    warp_key: u64,
     levels: u32,
+}
+
+/// How the picture on screen is framed from its warped source: the matrix from its uv to the source's,
+/// and which warp that source had. Set with every frame, so the focus map follows a crop or a rotation at
+/// once, without being made again.
+#[derive(Clone, Copy)]
+pub struct FocusFrame {
     uv_to_map: [[f32; 4]; 2],
+    warp_key: u64,
 }
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
@@ -123,6 +133,7 @@ pub struct WgpuDisplay {
     pub edited_view: Option<wgpu::TextureView>,
     pub original_texture: Option<(wgpu::Texture, wgpu::TextureView)>,
     pub focus_map: Option<FocusMapTexture>,
+    pub focus_frame: Option<FocusFrame>,
     // bound in the focus map's place while there is none; never read then
     pub blank_map: (wgpu::Texture, wgpu::TextureView),
     pub standalone: bool,
@@ -207,15 +218,15 @@ impl WgpuDisplay {
         }));
     }
 
-    /// Puts a photo's focus map on the GPU for focus peaking to draw from, with the matrix from the shown
-    /// picture's uv to the map's. Levels too large for the GPU are left out; the map's uv stays the same.
+    /// Puts a photo's focus map on the GPU for focus peaking to draw from, with the photo and the warp it
+    /// was made for. Levels too large for the GPU are left out; the map's uv stays the same.
     pub fn set_focus_map(
         &mut self,
         device: &wgpu::Device,
         queue: &wgpu::Queue,
         content: u64,
+        warp_key: u64,
         map: &crate::render::focus_map::FocusMap,
-        uv_to_map: [[f64; 3]; 2],
     ) {
         let max = device.limits().max_texture_dimension_2d;
         let levels: Vec<_> = map
@@ -261,16 +272,24 @@ impl WgpuDisplay {
                 },
             );
         }
-        let row = |r: [f64; 3]| [r[0] as f32, r[1] as f32, r[2] as f32, 0.0];
         self.focus_map = Some(FocusMapTexture {
             view: texture.create_view(&Default::default()),
             _texture: texture,
             content,
+            warp_key,
             levels: levels.len() as u32,
-            uv_to_map: [row(uv_to_map[0]), row(uv_to_map[1])],
         });
         self.rebind(device);
         self.flush(device, queue);
+    }
+
+    /// Says how the picture about to be shown is framed from its warped source (see `FocusFrame`).
+    pub fn set_focus_frame(&mut self, uv_to_map: [[f64; 3]; 2], warp_key: u64) {
+        let row = |r: [f64; 3]| [r[0] as f32, r[1] as f32, r[2] as f32, 0.0];
+        self.focus_frame = Some(FocusFrame {
+            uv_to_map: [row(uv_to_map[0]), row(uv_to_map[1])],
+            warp_key,
+        });
     }
 
     pub fn show_texture(
@@ -402,12 +421,17 @@ impl WgpuDisplay {
     }
 
     pub fn flush(&mut self, device: &wgpu::Device, queue: &wgpu::Queue) -> bool {
-        // the focus map is drawn from only while it is the shown photo's
-        match &self.focus_map {
-            Some(map) if self.content_key == Some(map.content) => {
+        // The focus map is drawn from only while it is the shown photo's and was made with the warp the
+        // shown picture has; it is placed with the framing of the picture as it was last rendered. In
+        // between - a new photo, a lens or perspective change - nothing is marked, rather than marks in
+        // the wrong place or from another way of reading focus.
+        match (&self.focus_map, &self.focus_frame) {
+            (Some(map), Some(frame))
+                if self.content_key == Some(map.content) && frame.warp_key == map.warp_key =>
+            {
                 self.latest_transform.peak_map = [1.0, map.levels as f32, 0.0, 0.0];
-                self.latest_transform.peak_u = map.uv_to_map[0];
-                self.latest_transform.peak_v = map.uv_to_map[1];
+                self.latest_transform.peak_u = frame.uv_to_map[0];
+                self.latest_transform.peak_v = frame.uv_to_map[1];
             }
             _ => self.latest_transform.peak_map = [0.0; 4],
         }
@@ -746,6 +770,7 @@ pub fn build_wgpu_display(
         edited_view: None,
         original_texture: None,
         focus_map: None,
+        focus_frame: None,
         blank_map: (blank_map, blank_map_view),
         standalone,
         view: DisplayView::default(),
