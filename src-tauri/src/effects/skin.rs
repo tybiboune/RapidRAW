@@ -18,6 +18,27 @@ use crate::render::gpu::compute::{Bind, ComputeEncoder, Grid, Group, Out, RGB_MO
 
 const STATS_LONG_SIDE: f32 = 512.0;
 
+/// The faults are looked for on a copy of the picture at most this many pixels across; only the
+/// correction is laid down at the picture's own size. Finding them takes about fifteen working textures
+/// of four floats a pixel: at full size on a 24-megapixel photo that is several gigabytes, more than many
+/// cards have free, and the render failed (the screen kept the picture from before). On the copy it is a
+/// few hundred megabytes. The faults are measured in shares of the face anyway, so they are found the
+/// same way at any size, and the result no longer changes with the zoom.
+const DETECT_LONG_SIDE: u32 = 2048;
+
+/// The size the faults are looked for at: the picture's own, or scaled down to `DETECT_LONG_SIDE`.
+fn detect_size((w, h): (u32, u32)) -> (u32, u32) {
+    let long = w.max(h);
+    if long <= DETECT_LONG_SIDE {
+        return (w, h);
+    }
+    let scale = DETECT_LONG_SIDE as f32 / long as f32;
+    (
+        ((w as f32 * scale).round() as u32).max(8),
+        ((h as f32 * scale).round() as u32).max(8),
+    )
+}
+
 #[repr(C)]
 #[derive(Debug, Default, Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
 // The order is the layout: a pair of numbers sits on an eight-byte boundary and the whole thing comes
@@ -218,12 +239,17 @@ pub fn encode(enc: &mut ComputeEncoder, job: &Skin, src: &Slot, dst: &Slot) {
     let r32 = wgpu::TextureFormat::R32Float;
     let (fw, fh) = job.face_map.dimensions();
 
+    // every pass up to the correction works on the copy the faults are looked for on
+    let detect = detect_size(size);
+    let detect_copy = (detect != size).then(|| enc.area_down(src, detect, RGB_MODE));
+    let detect_src: &Slot = detect_copy.as_deref().unwrap_or(src);
+
     // a sample of the picture is enough to measure a middle and a spread on, and keeps the one pass
     // that walks every skin pixel short
-    let scale = (STATS_LONG_SIDE / size.0.max(size.1) as f32).min(1.0);
+    let scale = (STATS_LONG_SIDE / detect.0.max(detect.1) as f32).min(1.0);
     let low_size = (
-        ((size.0 as f32 * scale).round() as u32).clamp(4, size.0),
-        ((size.1 as f32 * scale).round() as u32).clamp(4, size.1),
+        ((detect.0 as f32 * scale).round() as u32).clamp(4, detect.0),
+        ((detect.1 as f32 * scale).round() as u32).clamp(4, detect.1),
     );
 
     let face = enc.cached_map("Skin Face Map", job.map_key, (fw, fh), r32, || {
@@ -257,11 +283,12 @@ pub fn encode(enc: &mut ComputeEncoder, job: &Skin, src: &Slot, dst: &Slot) {
     // Everything a face does is measured in faces, not in pixels: a blemish, a crease and the shading of
     // a cheek are a fixed share of its width, so a small face in a big picture and a large one are
     // looked at the same way.
-    let face_px = (job.face_fraction * size.0 as f32).max(24.0);
+    // (in pixels of the copy the faults are looked for on)
+    let face_px = (job.face_fraction * detect.0 as f32).max(24.0);
     let step = |share: f32| ((face_px * share).round() as u32).max(1);
 
     let params = Params {
-        grid: Grid::new(size),
+        grid: Grid::new(detect),
         spots: job.spots,
         redness: job.redness,
         shine: job.shine,
@@ -282,7 +309,7 @@ pub fn encode(enc: &mut ComputeEncoder, job: &Skin, src: &Slot, dst: &Slot) {
     };
 
     // what this face's own skin colour comes to, left in scratch for the passes that read against it
-    let low = enc.area_down(src, low_size, RGB_MODE);
+    let low = enc.area_down(detect_src, low_size, RGB_MODE);
     let stats = enc.buffer("Skin Stats", bytemuck::cast_slice(&[0u32; 4]));
     enc.run(
         Group::Skin,
@@ -302,13 +329,13 @@ pub fn encode(enc: &mut ComputeEncoder, job: &Skin, src: &Slot, dst: &Slot) {
     // the quantities the maps are made of. The blurring takes the picture it is given, so the split is
     // laid down once for each size wanted.
     let split = |enc: &mut ComputeEncoder, label: &'static str| {
-        let tex = enc.texture(label, size, f32x4);
+        let tex = enc.texture(label, detect, f32x4);
         enc.run(
             Group::Skin,
             "sk_split",
             &params,
-            size,
-            &[&src.view, &face.view],
+            detect,
+            &[&detect_src.view, &face.view],
             Out::F32(&tex.view),
             Bind::default(),
         );
@@ -325,12 +352,12 @@ pub fn encode(enc: &mut ComputeEncoder, job: &Skin, src: &Slot, dst: &Slot) {
     let fine = enc.blur(fine_src, fine_radius, 2, 0);
     let wide = enc.blur(wide_src, wide_radius, 2, 0);
 
-    let maps = enc.texture("Skin Maps", size, f32x4);
+    let maps = enc.texture("Skin Maps", detect, f32x4);
     enc.run(
         Group::Skin,
         "sk_maps",
         &params,
-        size,
+        detect,
         &[&here.view, &fine.view, &wide.view],
         Out::F32(&maps.view),
         Bind {
@@ -362,12 +389,12 @@ pub fn encode(enc: &mut ComputeEncoder, job: &Skin, src: &Slot, dst: &Slot) {
 
         // how rough this skin's finest detail is from place to place: the yardstick a crease or a
         // blemish is read against
-        let band = enc.texture("Skin Band", size, f32x4);
+        let band = enc.texture("Skin Band", detect, f32x4);
         enc.run(
             Group::Skin,
             "sk_band",
             &params,
-            size,
+            detect,
             &[&here.view, &ridge_a.view],
             Out::F32(&band.view),
             Bind::default(),
@@ -375,12 +402,12 @@ pub fn encode(enc: &mut ComputeEncoder, job: &Skin, src: &Slot, dst: &Slot) {
         let spread = enc.blur(band, radius(0.09), 2, 0);
 
         if wants_lines {
-            let lines = enc.texture("Skin Extras", size, f32x4);
+            let lines = enc.texture("Skin Extras", detect, f32x4);
             enc.run(
                 Group::Skin,
                 "sk_lines",
                 &params,
-                size,
+                detect,
                 &[
                     &ridge_a.view,
                     &ridge_b.view,
@@ -402,14 +429,14 @@ pub fn encode(enc: &mut ComputeEncoder, job: &Skin, src: &Slot, dst: &Slot) {
         if wants_blemishes {
             // the blemishes found, twice: once as they are, once to be blurred out so the whole of each
             // blemish is covered and not only its middle
-            let found = enc.texture("Skin Blemishes", size, f32x4);
-            let found_wide = enc.texture("Skin Blemishes Wide", size, f32x4);
+            let found = enc.texture("Skin Blemishes", detect, f32x4);
+            let found_wide = enc.texture("Skin Blemishes Wide", detect, f32x4);
             for target in [&found, &found_wide] {
                 enc.run(
                     Group::Skin,
                     "sk_blob",
                     &params,
-                    size,
+                    detect,
                     &[&ridge_a.view, &ridge_b.view, &ridge_c.view, &spread.view],
                     Out::F32(&target.view),
                     Bind {
@@ -419,12 +446,12 @@ pub fn encode(enc: &mut ComputeEncoder, job: &Skin, src: &Slot, dst: &Slot) {
                 );
             }
             let found_wide = enc.blur(found_wide, radius(DETAIL_WIDTHS[1]), 2, 0);
-            let healed = enc.texture("Skin Heal", size, f32x4);
+            let healed = enc.texture("Skin Heal", detect, f32x4);
             enc.run(
                 Group::Skin,
                 "sk_heal",
                 &params,
-                size,
+                detect,
                 &[&found.view, &found_wide.view],
                 Out::F32(&healed.view),
                 Bind::default(),
@@ -433,10 +460,16 @@ pub fn encode(enc: &mut ComputeEncoder, job: &Skin, src: &Slot, dst: &Slot) {
         }
     }
 
+    // the correction, at the picture's own size: the maps found on the copy are read at each pixel's
+    // place on it (see sk_apply)
+    let apply = Params {
+        grid: Grid::new(size),
+        ..params
+    };
     enc.run(
         Group::Skin,
         "sk_apply",
-        &params,
+        &apply,
         size,
         &[
             &src.view,
