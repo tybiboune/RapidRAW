@@ -56,6 +56,20 @@ pub fn process_and_get_dynamic_image_with_precision(
     )
 }
 
+/// Gives back all the GPU memory kept between renders only to be quick: the editor's and the viewer's
+/// cached renders of the photo, and the compute pool and effect maps. The next render makes what it
+/// needs again; nothing on screen depends on them.
+pub fn release_gpu_caches(context: &GpuContext, state: &AppState) {
+    for target in [PreviewTarget::Editor, PreviewTarget::Viewer] {
+        *lock_or_reset(state.gpu_image_cache_for(target), "GPU image cache") = None;
+    }
+    crate::render::gpu::compute::release_cached(context);
+    let _ = context.device.poll(wgpu::PollType::Wait {
+        submission_index: None,
+        timeout: Some(std::time::Duration::from_millis(500)),
+    });
+}
+
 pub fn process_and_get_dynamic_image_with_analytics(
     context: &GpuContext,
     state: &tauri::State<AppState>,

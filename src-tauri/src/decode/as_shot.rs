@@ -32,17 +32,19 @@ pub fn as_shot(path: &str) -> AsShot {
     cached_or_read(path, |source_path| {
         read_file_mapped(Path::new(source_path))
             .ok()
-            .and_then(|mmap| crate::decode::raw_processing::read_as_shot(&mmap))
+            .and_then(|mmap| {
+                crate::decode::raw_processing::read_as_shot(&mmap, Path::new(source_path))
+            })
     })
 }
 
 pub fn as_shot_from_bytes(path: &str, file_bytes: &[u8]) -> AsShot {
-    cached_or_read(path, |_| {
-        crate::decode::raw_processing::read_as_shot(file_bytes)
+    cached_or_read(path, |source_path| {
+        crate::decode::raw_processing::read_as_shot(file_bytes, Path::new(source_path))
     })
 }
 
-fn cached_or_read(path: &str, read: impl FnOnce(&str) -> Option<AsShot>) -> AsShot {
+fn cached_or_read(path: &str, read: impl FnOnce(&str) -> Option<(AsShot, bool)>) -> AsShot {
     let (source_path, _) = parse_virtual_path(path);
     let source_path = source_path.to_string_lossy().to_string();
     if !is_raw_file(&source_path) {
@@ -52,8 +54,12 @@ fn cached_or_read(path: &str, read: impl FnOnce(&str) -> Option<AsShot>) -> AsSh
         return *cached;
     }
 
-    let as_shot = read(&source_path).unwrap_or_else(AsShot::reference);
+    let (as_shot, complete) = read(&source_path).unwrap_or_else(|| (AsShot::reference(), true));
 
-    as_shot_cache().lock().unwrap().insert(source_path, as_shot);
+    // An HE NEF read before its DNG was made has only part of its as-shot values; it is read again next
+    // time rather than kept so for the session.
+    if complete {
+        as_shot_cache().lock().unwrap().insert(source_path, as_shot);
+    }
     as_shot
 }

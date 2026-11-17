@@ -233,5 +233,25 @@ fn main() {
     println!("cargo:rerun-if-changed=build.rs");
     println!("cargo:rerun-if-env-changed=RAPIDRAW_RUNTIME_DIR");
 
-    tauri_build::build()
+    // The app manifest asks Windows for version 6 of the common controls, which tauri and wry call into
+    // (TaskDialogIndirect). tauri-build embeds it in the app alone, so a test binary loads the old
+    // controls, misses that entry point and never starts (STATUS_ENTRYPOINT_NOT_FOUND, 0xc0000139). The
+    // same manifest is embedded here by the linker in everything this crate links instead - the app and
+    // the test binaries alike - and tauri-build is told to leave it out, or the app would carry it twice.
+    let msvc = env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("windows")
+        && env::var("CARGO_CFG_TARGET_ENV").as_deref() == Ok("msvc");
+    if msvc {
+        let manifest =
+            PathBuf::from(env::var("CARGO_MANIFEST_DIR").unwrap()).join("windows-app-manifest.xml");
+        println!("cargo:rerun-if-changed={}", manifest.display());
+        println!("cargo:rustc-link-arg=/MANIFEST:EMBED");
+        println!("cargo:rustc-link-arg=/MANIFESTINPUT:{}", manifest.display());
+        tauri_build::try_build(
+            tauri_build::Attributes::new()
+                .windows_attributes(tauri_build::WindowsAttributes::new_without_app_manifest()),
+        )
+        .expect("failed to run tauri-build");
+    } else {
+        tauri_build::build()
+    }
 }

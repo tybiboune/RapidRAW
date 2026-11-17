@@ -370,6 +370,23 @@ pub struct ComputeEncoder<'a> {
     free: Rc<RefCell<Vec<Slot>>>,
 }
 
+/// Gives back the GPU memory the compute passes keep only to be quick: the pooled working textures and
+/// the cached effect maps. Both are made again as they are needed.
+pub fn release_cached(context: &GpuContext) {
+    if let Some(pipelines) = context.compute.get() {
+        pipelines
+            .pool
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .clear();
+        pipelines
+            .maps
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .clear();
+    }
+}
+
 pub fn encode<T>(
     context: &GpuContext,
     build: impl FnOnce(&mut ComputeEncoder) -> T,

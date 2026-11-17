@@ -278,21 +278,38 @@ fn process_preview_job(
         PreviewTarget::Viewer => "viewer_preview",
     };
 
-    let final_processed_image_result =
+    let display_output = use_wgpu_renderer.then_some(crate::render::gpu::display::DisplayOutput {
+        target,
+        layer,
+        to_viewer,
+        content: crate::render::gpu::display::display_content_key(&loaded_image.path),
+    });
+    let render = |analytics| {
         crate::render::gpu::output::process_and_get_dynamic_image_with_analytics(
             &context,
             &state,
             &processing_source,
             editor_render.request(pixel_roi, false),
             caller_id,
-            use_wgpu_renderer.then_some(crate::render::gpu::display::DisplayOutput {
-                target,
-                layer,
-                to_viewer,
-                content: crate::render::gpu::display::display_content_key(&loaded_image.path),
-            }),
-            analytics_config,
+            display_output,
+            analytics,
+        )
+    };
+    let mut final_processed_image_result = render(analytics_config);
+    // A render that runs out of GPU memory leaves the last picture on screen, so an edit seems not to
+    // take, typically at full size, where every texture is largest. Most of what fills the GPU is kept
+    // only to be quick (earlier renders, pooled textures, effect maps): it is all given back and the
+    // render tried once more. The analytics wait for the next render.
+    if let Err(error) = &final_processed_image_result
+        && error.contains("Out of Memory")
+    {
+        log::warn!(
+            "[process_preview_job] GPU out of memory after {:.2?}; freeing the GPU caches and retrying",
+            fn_start.elapsed()
         );
+        crate::render::gpu::output::release_gpu_caches(&context, &state);
+        final_processed_image_result = render(None);
+    }
 
     let deliver_to_viewer = |jpeg_bytes: Option<&[u8]>| {
         if to_viewer {
@@ -396,11 +413,14 @@ fn process_preview_job(
             Err(e) => Err(format!("Failed to encode preview: {}", e)),
         }
     } else {
+        let reason = final_processed_image_result
+            .err()
+            .unwrap_or_else(|| "unknown".to_string());
         log::error!(
-            "[process_preview_job] processing failed after {:.2?}",
+            "[process_preview_job] processing failed after {:.2?}: {reason}",
             fn_start.elapsed()
         );
-        Err("Processing failed".to_string())
+        Err(format!("Processing failed: {reason}"))
     }
 }
 
