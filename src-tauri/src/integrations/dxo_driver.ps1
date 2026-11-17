@@ -8,10 +8,17 @@ param(
     [Parameter(Mandatory = $true)][string]$Photo,
     [Parameter(Mandatory = $true)][string]$Method,
     [Parameter(Mandatory = $true)][string]$Output,
-    [int]$TimeoutSec = 900
+    [int]$TimeoutSec = 900,
+    # PhotoLab was started for this run (it was not open before): it may show its "DxO Hub" window on startup
+    [switch]$FreshStart
 )
 $ErrorActionPreference = 'Stop'
-function Fail($reason) { Write-Output "error $reason"; exit 1 }
+function Fail($reason) {
+    # a film strip that was shown for this run is hidden again
+    if ($script:shownBrowser -and $script:top) { try { [void](ToggleImageBrowser $script:top) } catch { } }
+    Write-Output "error $reason"
+    exit 1
+}
 
 Add-Type -AssemblyName UIAutomationClient, UIAutomationTypes
 Add-Type -TypeDefinition @'
@@ -60,14 +67,43 @@ $expand = [System.Windows.Automation.ExpandCollapsePattern]::Pattern
 $toggle = [System.Windows.Automation.TogglePattern]::Pattern
 function Prop($prop, $value) { [System.Windows.Automation.PropertyCondition]::new($prop, $value) }
 
+# A freshly started PhotoLab can show its "DxO Hub" window (news and offers) over the main window. It blocks
+# the main window, so it is closed as soon as it shows. Only looked for when PhotoLab was started for this run.
+function CloseHub($window) {
+    if (-not $FreshStart -or -not $window) { return }
+    try {
+        $hub = $window.FindFirst($Scope::Descendants, (Prop $ae::NameProperty 'DxO Hub'))
+        if (-not $hub) { return }
+        $close = $hub.FindAll($Scope::Descendants, (Prop $ae::NameProperty 'Close')) |
+            Where-Object { $_.Current.ControlType -eq $Types::Button } | Select-Object -First 1
+        if ($close) { $close.GetCurrentPattern($invoke).Invoke(); Start-Sleep 1 }
+    } catch { }
+}
+
+# View > Show/Hide image browser: shows or hides the film strip
+function ToggleImageBrowser($window) {
+    $view = $window.FindFirst($Scope::Descendants, (Prop $ae::AutomationIdProperty 'MenuView'))
+    if (-not $view) { return $false }
+    $view.GetCurrentPattern($expand).Expand()
+    Start-Sleep 1
+    $item = $view.FindAll($Scope::Descendants, (Prop $ae::NameProperty 'Show/Hide image browser')) |
+        Where-Object { $_.Current.ControlType -eq $Types::MenuItem } | Select-Object -First 1
+    if (-not $item) { $view.GetCurrentPattern($expand).Collapse(); return $false }
+    $item.GetCurrentPattern($invoke).Invoke()
+    Start-Sleep 2
+    return $true
+}
+
 # PhotoLab is started by RapiderRaw with the photo as its argument. It shows a splash window first and its
 # real window some time later, so the real window is looked for until it is there and names the photo in
-# its film strip: it is the one with the Customize button.
+# its film strip: it is the one with the Customize button. A hidden film strip is shown so the photo can be
+# found, and hidden again at the end.
 $stem = [IO.Path]::GetFileName($Photo)
 $proc = $null
 $top = $null
 $sawProcess = $false
 $wasMinimized = $false
+$shownBrowser = $false
 $deadline = (Get-Date).AddSeconds(300)
 while ((Get-Date) -lt $deadline -and -not $top) {
     foreach ($p in @(Get-Process -Name 'DxO.PhotoLab*' -ErrorAction SilentlyContinue)) {
@@ -80,6 +116,10 @@ while ((Get-Date) -lt $deadline -and -not $top) {
         foreach ($w in @($ae::RootElement.FindAll($Scope::Children, (Prop $ae::ProcessIdProperty $p.Id)))) {
             try {
                 if (-not $w.FindFirst($Scope::Descendants, (Prop $ae::AutomationIdProperty 'CustomizeButton'))) { continue }
+                CloseHub $w
+                if (-not $shownBrowser -and -not $w.FindFirst($Scope::Descendants, (Prop $ae::AutomationIdProperty 'FilmStrip'))) {
+                    $shownBrowser = ToggleImageBrowser $w
+                }
                 foreach ($t in $w.FindAll($Scope::Descendants, (Prop $ae::ControlTypeProperty $Types::Text))) {
                     if ($t.Current.Name -like "*$stem") { $top = $w; $proc = $p; break }
                 }
@@ -88,7 +128,7 @@ while ((Get-Date) -lt $deadline -and -not $top) {
         }
         if ($top) { break }
     }
-    if (-not $top) { Start-Sleep 2 }
+    if (-not $top) { Start-Sleep 1 }
 }
 if (-not $top) {
     if ($sawProcess) { Fail 'PhotoLab did not open the photo' } else { Fail 'PhotoLab did not open' }
@@ -100,7 +140,13 @@ $hwnd = [IntPtr]$top.Current.NativeWindowHandle
 $customize = $top.FindFirst($Scope::Descendants, (Prop $ae::AutomationIdProperty 'CustomizeButton'))
 $customize.GetCurrentPattern($selItem).Select()
 Start-Sleep 2
-$tabs = $top.FindAll($Scope::Descendants, (Prop $ae::ControlTypeProperty $Types::ListItem))
+CloseHub $top
+# the palette tabs (Light, Color, Detail, ...) are the list that holds the Light tab; other lists in the
+# window, like the history and the film strip, hold list items too
+$lightTab = $top.FindFirst($Scope::Descendants, (Prop $ae::AutomationIdProperty 'LightCorrectionsFilterListViewItem'))
+if (-not $lightTab) { Fail 'the palette tabs were not found' }
+$tabs = $walker.GetParent($lightTab).FindAll($Scope::Children, (Prop $ae::ControlTypeProperty $Types::ListItem))
+if ($tabs.Count -lt 3) { Fail 'the Detail palette tab was not found' }
 $tabs[2].GetCurrentPattern($selItem).Select()
 Start-Sleep 3
 
@@ -129,6 +175,7 @@ function ClickRadio {
 }
 $selected = $radio.GetCurrentPattern($selItem).Current.IsSelected
 for ($attempt = 0; $attempt -lt 3 -and -not $selected; $attempt++) {
+    CloseHub $top
     if (-not (ClickRadio)) { Fail 'PhotoLab is covered by another window that could not be moved aside' }
     Start-Sleep 4
     $selected = $radio.GetCurrentPattern($selItem).Current.IsSelected
@@ -136,7 +183,8 @@ for ($attempt = 0; $attempt -lt 3 -and -not $selected; $attempt++) {
 if (-not $selected) { Fail 'the denoiser could not be selected' }
 
 # File > Export to disk
-$file = $top.FindFirst($Scope::Descendants, (Prop $ae::AutomationIdProperty 'MenuFile'))
+CloseHub $top
+$file =$top.FindFirst($Scope::Descendants, (Prop $ae::AutomationIdProperty 'MenuFile'))
 $file.GetCurrentPattern($expand).Expand()
 Start-Sleep 1
 $item = $file.FindAll($Scope::Descendants, (Prop $ae::NameProperty 'Export to disk')) |
@@ -146,6 +194,14 @@ $item.GetCurrentPattern($invoke).Invoke()
 Start-Sleep 3
 $dlg = $top.FindFirst($Scope::Children, (Prop $ae::NameProperty 'Export to disk - Options'))
 if (-not $dlg) { Fail 'export options did not open' }
+# on a failure the export dialog is closed, not left open over PhotoLab
+function CancelExport {
+    try {
+        $cancel = $dlg.FindAll($Scope::Descendants, (Prop $ae::NameProperty 'Cancel')) |
+            Where-Object { $_.Current.ControlType -eq $Types::Button } | Select-Object -First 1
+        if ($cancel) { $cancel.GetCurrentPattern($invoke).Invoke() }
+    } catch { }
+}
 
 # only the DNG output ticked, going to the photo's own folder
 $list = $dlg.FindAll($Scope::Descendants, (Prop $ae::ControlTypeProperty $Types::ListItem))
@@ -159,14 +215,27 @@ foreach ($li in $list) {
     if ($isDng -ne ($tp.Current.ToggleState -eq 'On')) { $tp.Toggle() }
     if ($isDng) { $dngItem = $li }
 }
-if (-not $dngItem) { Fail 'no DNG output option in PhotoLab' }
+if (-not $dngItem) { CancelExport; Fail 'no DNG output option in PhotoLab' }
 $dngItem.GetCurrentPattern($selItem).Select()
 Start-Sleep 2
 $combos = $dlg.FindAll($Scope::Descendants, (Prop $ae::ControlTypeProperty $Types::ComboBox))
-$format = ($combos[0].GetCurrentPattern([System.Windows.Automation.SelectionPattern]::Pattern).Current.GetSelection() | Select-Object -First 1).Current.Name
-$where = ($combos[1].GetCurrentPattern([System.Windows.Automation.SelectionPattern]::Pattern).Current.GetSelection() | Select-Object -First 1).Current.Name
-if ($format -notmatch 'Dng') { Fail "the DNG output option is set to '$format'" }
-if ($where -notmatch 'OriginalFolder') { Fail "the DNG output option is not set to the photo's own folder ('$where')" }
+function Selected($combo) {
+    ($combo.GetCurrentPattern([System.Windows.Automation.SelectionPattern]::Pattern).Current.GetSelection() | Select-Object -First 1).Current.Name
+}
+$format = Selected $combos[0]
+if ($format -notmatch 'Dng') { CancelExport; Fail "the DNG output option is set to '$format'" }
+# RapiderRaw finds the DNG next to the photo, so the DNG output goes to the photo's own folder
+if ((Selected $combos[1]) -notmatch 'OriginalFolder') {
+    $combos[1].GetCurrentPattern($expand).Expand()
+    Start-Sleep 1
+    $original = $combos[1].FindAll($Scope::Descendants, (Prop $ae::ControlTypeProperty $Types::ListItem)) |
+        Where-Object { $_.Current.Name -eq 'OriginalFolder' } | Select-Object -First 1
+    if ($original) { $original.GetCurrentPattern($selItem).Select() }
+    $combos[1].GetCurrentPattern($expand).Collapse()
+    Start-Sleep 1
+}
+$where = Selected $combos[1]
+if ($where -notmatch 'OriginalFolder') { CancelExport; Fail "the DNG output could not be set to the photo's own folder ('$where')" }
 
 # a leftover from an earlier run would make PhotoLab number the new file instead
 Remove-Item -LiteralPath $Output -Force -ErrorAction SilentlyContinue
@@ -189,5 +258,6 @@ while ((Get-Date) -lt $deadline) {
 if (-not (Test-Path -LiteralPath $Output) -or $stable -lt 3) { Fail 'PhotoLab did not finish the export in time' }
 
 # put the window back the way it was found
+if ($shownBrowser) { [void](ToggleImageBrowser $top) }
 if ($wasMinimized) { [void][DxoWin]::ShowWindow($proc.MainWindowHandle, 6) }
 Write-Output "ok $Output"
