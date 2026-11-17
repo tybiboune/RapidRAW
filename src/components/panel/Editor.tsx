@@ -29,6 +29,7 @@ import {
 import EditorToolbar from './editor/EditorToolbar';
 import ImageCanvas, { ImageRegion, MaskOverlayImage } from './editor/ImageCanvas';
 import SpeedEditOverlay from './editor/overlays/SpeedEditOverlay';
+import InfluenceLabel from './editor/overlays/InfluenceLabel';
 import { Mask, SubMask } from '../../types/masks';
 import { CompareView } from '../../types/settings';
 import { Panel } from '../../types/ui';
@@ -2882,6 +2883,7 @@ export default function Editor({ onBackToLibrary, onContextMenu, onImageSelect, 
             </>
           )}
           {straightenOverlay}
+          <InfluenceLabel />
         </div>
         <SpeedEditOverlay />
       </div>

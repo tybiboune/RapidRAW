@@ -511,6 +511,7 @@
         "toggleAnalytics": "Alternar visualització d'anàlisi"
       }
     },
+    "affectedAreas": "Zones afectades",
     "ai": {
       "actions": {
         "addNewComponent": "Afegir nou component",

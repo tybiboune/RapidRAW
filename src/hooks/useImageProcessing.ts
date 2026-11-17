@@ -14,6 +14,7 @@ import { globalImageCache } from '../utils/ImageLRUCache';
 import { prepareAdjustmentsPayload } from '../utils/backendPayload';
 import { calculateTargetResolution, getVisibleImageRegion } from '../utils/previewResolution';
 import { getDevicePixelRatio } from '../utils/displayScale';
+import { useInfluencePreview } from './useInfluencePreview';
 
 const isWgpuRender = (buffer: ArrayBuffer) => new TextDecoder().decode(buffer.slice(0, 11)) === 'WGPU_RENDER';
 
@@ -56,6 +57,7 @@ export function useImageProcessing(
   const originalSize = useEditorStore((state) => state.originalSize);
   const isSliderDragging = useEditorStore((state) => state.isSliderDragging);
   const compareView = useEditorStore((state) => state.compareView);
+  const influence = useEditorStore((state) => state.influence);
   const setEditor = useEditorStore((state) => state.setEditor);
 
   const activeView = useUIStore((state) => state.activeView);
@@ -74,6 +76,8 @@ export function useImageProcessing(
   const dragIdleTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const activeWaveformChannelRef = useRef(activeWaveformChannel);
   activeWaveformChannelRef.current = activeWaveformChannel;
+
+  useInfluencePreview(activeView === 'editor');
 
   const selectedImagePathRef = useRef<string | null>(null);
   useEffect(() => {
@@ -150,6 +154,8 @@ export function useImageProcessing(
 
       const jobId = ++previewJobIdRef.current;
       const roi = calculateROI();
+      // the affected-areas view (Alt held on a control) rides along with this one render only
+      const influence = useEditorStore.getState().influence;
 
       try {
         const request = invoke<ArrayBuffer>(Invokes.ApplyAdjustments, {
@@ -158,11 +164,12 @@ export function useImageProcessing(
           isInteractive: dragging,
           targetResolution: targetRes || null,
           roi: roi || null,
-          requestAnalytics: true,
+          requestAnalytics: !influence,
           computeWaveform: !!isWaveformVisible,
           activeWaveformChannel: activeWaveformChannelRef.current || null,
+          influence: influence ? { kind: influence.kind, index: influence.index } : null,
         });
-        if (!dragging) renderOriginal(targetRes);
+        if (!dragging && !influence) renderOriginal(targetRes);
         const buffer = await request;
 
         markSent();
@@ -548,6 +555,7 @@ export function useImageProcessing(
     appSettings?.copyPasteSettings?.includedAdjustments,
     appSettings?.copyPasteSettings?.autoSync,
     isWaveformVisible,
+    influence,
   ]);
 
   return {

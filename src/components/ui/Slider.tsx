@@ -5,6 +5,7 @@ import { useEditorStore } from '../../store/useEditorStore';
 import { SPEED_EDIT_ADJUSTMENTS } from '../../utils/adjustments';
 import { SpeedEditTarget } from '../../types/editor';
 import { FINE_ADJUSTMENT_MULTIPLIER, hasFineAdjustmentModifier } from '../../utils/fineAdjustment';
+import { InfluenceTarget, influenceAttributes } from '../../utils/influencePreview';
 import { useSliderResetResolver } from '../../context/SliderResetContext';
 
 export type SliderChangeEvent =
@@ -49,6 +50,8 @@ interface SliderProps {
   trackClassName?: string;
   fillOrigin?: 'min' | 'default';
   suffix?: string;
+  // Alt held on the slider shows where it acts on the photo
+  influence?: InfluenceTarget;
 }
 
 const DOUBLE_CLICK_THRESHOLD_MS = 150;
@@ -80,6 +83,7 @@ const Slider = ({
   trackClassName,
   fillOrigin = 'default',
   suffix = '',
+  influence,
 }: SliderProps) => {
   const resolveReset = useSliderResetResolver();
   const resetValue = (resolveReset && resetKey !== undefined ? resolveReset(resetKey) : undefined) ?? defaultValue;
@@ -652,6 +656,7 @@ const Slider = ({
       className={`mb-2 group ${disabled ? 'opacity-50 cursor-not-allowed' : ''}`}
       ref={containerRef}
       data-speed-edit-id={speedEditId}
+      {...influenceAttributes(disabled ? null : influence)}
       onPointerDownCapture={disabled ? undefined : claimSpeedEdit}
     >
       <div className="flex justify-between items-center mb-1">

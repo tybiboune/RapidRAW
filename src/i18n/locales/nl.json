@@ -493,6 +493,7 @@
         "toggleAnalytics": "Analytische weergave aan/uit"
       }
     },
+    "affectedAreas": "Beïnvloede gebieden",
     "ai": {
       "actions": {
         "addNewComponent": "Nieuw component toevoegen",

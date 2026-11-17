@@ -529,6 +529,7 @@
         "toggleAnalytics": "Přepnout zobrazení Analytics"
       }
     },
+    "affectedAreas": "Ovlivněné oblasti",
     "ai": {
       "actions": {
         "addNewComponent": "Přidat novou komponentu",

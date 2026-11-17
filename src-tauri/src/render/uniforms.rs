@@ -130,9 +130,9 @@ pub struct GlobalAdjustments {
     pub lut_is_scene_referred: u32,
     pub vignette_center_x: f32,
     pub vignette_center_y: f32,
-    _pad_lut5: f32,
+    pub influence_kind: u32,
 
-    _pad_agx1: f32,
+    pub influence_index: u32,
     _pad_agx2: f32,
     _pad_agx3: f32,
     pub agx_pipe_to_rendering_matrix: GpuMat3,
@@ -776,9 +776,9 @@ fn get_global_adjustments_from_json(
         lut_is_scene_referred,
         vignette_center_x: get_val("vignette", "vignetteCenterX", 1.0, Some(0.5)),
         vignette_center_y: get_val("vignette", "vignetteCenterY", 1.0, Some(0.5)),
-        _pad_lut5: 0.0,
+        influence_kind: 0,
 
-        _pad_agx1: 0.0,
+        influence_index: 0,
         _pad_agx2: 0.0,
         _pad_agx3: 0.0,
         agx_pipe_to_rendering_matrix: pipe_to_rendering,

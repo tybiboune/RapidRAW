@@ -493,6 +493,7 @@
         "toggleAnalytics": "Toggle Analytics Display"
       }
     },
+    "affectedAreas": "Affected areas",
     "ai": {
       "actions": {
         "addNewComponent": "Add New Component",

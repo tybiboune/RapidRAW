@@ -529,6 +529,7 @@
         "toggleAnalytics": "Показати/приховати аналітику"
       }
     },
+    "affectedAreas": "Зачеплені ділянки",
     "ai": {
       "actions": {
         "addNewComponent": "Додати новий компонент",

@@ -16,6 +16,7 @@ import { ImageDimensions } from '../hooks/useImageRenderSize';
 import { ToolType } from '../types/masks';
 import { describeHistoryChange } from '../utils/editHistory';
 import { HslMixerProperty } from '../utils/hslMixer';
+import type { InfluenceTarget } from '../utils/influencePreview';
 
 export type CenterMarker = 'vignette' | 'centre';
 
@@ -65,6 +66,8 @@ interface EditorState {
 
   // Interaction State
   isSliderDragging: boolean;
+  // the control whose affected areas the preview shows while Alt is held on it
+  influence: InfluenceTarget | null;
   speedEditTarget: RefObject<SpeedEditTarget | null> | null;
   isSpeedEditActive: boolean;
   zoom: number;
@@ -156,6 +159,7 @@ export const useEditorStore = create<EditorState>((set) => ({
   waveformHeight: 220,
 
   isSliderDragging: false,
+  influence: null,
   speedEditTarget: null,
   isSpeedEditActive: false,
   interactivePatch: null,

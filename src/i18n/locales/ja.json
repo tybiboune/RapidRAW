@@ -493,6 +493,7 @@
         "toggleAnalytics": "アナリティクス表示の切り替え"
       }
     },
+    "affectedAreas": "影響を受ける範囲",
     "ai": {
       "actions": {
         "addNewComponent": "新しいコンポーネントを追加",

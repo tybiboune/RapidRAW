@@ -529,6 +529,7 @@
         "toggleAnalytics": "Показать/скрыть панель гистограммы"
       }
     },
+    "affectedAreas": "Затронутые области",
     "ai": {
       "actions": {
         "addNewComponent": "Добавить новый компонент",
