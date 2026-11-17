@@ -31,7 +31,7 @@ pub fn is_unsupported_nef_compression(err: &anyhow::Error) -> bool {
     is_unsupported_nef_compression_text(&err.to_string())
 }
 
-fn is_unsupported_nef_compression_text(text: &str) -> bool {
+pub fn is_unsupported_nef_compression_text(text: &str) -> bool {
     let lowered = text.to_ascii_lowercase();
     lowered.contains("nef compression")
         && lowered.contains("not supported")

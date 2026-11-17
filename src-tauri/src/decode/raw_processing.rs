@@ -600,9 +600,29 @@ fn cfa_white_balance(raw_image: &RawImage) -> Option<[f32; 3]> {
 pub fn read_as_shot(file_bytes: &[u8]) -> Option<AsShot> {
     let source = RawSource::new_from_slice(file_bytes);
     let decoder = rawler::get_decoder(&source).ok()?;
-    let mut raw_image = decoder
-        .raw_image(&source, &RawDecodeParams::default(), true)
-        .ok()?;
+    let mut raw_image = match decoder.raw_image(&source, &RawDecodeParams::default(), true) {
+        Ok(raw_image) => raw_image,
+        // A Nikon HE/HE* NEF: rawler reads its tags but not its image data, and the photo itself is
+        // developed through a DNG (see dng_converter). The baseline exposure needs only the tags, so it
+        // is read here all the same - left out, these photos came up 0.7 EV darker than an ordinary NEF
+        // from the same camera. Nikon's HE cameras are all colour. The white balance needs the image,
+        // so it stays the reference one, as before.
+        Err(err)
+            if crate::decode::dng_converter::is_unsupported_nef_compression_text(
+                &err.to_string(),
+            ) =>
+        {
+            return Some(AsShot {
+                white_balance: WhiteBalance::reference(),
+                exposure: crate::decode::baseline_exposure::read(
+                    decoder.as_ref(),
+                    file_bytes,
+                    false,
+                ),
+            });
+        }
+        Err(_) => return None,
+    };
     raw_image.wb_coeffs = crate::decode::multi_exposure::neutralize_wb_if_multiexposure(
         raw_image.wb_coeffs,
         file_bytes,
