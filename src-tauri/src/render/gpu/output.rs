@@ -391,14 +391,24 @@ fn process_and_get_dynamic_image_inner(
     let texture_size = [processor_state.width as f32, processor_state.height as f32];
     if let (Some(layer), Some(display)) = (display_layer, display) {
         match layer {
-            DisplayLayer::Edited => display.show_texture(
-                device,
-                queue,
-                &processor.display_textures().output_texture_view,
-                image_size,
-                texture_size,
-                display_output.map(|output| output.content),
-            ),
+            DisplayLayer::Edited => {
+                // where this picture comes from on its warped source, for the focus map to be placed by
+                let transform = &source.transform;
+                display.set_focus_frame(
+                    transform
+                        .frame
+                        .uv_to_source(transform.working_size(source_size)),
+                    transform.warp_key(),
+                );
+                display.show_texture(
+                    device,
+                    queue,
+                    &processor.display_textures().output_texture_view,
+                    image_size,
+                    texture_size,
+                    display_output.map(|output| output.content),
+                )
+            }
             DisplayLayer::Original => {
                 display.latest_transform.original_size = image_size;
                 display.rebind(device);

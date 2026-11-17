@@ -24,6 +24,30 @@ pub struct DisplayTransform {
     // Both are vec4 and sit on the end, where the sixteen-byte alignment is already met.
     pub peak: [f32; 4],
     pub peak_color: [f32; 4],
+    // the focus map: x is 1 while it belongs to the picture shown, y its number of levels; and the rows of
+    // the matrix taking the picture's uv to the map's (see `Frame::uv_to_source`)
+    pub peak_map: [f32; 4],
+    pub peak_u: [f32; 4],
+    pub peak_v: [f32; 4],
+}
+
+/// A photo's focus map on the GPU (see `render::focus_map`), with the photo and the lens and perspective
+/// corrections it was made for.
+pub struct FocusMapTexture {
+    _texture: wgpu::Texture,
+    view: wgpu::TextureView,
+    content: u64,
+    warp_key: u64,
+    levels: u32,
+}
+
+/// How the picture on screen is framed from its warped source: the matrix from its uv to the source's,
+/// and which warp that source had. Set with every frame, so the focus map follows a crop or a rotation at
+/// once, without being made again.
+#[derive(Clone, Copy)]
+pub struct FocusFrame {
+    uv_to_map: [[f32; 4]; 2],
+    warp_key: u64,
 }
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
@@ -50,6 +74,9 @@ impl Default for DisplayTransform {
             split_offset: [0.0, 0.0],
             peak: [0.0, 0.5, 0.0, 0.0],
             peak_color: [1.0, 0.16, 0.36, 1.0],
+            peak_map: [0.0; 4],
+            peak_u: [0.0; 4],
+            peak_v: [0.0; 4],
         }
     }
 }
@@ -105,6 +132,10 @@ pub struct WgpuDisplay {
     pub current_bind_group: Option<wgpu::BindGroup>,
     pub edited_view: Option<wgpu::TextureView>,
     pub original_texture: Option<(wgpu::Texture, wgpu::TextureView)>,
+    pub focus_map: Option<FocusMapTexture>,
+    pub focus_frame: Option<FocusFrame>,
+    // bound in the focus map's place while there is none; never read then
+    pub blank_map: (wgpu::Texture, wgpu::TextureView),
     pub standalone: bool,
     pub view: DisplayView,
     pub frame: Option<DisplayFrame>,
@@ -155,6 +186,10 @@ impl WgpuDisplay {
             .original_texture
             .as_ref()
             .map_or(edited_view, |(_, view)| view);
+        let map_view = self
+            .focus_map
+            .as_ref()
+            .map_or(&self.blank_map.1, |map| &map.view);
         self.current_bind_group = Some(device.create_bind_group(&wgpu::BindGroupDescriptor {
             layout: &self.bind_group_layout,
             entries: &[
@@ -174,9 +209,87 @@ impl WgpuDisplay {
                     binding: 3,
                     resource: wgpu::BindingResource::TextureView(original_view),
                 },
+                wgpu::BindGroupEntry {
+                    binding: 4,
+                    resource: wgpu::BindingResource::TextureView(map_view),
+                },
             ],
             label: None,
         }));
+    }
+
+    /// Puts a photo's focus map on the GPU for focus peaking to draw from, with the photo and the warp it
+    /// was made for. Levels too large for the GPU are left out; the map's uv stays the same.
+    pub fn set_focus_map(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        content: u64,
+        warp_key: u64,
+        map: &crate::render::focus_map::FocusMap,
+    ) {
+        let max = device.limits().max_texture_dimension_2d;
+        let levels: Vec<_> = map
+            .levels
+            .iter()
+            .skip_while(|level| level.width > max || level.height > max)
+            .collect();
+        let Some(first) = levels.first() else {
+            return;
+        };
+        let texture = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("Focus Map"),
+            size: wgpu::Extent3d {
+                width: first.width,
+                height: first.height,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: levels.len() as u32,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::R8Unorm,
+            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+            view_formats: &[],
+        });
+        for (mip, level) in levels.iter().enumerate() {
+            queue.write_texture(
+                wgpu::TexelCopyTextureInfo {
+                    texture: &texture,
+                    mip_level: mip as u32,
+                    origin: wgpu::Origin3d::ZERO,
+                    aspect: wgpu::TextureAspect::All,
+                },
+                &level.data,
+                wgpu::TexelCopyBufferLayout {
+                    offset: 0,
+                    bytes_per_row: Some(level.width),
+                    rows_per_image: Some(level.height),
+                },
+                wgpu::Extent3d {
+                    width: level.width,
+                    height: level.height,
+                    depth_or_array_layers: 1,
+                },
+            );
+        }
+        self.focus_map = Some(FocusMapTexture {
+            view: texture.create_view(&Default::default()),
+            _texture: texture,
+            content,
+            warp_key,
+            levels: levels.len() as u32,
+        });
+        self.rebind(device);
+        self.flush(device, queue);
+    }
+
+    /// Says how the picture about to be shown is framed from its warped source (see `FocusFrame`).
+    pub fn set_focus_frame(&mut self, uv_to_map: [[f64; 3]; 2], warp_key: u64) {
+        let row = |r: [f64; 3]| [r[0] as f32, r[1] as f32, r[2] as f32, 0.0];
+        self.focus_frame = Some(FocusFrame {
+            uv_to_map: [row(uv_to_map[0]), row(uv_to_map[1])],
+            warp_key,
+        });
     }
 
     pub fn show_texture(
@@ -308,6 +421,20 @@ impl WgpuDisplay {
     }
 
     pub fn flush(&mut self, device: &wgpu::Device, queue: &wgpu::Queue) -> bool {
+        // The focus map is drawn from only while it is the shown photo's and was made with the warp the
+        // shown picture has; it is placed with the framing of the picture as it was last rendered. In
+        // between - a new photo, a lens or perspective change - nothing is marked, rather than marks in
+        // the wrong place or from another way of reading focus.
+        match (&self.focus_map, &self.focus_frame) {
+            (Some(map), Some(frame))
+                if self.content_key == Some(map.content) && frame.warp_key == map.warp_key =>
+            {
+                self.latest_transform.peak_map = [1.0, map.levels as f32, 0.0, 0.0];
+                self.latest_transform.peak_u = frame.uv_to_map[0];
+                self.latest_transform.peak_v = frame.uv_to_map[1];
+            }
+            _ => self.latest_transform.peak_map = [0.0; 4],
+        }
         queue.write_buffer(
             &self.transform_buffer,
             0,
@@ -551,8 +678,34 @@ pub fn build_wgpu_display(
                     multisampled: false,
                 },
             },
+            wgpu::BindGroupLayoutEntry {
+                binding: 4,
+                visibility: wgpu::ShaderStages::FRAGMENT,
+                count: None,
+                ty: wgpu::BindingType::Texture {
+                    sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                    view_dimension: wgpu::TextureViewDimension::D2,
+                    multisampled: false,
+                },
+            },
         ],
     });
+
+    let blank_map = device.create_texture(&wgpu::TextureDescriptor {
+        label: Some("No Focus Map"),
+        size: wgpu::Extent3d {
+            width: 1,
+            height: 1,
+            depth_or_array_layers: 1,
+        },
+        mip_level_count: 1,
+        sample_count: 1,
+        dimension: wgpu::TextureDimension::D2,
+        format: wgpu::TextureFormat::R8Unorm,
+        usage: wgpu::TextureUsages::TEXTURE_BINDING,
+        view_formats: &[],
+    });
+    let blank_map_view = blank_map.create_view(&Default::default());
 
     let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
         label: Some("Display Pipeline Layout"),
@@ -616,6 +769,9 @@ pub fn build_wgpu_display(
         current_bind_group: None,
         edited_view: None,
         original_texture: None,
+        focus_map: None,
+        focus_frame: None,
+        blank_map: (blank_map, blank_map_view),
         standalone,
         view: DisplayView::default(),
         frame: None,
@@ -718,13 +874,16 @@ pub fn wgpu_display_failed() -> bool {
 mod tests {
     use super::DisplayTransform;
 
-    // the shader's `Transform` block is 160 bytes (the last two vec4 sit on 16-byte boundaries, at 128 and
-    // 144), and the card reads exactly what is written from `DisplayTransform`
+    // the shader's `Transform` block is 208 bytes (the last five vec4 sit on 16-byte boundaries, from 128
+    // on), and the card reads exactly what is written from `DisplayTransform`
     #[test]
     fn display_transform_matches_the_shader_block() {
-        assert_eq!(std::mem::size_of::<DisplayTransform>(), 160);
+        assert_eq!(std::mem::size_of::<DisplayTransform>(), 208);
         assert_eq!(std::mem::offset_of!(DisplayTransform, peak), 128);
         assert_eq!(std::mem::offset_of!(DisplayTransform, peak_color), 144);
+        assert_eq!(std::mem::offset_of!(DisplayTransform, peak_map), 160);
+        assert_eq!(std::mem::offset_of!(DisplayTransform, peak_u), 176);
+        assert_eq!(std::mem::offset_of!(DisplayTransform, peak_v), 192);
     }
 
     // WGSL compiles when it first runs, so run it: build the display shader on a real device and fail on
