@@ -20,6 +20,7 @@ use rayon::prelude::*;
 use std::borrow::Cow;
 use std::cell::Cell;
 use std::panic::{AssertUnwindSafe, catch_unwind};
+use std::path::Path;
 use std::sync::{
     Arc,
     atomic::{AtomicUsize, Ordering},
@@ -597,12 +598,62 @@ fn cfa_white_balance(raw_image: &RawImage) -> Option<[f32; 3]> {
     }
 }
 
-pub fn read_as_shot(file_bytes: &[u8]) -> Option<AsShot> {
+/// What a raw says about how it was shot: its white balance and the exposure it was meant to have. The
+/// flag says whether that is all of it - `false` only for an HE NEF whose DNG is not made yet, whose
+/// white balance is the reference one for now and should be read again once the DNG is there.
+pub fn read_as_shot(file_bytes: &[u8], source_path: &Path) -> Option<(AsShot, bool)> {
     let source = RawSource::new_from_slice(file_bytes);
     let decoder = rawler::get_decoder(&source).ok()?;
-    let mut raw_image = decoder
-        .raw_image(&source, &RawDecodeParams::default(), true)
-        .ok()?;
+    let mut raw_image = match decoder.raw_image(&source, &RawDecodeParams::default(), true) {
+        Ok(raw_image) => raw_image,
+        // A Nikon HE/HE* NEF (the Z6 III's High Efficiency modes): rawler reads its tags but not its image
+        // data, and the photo itself is developed through a DNG (see dng_converter). The baseline
+        // exposure needs only the NEF's tags and is read from them, the same way as for an ordinary NEF.
+        // The camera's as-shot neutral and colour matrices sit with the image data; Adobe DNG Converter
+        // writes the camera's own into the DNG, and they are read from there without decoding a pixel.
+        Err(err)
+            if crate::decode::dng_converter::is_unsupported_nef_compression_text(
+                &err.to_string(),
+            ) =>
+        {
+            let white_balance = crate::decode::dng_converter::converted_dng(source_path)
+                .and_then(|dng| crate::library::file_ops::read_file_mapped(&dng).ok())
+                .and_then(|dng_bytes| {
+                    let dng_source = RawSource::new_from_slice(&dng_bytes);
+                    let mut dng_image = rawler::get_decoder(&dng_source)
+                        .ok()?
+                        .raw_image(&dng_source, &RawDecodeParams::default(), true)
+                        .ok()?;
+                    dng_image.wb_coeffs =
+                        crate::decode::multi_exposure::neutralize_wb_if_multiexposure(
+                            dng_image.wb_coeffs,
+                            file_bytes,
+                        );
+                    as_shot_color(&dng_image).map(|(white_balance, _)| white_balance)
+                });
+            if let Some(white_balance) = white_balance {
+                log::info!(
+                    "As-shot white balance of HE NEF '{}' read from its DNG: {:.0} K, tint {:+.1}",
+                    source_path.display(),
+                    white_balance.temperature,
+                    white_balance.tint
+                );
+            }
+            return Some((
+                AsShot {
+                    white_balance: white_balance.unwrap_or_else(WhiteBalance::reference),
+                    // Nikon's HE cameras are all colour
+                    exposure: crate::decode::baseline_exposure::read(
+                        decoder.as_ref(),
+                        file_bytes,
+                        false,
+                    ),
+                },
+                white_balance.is_some(),
+            ));
+        }
+        Err(_) => return None,
+    };
     raw_image.wb_coeffs = crate::decode::multi_exposure::neutralize_wb_if_multiexposure(
         raw_image.wb_coeffs,
         file_bytes,
@@ -610,18 +661,21 @@ pub fn read_as_shot(file_bytes: &[u8]) -> Option<AsShot> {
     let is_monochrome = raw_image.cpp == 1
         && !matches!(raw_image.photometric, RawPhotometricInterpretation::Cfa(_));
 
-    Some(AsShot {
-        white_balance: (!is_monochrome)
-            .then(|| as_shot_color(&raw_image))
-            .flatten()
-            .map(|(white_balance, _)| white_balance)
-            .unwrap_or_else(WhiteBalance::reference),
-        exposure: crate::decode::baseline_exposure::read(
-            decoder.as_ref(),
-            file_bytes,
-            is_monochrome,
-        ),
-    })
+    Some((
+        AsShot {
+            white_balance: (!is_monochrome)
+                .then(|| as_shot_color(&raw_image))
+                .flatten()
+                .map(|(white_balance, _)| white_balance)
+                .unwrap_or_else(WhiteBalance::reference),
+            exposure: crate::decode::baseline_exposure::read(
+                decoder.as_ref(),
+                file_bytes,
+                is_monochrome,
+            ),
+        },
+        true,
+    ))
 }
 
 fn camera_neutral(raw_image: &RawImage) -> [f32; 4] {
