@@ -98,8 +98,18 @@ pub fn prepare(
     })
 }
 
+/// The most pixels the stack of blurred layers is worked out on. The stack is several four-float
+/// textures at the size it runs at: on a 24-megapixel photo at full size (the editor zoomed in, or an
+/// export) a small blur kept it there, with gigabytes of textures and about four seconds a render.
+/// Above this it runs at a fraction of the size. Only what is out of focus comes from the stack - the
+/// sharp part of the picture is kept at its own size - so the stack's own softness is not seen.
+const STACK_MAX_PIXELS: usize = 8_000_000;
+
 fn downsample_factor(pixels: usize, max_radius: f32) -> usize {
     let mut ds = (max_radius / 18.0).ceil().max(1.0) as usize;
+    while ds < 6 && pixels / (ds * ds) > STACK_MAX_PIXELS {
+        ds += 1;
+    }
     while ds < 6 {
         let rw = max_radius / ds as f32;
         let taps = (std::f32::consts::PI * rw * rw).min(128.0) as f64;
@@ -504,4 +514,53 @@ pub fn encode(enc: &mut ComputeEncoder, job: &LensBlur, src: &Slot, dst: &Slot) 
             ..Default::default()
         },
     );
+}
+
+#[cfg(test)]
+mod tests {
+    use super::downsample_factor;
+
+    // the radius a blur amount comes to on a picture, as `prepare` works it out
+    fn radius(amount: f32, long_side: f32) -> f32 {
+        amount / 100.0 * long_side * 0.012
+    }
+
+    #[test]
+    fn a_small_blur_on_a_full_size_photo_does_not_run_at_full_size() {
+        let full = 6048 * 4032;
+        for amount in [2.0, 4.0, 10.0, 40.0, 100.0] {
+            assert!(
+                downsample_factor(full, radius(amount, 6048.0)) >= 2,
+                "amount {amount} kept the stack at full size"
+            );
+        }
+    }
+
+    #[test]
+    fn previews_keep_the_size_they_had() {
+        // the factor as it was worked out before there was a cap
+        let before = |pixels: usize, max_radius: f32| {
+            let mut ds = (max_radius / 18.0).ceil().max(1.0) as usize;
+            while ds < 6 {
+                let rw = max_radius / ds as f32;
+                let taps = (std::f32::consts::PI * rw * rw).min(128.0) as f64;
+                if (pixels as f64 / (ds * ds) as f64) * taps <= 7.0e8 {
+                    break;
+                }
+                ds += 1;
+            }
+            ds
+        };
+        // fit to the window, and the editor at 35%
+        for (w, h) in [(1536usize, 1024usize), (2816, 1877)] {
+            for amount in [1.0, 2.0, 4.0, 10.0, 40.0, 100.0] {
+                let r = radius(amount, w as f32);
+                assert_eq!(
+                    downsample_factor(w * h, r),
+                    before(w * h, r),
+                    "{w}x{h} at amount {amount}"
+                );
+            }
+        }
+    }
 }
