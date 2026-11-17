@@ -5,6 +5,7 @@ import { Adjustments, BasicAdjustment } from '../../utils/adjustments';
 import { useEffect, useRef, useState, useMemo, memo } from 'react';
 import { useTranslation } from 'react-i18next';
 import { areSectionPropsEqual } from '../../utils/adjustments';
+import { InfluenceTarget, TONE_INFLUENCE } from '../../utils/influencePreview';
 
 interface BasicAdjustmentsProps {
   adjustments: Adjustments;
@@ -180,6 +181,17 @@ function BasicAdjustments({
 
   const hideTonemapper = isForMask || appSettings?.tonemapperOverrideEnabled;
 
+  // Alt held on a tonal slider shows where it acts (global adjustments only)
+  const influence = useMemo(() => {
+    if (isForMask) return {} as Partial<Record<keyof typeof TONE_INFLUENCE, InfluenceTarget>>;
+    return Object.fromEntries(
+      (Object.keys(TONE_INFLUENCE) as Array<keyof typeof TONE_INFLUENCE>).map((key) => [
+        key,
+        { kind: 'tone', index: TONE_INFLUENCE[key], label: t(`adjustments.basic.${key}`) },
+      ]),
+    ) as Partial<Record<keyof typeof TONE_INFLUENCE, InfluenceTarget>>;
+  }, [isForMask, t]);
+
   return (
     <div>
       {hideTonemapper ? (
@@ -224,6 +236,7 @@ function BasicAdjustments({
         step={1}
         value={adjustments.highlights}
         onDragStateChange={onDragStateChange}
+        influence={influence.highlights}
       />
       <Slider
         resetKey="shadows"
@@ -235,6 +248,7 @@ function BasicAdjustments({
         step={1}
         value={adjustments.shadows}
         onDragStateChange={onDragStateChange}
+        influence={influence.shadows}
       />
       <Slider
         resetKey="whites"
@@ -246,6 +260,7 @@ function BasicAdjustments({
         step={1}
         value={adjustments.whites}
         onDragStateChange={onDragStateChange}
+        influence={influence.whites}
       />
       <Slider
         resetKey="blacks"
@@ -257,6 +272,7 @@ function BasicAdjustments({
         step={1}
         value={adjustments.blacks}
         onDragStateChange={onDragStateChange}
+        influence={influence.blacks}
       />
       <Slider
         resetKey="brightness"

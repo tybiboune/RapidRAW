@@ -511,6 +511,7 @@
         "toggleAnalytics": "Attiva/Disattiva Visualizzazione Analitiche"
       }
     },
+    "affectedAreas": "Aree interessate",
     "ai": {
       "actions": {
         "addNewComponent": "Aggiungi Nuovo Componente",

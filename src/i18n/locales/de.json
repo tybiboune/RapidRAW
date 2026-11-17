@@ -493,6 +493,7 @@
         "toggleAnalytics": "Analyseanzeige umschalten"
       }
     },
+    "affectedAreas": "Betroffene Bereiche",
     "ai": {
       "actions": {
         "addNewComponent": "Neue Komponente hinzufügen",

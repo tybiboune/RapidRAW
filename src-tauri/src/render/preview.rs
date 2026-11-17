@@ -312,6 +312,38 @@ pub fn get_cached_full_warped_image_for_path(
     Ok(warped_arc)
 }
 
+/// The "affected areas" view of one control: while Alt is held on it, the preview shows how strongly
+/// it acts on each pixel instead of the photo. It only rides along with a render request, so it never
+/// reaches the adjustments, their hashes, history, sidecars or exports.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum InfluenceKind {
+    /// a Colour Mixer slider: index = band * 3 + slider (0 hue, 1 saturation, 2 luminance)
+    Hsl,
+    /// 0 highlights, 1 shadows, 2 whites, 3 blacks
+    Tone,
+    /// a Colour Grading zone: 0 shadows, 1 midtones, 2 highlights
+    Grading,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Deserialize)]
+pub struct Influence {
+    pub kind: InfluenceKind,
+    pub index: u32,
+}
+
+impl Influence {
+    /// the shader's (kind, index), or None for an index the control does not have
+    fn uniform(self) -> Option<(u32, u32)> {
+        let (kind, count) = match self.kind {
+            InfluenceKind::Hsl => (1, 24),
+            InfluenceKind::Tone => (2, 4),
+            InfluenceKind::Grading => (3, 3),
+        };
+        (self.index < count).then_some((kind, self.index))
+    }
+}
+
 pub struct EditorRender {
     adjustments: AllAdjustments,
     masks: crate::masks::generation::GeneratedMasks,
@@ -377,9 +409,15 @@ impl EditorRender {
         &self,
         roi: Option<crate::render::gpu::processor::Roi>,
         hsl_probe: bool,
+        influence: Option<Influence>,
     ) -> RenderRequest<'_> {
+        let mut adjustments = self.adjustments;
+        if let Some((kind, index)) = influence.and_then(Influence::uniform) {
+            adjustments.global.influence_kind = kind;
+            adjustments.global.influence_index = index;
+        }
         RenderRequest {
-            adjustments: self.adjustments,
+            adjustments,
             mask_bitmaps: &self.masks.bitmaps,
             mask_cache_key: Some(self.mask_cache_key),
             lut: self.lut.clone(),

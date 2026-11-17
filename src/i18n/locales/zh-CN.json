@@ -493,6 +493,7 @@
         "toggleAnalytics": "切换分析显示"
       }
     },
+    "affectedAreas": "受影响区域",
     "ai": {
       "actions": {
         "addNewComponent": "添加新组件",

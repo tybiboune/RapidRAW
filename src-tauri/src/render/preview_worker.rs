@@ -11,7 +11,7 @@ use crate::render::cache_utils::{
 use crate::render::gpu::context::get_or_init_gpu_context;
 use crate::render::gpu::display::DisplayLayer;
 use crate::render::options::resolve_render_options;
-use crate::render::preview::{EditorRender, prepare_preview_source};
+use crate::render::preview::{EditorRender, Influence, prepare_preview_source};
 use crate::render::source::RenderSource;
 use image::DynamicImage;
 use imgref::ImgRef;
@@ -35,6 +35,7 @@ fn process_preview_job(
     request_analytics: bool,
     compute_waveform: bool,
     active_waveform_channel: Option<&str>,
+    influence: Option<Influence>,
     target: PreviewTarget,
 ) -> Result<Vec<u8>, String> {
     let fn_start = std::time::Instant::now();
@@ -56,7 +57,9 @@ fn process_preview_job(
         patch_hash: calculate_patch_hash(&adjustments_json),
         render,
     };
-    let mirrors_editor = target == PreviewTarget::Editor && layer == DisplayLayer::Edited;
+    // the affected-areas view is not the photo: the viewer window and the histogram keep the last one
+    let mirrors_editor =
+        target == PreviewTarget::Editor && layer == DisplayLayer::Edited && influence.is_none();
     if mirrors_editor {
         crate::platform::viewer_window::record_editor_source(
             app_handle,
@@ -231,7 +234,8 @@ fn process_preview_job(
         image_generation,
     );
 
-    let wants_analytics = !(is_interactive && pixel_roi.is_some()) && request_analytics;
+    let wants_analytics =
+        !(is_interactive && pixel_roi.is_some()) && request_analytics && influence.is_none();
     let channel_filter = if is_interactive {
         active_waveform_channel.map(|s| s.to_string())
     } else {
@@ -289,7 +293,7 @@ fn process_preview_job(
             &context,
             &state,
             &processing_source,
-            editor_render.request(pixel_roi, false),
+            editor_render.request(pixel_roi, false, influence),
             caller_id,
             display_output,
             analytics,
@@ -500,6 +504,7 @@ fn run_editor_job(app_handle: &tauri::AppHandle, job: PreviewJob) {
             job.request_analytics,
             job.compute_waveform,
             job.active_waveform_channel.as_deref(),
+            job.influence,
             PreviewTarget::Editor,
         )
     });
@@ -512,7 +517,7 @@ fn run_editor_job(app_handle: &tauri::AppHandle, job: PreviewJob) {
             {
                 state.image_preloader.frame_rendered(&path);
             }
-            if job.layer == DisplayLayer::Edited && !job.is_interactive {
+            if job.layer == DisplayLayer::Edited && !job.is_interactive && job.influence.is_none() {
                 crate::platform::viewer_window::schedule_viewer_render(app_handle);
             }
         }
@@ -539,6 +544,7 @@ fn run_viewer_job(app_handle: &tauri::AppHandle) {
             None,
             false,
             false,
+            None,
             None,
             PreviewTarget::Viewer,
         )

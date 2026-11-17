@@ -90,9 +90,9 @@ struct GlobalAdjustments {
     lut_is_scene_referred: u32,
     vignette_center_x: f32,
     vignette_center_y: f32,
-    _pad_lut5: f32,
+    influence_kind: u32,
 
-    _pad_agx1: f32,
+    influence_index: u32,
     _pad_agx2: f32,
     _pad_agx3: f32,
     agx_pipe_to_rendering_matrix: mat3x3<f32>,
@@ -344,6 +344,7 @@ const F_LUT: u32 = 256u;
 const F_CA: u32 = 512u;
 const F_AGX: u32 = 1024u;
 const F_MONOCHROME: u32 = 2048u;
+const F_INFLUENCE: u32 = 4096u;
 
 fn has_feature(f: u32) -> bool {
     return (FEATURES & f) != 0u;
@@ -1051,6 +1052,56 @@ fn color_grade_regions(lightness: f32, feather: f32, balance: f32) -> vec3<f32> 
     let shadow = 1.0 - smoothstep(shadow_split - feather, shadow_split + feather, lightness);
     let highlight = smoothstep(highlight_split - feather, highlight_split + feather, lightness);
     return vec3<f32>(shadow, max(1.0 - shadow - highlight, 0.0), highlight);
+}
+
+// The "affected areas" view (hold Alt on a control): how strongly one control acts on each pixel,
+// from 0 to 1. It is drawn instead of the photo and never saved or exported.
+const INFLUENCE_HSL: u32 = 1u;
+const INFLUENCE_TONE: u32 = 2u;
+const INFLUENCE_GRADING: u32 = 3u;
+// a tonal control is nudged by this much both ways, and the change in brightness it makes is
+// read against INFLUENCE_TONE_EV, so it shows where it acts even while it is at zero
+const INFLUENCE_TONE_PROBE: f32 = 0.5;
+const INFLUENCE_TONE_EV: f32 = 0.35;
+// how much of the tone map's brightness is the weight alone rather than the photo's own texture
+const INFLUENCE_TONE_BASE: f32 = 0.7;
+
+// the weight of one Colour Mixer band, as apply_hsl_panel gives it: index = band * 3 + slider
+// (0 hue, 1 saturation, 2 luminance)
+fn hsl_band_weight(color: vec3<f32>, index: u32) -> f32 {
+    let safe_color = max(color, vec3<f32>(0.0));
+    if (distance(safe_color.r, safe_color.g) < 0.001 && distance(safe_color.g, safe_color.b) < 0.001) {
+        return 0.0;
+    }
+    let hsv = rgb_to_hsv(linear_to_srgb_extended(safe_color));
+    let band = min(index / 3u, 7u);
+    var total = 0.0;
+    var own = 0.0;
+    for (var i = 0u; i < 8u; i = i + 1u) {
+        let influence = get_raw_hsl_influence(hsv.x, HSL_RANGES[i].center, HSL_RANGES[i].width);
+        total += influence;
+        if (i == band) {
+            own = influence;
+        }
+    }
+    let gate = select(smoothstep(0.05, 0.20, hsv.y), smoothstep(0.0, 1.0, hsv.y), index % 3u == 2u);
+    return own / max(total, 1.0e-6) * gate;
+}
+
+// the weight of one Colour Grading zone (0 shadows, 1 midtones, 2 highlights), as apply_color_grading gives it
+fn grading_zone_weight(color: vec3<f32>, index: u32, blending: f32, balance: f32) -> f32 {
+    let scene_lightness = signed_cbrt(get_luma(max(color, vec3<f32>(0.0))));
+    let lightness = 0.5 * (display_lightness(scene_lightness - CG_SLOPE_STEP) + display_lightness(scene_lightness + CG_SLOPE_STEP));
+    let regions = color_grade_regions(lightness, CG_FEATHER_MIN + CG_FEATHER_RANGE * blending, balance);
+    return regions[min(index, 2u)];
+}
+
+// how far a tonal control moves a pixel, from the brightness after nudging it down and up
+fn tone_probe_weight(base: vec3<f32>, lower: vec3<f32>, upper: vec3<f32>) -> f32 {
+    let at = log2(max(get_luma(max(base, vec3<f32>(0.0))), TONE_FLOOR));
+    let down = abs(log2(max(get_luma(max(lower, vec3<f32>(0.0))), TONE_FLOOR)) - at);
+    let up = abs(log2(max(get_luma(max(upper, vec3<f32>(0.0))), TONE_FLOOR)) - at);
+    return 1.0 - exp(-0.5 * (down + up) / INFLUENCE_TONE_EV);
 }
 
 fn fit_grade_gamut(graded: vec3<f32>, lower_bound: f32) -> vec3<f32> {
@@ -2221,12 +2272,28 @@ fn main(
     let white_level = tone_stats.x + t_exposure;
     let tone_broad = sampled_base.tone_detail * max(detail_core(sampled_base.tone_detail, LC_BROAD_CORE), textured);
     let toned = apply_tonal_adjustments(composite_rgb_linear, detail_fine + lc_log_gain, detail_broad, tone_broad, sampled_base.clipped, t_highlights, t_shadows, white_level);
+    let influence_kind = select(0u, adjustments.global.influence_kind, has_feature(F_INFLUENCE));
+    let influence_index = adjustments.global.influence_index;
+    var influence_weight = 1.0;
+    if (influence_kind == INFLUENCE_TONE && influence_index < 2u) {
+        let nudge = select(vec2<f32>(0.0, INFLUENCE_TONE_PROBE), vec2<f32>(INFLUENCE_TONE_PROBE, 0.0), influence_index == 0u);
+        let lower = apply_tonal_adjustments(composite_rgb_linear, detail_fine + lc_log_gain, detail_broad, tone_broad, sampled_base.clipped, t_highlights - nudge.x, t_shadows - nudge.y, white_level);
+        let upper = apply_tonal_adjustments(composite_rgb_linear, detail_fine + lc_log_gain, detail_broad, tone_broad, sampled_base.clipped, t_highlights + nudge.x, t_shadows + nudge.y, white_level);
+        influence_weight = tone_probe_weight(toned.rgb, lower.rgb, upper.rgb);
+    }
     var contrast_key = 0.0;
     if (t_contrast != 0.0) {
         contrast_key = toned_key(tone_stats.w + adjustments.global.exposure, tone_stats.x + adjustments.global.exposure);
     }
     composite_rgb_linear = apply_contrast(toned.rgb, t_contrast, contrast_key);
-    composite_rgb_linear = apply_tone_ends(composite_rgb_linear, toned.w, detail_fine + lc_log_gain, tone_broad, t_highlights, t_whites, t_blacks);
+    let contrasted = composite_rgb_linear;
+    composite_rgb_linear = apply_tone_ends(contrasted, toned.w, detail_fine + lc_log_gain, tone_broad, t_highlights, t_whites, t_blacks);
+    if (influence_kind == INFLUENCE_TONE && influence_index >= 2u) {
+        let nudge = select(vec2<f32>(0.0, INFLUENCE_TONE_PROBE), vec2<f32>(INFLUENCE_TONE_PROBE, 0.0), influence_index == 2u);
+        let lower = apply_tone_ends(contrasted, toned.w, detail_fine + lc_log_gain, tone_broad, t_highlights, t_whites - nudge.x, t_blacks - nudge.y);
+        let upper = apply_tone_ends(contrasted, toned.w, detail_fine + lc_log_gain, tone_broad, t_highlights, t_whites + nudge.x, t_blacks + nudge.y);
+        influence_weight = tone_probe_weight(composite_rgb_linear, lower, upper);
+    }
     let is_monochrome = has_feature(F_MONOCHROME) && adjustments.global.monochrome.enabled == 1u;
     if (!is_monochrome) {
         composite_rgb_linear = apply_color_calibration(composite_rgb_linear, adjustments.global.color_calibration);
@@ -2238,6 +2305,9 @@ fn main(
     if (is_monochrome) {
         composite_rgb_linear = apply_monochrome_mix(composite_rgb_linear, adjustments.global.monochrome, final_hsl);
     } else {
+        if (influence_kind == INFLUENCE_HSL) {
+            influence_weight = hsl_band_weight(composite_rgb_linear, influence_index);
+        }
         if (has_feature(F_HSL)) {
             composite_rgb_linear = apply_hsl_panel(composite_rgb_linear, final_hsl, absolute_coord_i);
         }
@@ -2245,6 +2315,9 @@ fn main(
         composite_rgb_linear = apply_creative_color(composite_rgb_linear, t_saturation, t_vibrance);
     }
 
+    if (influence_kind == INFLUENCE_GRADING) {
+        influence_weight = grading_zone_weight(composite_rgb_linear, influence_index, adjustments.global.color_grading_blending, adjustments.global.color_grading_balance);
+    }
     composite_rgb_linear = apply_color_grading(
         composite_rgb_linear,
         adjustments.global.color_grading_shadows,
@@ -2328,7 +2401,15 @@ fn main(
         final_rgb += vec3<f32>(grained - luma);
     }
 
-    if (adjustments.global.show_clipping == 1u) {
+    if (influence_kind != 0u) {
+        // colour controls: the pixels they act on in their resulting colour, the rest black. Tonal
+        // controls: how strongly, as a light map with a trace of the photo's texture to find one's way,
+        // since the pixels Blacks or Shadows act on would otherwise be too dark to read
+        let weight = clamp(influence_weight, 0.0, 1.0);
+        let texture = get_luma(clamp(final_rgb, vec3<f32>(0.0), vec3<f32>(1.0)));
+        let tone_map = vec3<f32>(weight * (INFLUENCE_TONE_BASE + (1.0 - INFLUENCE_TONE_BASE) * texture));
+        final_rgb = select(final_rgb * weight, tone_map, influence_kind == INFLUENCE_TONE);
+    } else if (adjustments.global.show_clipping == 1u) {
         let HIGHLIGHT_WARNING_COLOR = vec3<f32>(1.0, 0.0, 0.0);
         let SHADOW_WARNING_COLOR = vec3<f32>(0.0, 0.0, 1.0);
         let HIGHLIGHT_CLIP_THRESHOLD = 0.998;

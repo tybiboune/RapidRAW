@@ -130,6 +130,15 @@ re-renders the whole preview, and the "works at zero" requirement turns into a r
 Keep it in front-end state and the display uniform, and it costs one extra pass over a frame already on
 the card. It must also never reach `is_image_edited`, or looking at a photograph would mark it edited.
 
+**Done in this fork, differently.** Hold Alt on a tonal slider (Highlights, Shadows, Whites, Blacks), a
+Colour Mixer slider or a Colour Grading zone's wheel. The plan above assumed a display overlay, but the
+weights are only known inside the main shader, at each adjustment's own stage, so the influence rides
+along with one render request instead (`influence` on `apply_adjustments`, like the mixer picker's
+`hsl_probe`). It is copied into two spare uniform slots of that request only, so it still never reaches
+the adjustments, their hashes, history, sidecars, exports or `is_image_edited`. A hover costs one render
+of the frame already cached on the card, not a re-render from the source. Tonal controls are measured by
+nudging the control both ways at each pixel, which is what makes them work at zero.
+
 ---
 
 ## #1992 - Fine control for sliders

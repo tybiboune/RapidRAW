@@ -511,6 +511,7 @@
         "toggleAnalytics": "Alternar vista de análisis"
       }
     },
+    "affectedAreas": "Zonas afectadas",
     "ai": {
       "actions": {
         "addNewComponent": "Añadir nuevo componente",

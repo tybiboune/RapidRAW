@@ -40,6 +40,12 @@ import {
 import { TextColors, TextWeights } from '../../types/typography';
 import { useUIStore } from '../../store/useUIStore';
 import { HSL_MIXER_BANDS, HslMixerBand, HslMixerProperty } from '../../utils/hslMixer';
+import {
+  GRADING_INFLUENCE,
+  HSL_INFLUENCE_PROPERTIES,
+  InfluenceTarget,
+  influenceAttributes,
+} from '../../utils/influencePreview';
 
 interface ColorProps {
   color: string;
@@ -185,8 +191,19 @@ export const ColorSwatch = ({ color, name, isActive, ariaLabel, tooltip, onClick
   );
 };
 
-const ColorGradingPanel = ({ adjustments, setAdjustments, onDragStateChange }: ColorPanelProps) => {
+const ColorGradingPanel = ({ adjustments, setAdjustments, onDragStateChange, isForMask }: ColorPanelProps) => {
   const { t } = useTranslation();
+  // Alt held on a zone's wheel shows the tones it acts on (global adjustments only)
+  const zoneInfluence = (zone: keyof typeof GRADING_INFLUENCE) =>
+    influenceAttributes(
+      isForMask
+        ? null
+        : {
+            kind: 'grading',
+            index: GRADING_INFLUENCE[zone],
+            label: `${t('adjustments.color.colorGrading')} · ${t(`adjustments.color.grading.${zone}`)}`,
+          },
+    );
   const [activeTab, setActiveTab] = useState<'3way' | 'global'>('3way');
   const isExpanded = useUIStore((state) => state.isColorGradingExpanded);
   const colorGrading = adjustments.colorGrading || INITIAL_ADJUSTMENTS.colorGrading;
@@ -262,7 +279,7 @@ const ColorGradingPanel = ({ adjustments, setAdjustments, onDragStateChange }: C
               className="w-full"
             >
               <div className="flex justify-center mb-4">
-                <div className="w-[calc(50%-0.5rem)]">
+                <div className="w-[calc(50%-0.5rem)]" {...zoneInfluence('midtones')}>
                   <ColorWheel
                     defaultValue={INITIAL_ADJUSTMENTS.colorGrading.midtones}
                     label={t('adjustments.color.grading.midtones')}
@@ -274,7 +291,7 @@ const ColorGradingPanel = ({ adjustments, setAdjustments, onDragStateChange }: C
                 </div>
               </div>
               <div className="flex justify-between mb-2 gap-4">
-                <div className="w-full flex-1 min-w-0">
+                <div className="w-full flex-1 min-w-0" {...zoneInfluence('shadows')}>
                   <ColorWheel
                     defaultValue={INITIAL_ADJUSTMENTS.colorGrading.shadows}
                     label={t('adjustments.color.grading.shadows')}
@@ -284,7 +301,7 @@ const ColorGradingPanel = ({ adjustments, setAdjustments, onDragStateChange }: C
                     isExpanded={isExpanded}
                   />
                 </div>
-                <div className="w-full flex-1 min-w-0">
+                <div className="w-full flex-1 min-w-0" {...zoneInfluence('highlights')}>
                   <ColorWheel
                     defaultValue={INITIAL_ADJUSTMENTS.colorGrading.highlights}
                     label={t('adjustments.color.grading.highlights')}
@@ -786,6 +803,22 @@ function ColorPanel({
     [t],
   );
 
+  // Alt held on a mixer slider shows the colours its band acts on (global adjustments only)
+  const mixerInfluence = useMemo(() => {
+    const targets = new Map<string, InfluenceTarget>();
+    if (isForMask) return targets;
+    HSL_COLORS.forEach(({ name, label }, band) =>
+      mixerTabs.forEach(({ id, label: property }) =>
+        targets.set(`${name}-${id}`, {
+          kind: 'hsl',
+          index: band * 3 + HSL_INFLUENCE_PROPERTIES.indexOf(id),
+          label: `${label} · ${property}`,
+        }),
+      ),
+    );
+    return targets;
+  }, [HSL_COLORS, mixerTabs, isForMask]);
+
   const toggleMixerExpanded = () => {
     if (isMixerExpanded && mixerPickerProperty) setEditor({ mixerPickerProperty: null });
     setUI({ isColorMixerExpanded: !isMixerExpanded });
@@ -899,6 +932,7 @@ function ColorPanel({
       value={hsl[color][property]}
       trackClassName={`${MIXER_TRACK_PREFIX[property]}-slider-${color}`}
       onDragStateChange={onDragStateChange}
+      influence={mixerInfluence.get(`${color}-${property}`)}
     />
   );
 
@@ -1066,6 +1100,7 @@ function ColorPanel({
               setAdjustments={setAdjustments}
               appSettings={appSettings}
               onDragStateChange={onDragStateChange}
+              isForMask={isForMask}
             />
           )}
         </AdjustmentSubSection>

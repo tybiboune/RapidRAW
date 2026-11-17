@@ -493,6 +493,7 @@
         "toggleAnalytics": "분석 표시 전환"
       }
     },
+    "affectedAreas": "영향을 받는 영역",
     "ai": {
       "actions": {
         "addNewComponent": "새 구성 요소 추가",

@@ -242,6 +242,7 @@ pub struct PreviewJob {
     pub request_analytics: bool,
     pub compute_waveform: bool,
     pub active_waveform_channel: Option<String>,
+    pub influence: Option<crate::render::preview::Influence>,
     pub responder: tokio::sync::oneshot::Sender<Vec<u8>>,
 }
 

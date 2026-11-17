@@ -286,7 +286,7 @@ pub async fn sample_hsl_mixer_area(
             &context,
             &state,
             &source,
-            editor_render.request(Some(roi), true),
+            editor_render.request(Some(roi), true, None),
             "sample_hsl_mixer_area",
         )?;
         Ok(Response::new(probe.into_bytes()))
@@ -311,6 +311,7 @@ pub async fn apply_adjustments(
     request_analytics: bool,
     compute_waveform: bool,
     active_waveform_channel: Option<String>,
+    influence: Option<crate::render::preview::Influence>,
     state: tauri::State<'_, AppState>,
 ) -> Result<Response, String> {
     let (tx, rx) = tokio::sync::oneshot::channel();
@@ -331,6 +332,7 @@ pub async fn apply_adjustments(
                 request_analytics,
                 compute_waveform,
                 active_waveform_channel,
+                influence,
                 responder: tx,
             };
             worker_tx

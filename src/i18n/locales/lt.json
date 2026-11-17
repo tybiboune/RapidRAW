@@ -529,6 +529,7 @@
         "toggleAnalytics": "Perjungti analizės rodinį"
       }
     },
+    "affectedAreas": "Paveiktos sritys",
     "ai": {
       "actions": {
         "addNewComponent": "Pridėti naują komponentą",
