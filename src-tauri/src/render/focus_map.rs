@@ -158,11 +158,12 @@ fn gradient_magnitude(plane: &[f32], width: usize, height: usize) -> Vec<f32> {
         if y == 0 || y + 1 == height {
             return;
         }
-        for x in 1..width.saturating_sub(1) {
+        let inner = width.saturating_sub(2);
+        for (x, out) in row.iter_mut().enumerate().skip(1).take(inner) {
             let i = y * width + x;
             let gx = 0.5 * (plane[i + 1] - plane[i - 1]);
             let gy = 0.5 * (plane[i + width] - plane[i - width]);
-            row[x] = (gx * gx + gy * gy).sqrt();
+            *out = (gx * gx + gy * gy).sqrt();
         }
     });
     out
@@ -303,7 +304,7 @@ fn blur_map(plane: Vec<f32>, width: usize, height: usize) -> (Vec<u8>, f32, usiz
                 return 0;
             }
             let mut count = 0;
-            for x in 1..width - 1 {
+            for (x, texel) in row.iter_mut().enumerate().skip(1).take(width - 2) {
                 let i = y * width + x;
                 let m = magnitude[i];
                 if m < threshold || m < LOCAL_OVER_NOISE * blocks.around(x, y) {
@@ -324,7 +325,7 @@ fn blur_map(plane: Vec<f32>, width: usize, height: usize) -> (Vec<u8>, f32, usiz
                 if m < before || m <= after {
                     continue;
                 }
-                row[x] = if coarse_pooled[i] <= 0.0 || fine_pooled[i] <= 0.0 {
+                *texel = if coarse_pooled[i] <= 0.0 || fine_pooled[i] <= 0.0 {
                     254
                 } else {
                     stored_blur(&ratios, fine_pooled[i] / coarse_pooled[i])
@@ -398,13 +399,14 @@ mod tests {
 
     // Abramowitz & Stegun 7.1.26, good to 1.5e-7
     fn erf(x: f32) -> f32 {
+        let x = f64::from(x);
         let t = 1.0 / (1.0 + 0.3275911 * x.abs());
         let y = 1.0
             - (((((1.061405429 * t - 1.453152027) * t) + 1.421413741) * t - 0.284496736) * t
                 + 0.254829592)
                 * t
                 * (-x * x).exp();
-        if x < 0.0 { -y } else { y }
+        (if x < 0.0 { -y } else { y }) as f32
     }
 
     // a repeatable normal noise source
