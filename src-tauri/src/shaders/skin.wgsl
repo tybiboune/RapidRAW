@@ -482,9 +482,12 @@ fn clean_ring(pos: vec2<f32>, reach: f32) -> Ring {
     for (var i = 0u; i < 8u; i += 1u) {
         let angle = f32(i) * 0.78539816;
         let q = pos + vec2<f32>(cos(angle), sin(angle)) * 2.2 * reach;
-        let tap = tap_uv((q + 0.5) / dst, params.grid.dst);
-        let on_skin = tap_sample(t1, tap).w;
-        let clean = 1.0 - tap_sample(t5, tap).x;
+        let uv = (q + 0.5) / dst;
+        let tap = tap_uv(uv, params.grid.dst);
+        // the maps are on the copy the faults were found on, the picture at its own size
+        let found_tap = tap_uv(uv, textureDimensions(t1));
+        let on_skin = tap_sample(t1, found_tap).w;
+        let clean = 1.0 - tap_sample(t5, found_tap).x;
         let w = on_skin * clean * clean;
         let rgb = tap_sample(t0, tap).rgb;
         let luma = plain_luma(rgb);
@@ -524,7 +527,12 @@ fn sk_apply(@builtin(global_invocation_id) id: vec3<u32>) {
     if (outside(id)) { return; }
     let p = vec2<i32>(id.xy);
     let texel = textureLoad(t0, p, 0);
-    let maps = textureLoad(t1, p, 0);
+    // The maps were made on the copy the faults are looked for on, which is smaller than the picture
+    // when the picture is large: each is read at this pixel's place on it. When the two are the same
+    // size the read lands exactly on the texel.
+    let found_size = textureDimensions(t1);
+    let at = tap_uv((vec2<f32>(id.xy) + 0.5) / vec2<f32>(params.grid.dst), found_size);
+    let maps = tap_sample(t1, at);
     let skin = maps.w;
     if (skin <= 0.01) {
         textureStore(out_f16, p, texel);
@@ -532,8 +540,8 @@ fn sk_apply(@builtin(global_invocation_id) id: vec3<u32>) {
     }
     var ycc = to_ycc(texel.rgb);
     let l0 = (ycc.x - 16.0) / 219.0;
-    let fine = textureLoad(t2, p, 0);
-    let wide = textureLoad(t3, p, 0);
+    let fine = tap_sample(t2, at);
+    let wide = tap_sample(t3, at);
     let l_fine = fine.x / max(fine.w, 1e-4);
     let l_wide = wide.x / max(wide.w, 1e-4);
     // the pores, the grain, the stubble: everything finer than a blemish, kept aside to go back on top
@@ -545,9 +553,11 @@ fn sk_apply(@builtin(global_invocation_id) id: vec3<u32>) {
     // A blemish - a spot, a patch of redness, a bump - is replaced by the clean skin around it, in colour as
     // well as brightness: a mole taken out in brightness alone is still a red mole.
     if (params.spots > 0.0) {
-        let found = textureLoad(t5, p, 0);
+        let found = tap_sample(t5, at);
         if (found.x > 0.01) {
-            let ring = clean_ring(vec2<f32>(id.xy), found.y);
+            // how far out clean skin is was measured in pixels of the copy
+            let reach = found.y * f32(params.grid.dst.x) / f32(found_size.x);
+            let ring = clean_ring(vec2<f32>(id.xy), reach);
             if (ring.weight > 1.0) {
                 let clean = to_ycc(ring.colour / ring.weight);
                 let even = 1.0 - smooth_step(0.05, 0.12, ring.spread);
@@ -566,7 +576,7 @@ fn sk_apply(@builtin(global_invocation_id) id: vec3<u32>) {
     // A line is a valley: lift it part of the way up to the skin on either side of it. How far was worked
     // out against the brightness the picture came in with, so the spots just taken out are not counted
     // twice.
-    let extra = textureLoad(t4, p, 0);
+    let extra = tap_sample(t4, at);
     if (params.lines > 0.0) {
         // The map carries the skin weight and the whole correction is faded by that same weight at the
         // end, so it is divided back out here - the same reason the redness below divides it out. Left
