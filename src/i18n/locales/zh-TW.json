@@ -581,9 +581,11 @@
       "noImageSelected": "未選擇影像。",
       "params": {
         "feather": "羽化",
+        "fidelity": "Fidelity",
         "grow": "擴張",
         "intensity": "強度",
-        "pressure": "壓力"
+        "pressure": "壓力",
+        "strength": "Strength"
       },
       "patches": {
         "aiEdit": "AI 編輯 {{count}}",
@@ -602,6 +604,9 @@
         "quickErase": "快速擦除 {{count}}",
         "quickErase_one": "快速擦除 {{count}}",
         "quickErase_other": "快速擦除 {{count}}",
+        "restoreFace": "Restore Face {{count}}",
+        "restoreFace_one": "Restore Face {{count}}",
+        "restoreFace_other": "Restore Face {{count}}",
         "retouch": "修飾 {{count}}",
         "retouch_one": "Retouch {{count}}",
         "retouch_other": "修飾 {{count}}"
@@ -1570,6 +1575,7 @@
       "quickErase": "快速擦除",
       "quickEraser": "快速橡皮擦",
       "radial": "徑向",
+      "restoreFace": "Restore Face",
       "retouch": "修飾",
       "sky": "天空",
       "subject": "主體",

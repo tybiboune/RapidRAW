@@ -950,7 +950,8 @@ export default function Editor({ onBackToLibrary, onContextMenu, onImageSelect, 
         activeSubMask?.type === Mask.Clone ||
         activeSubMask?.type === Mask.Heal ||
         activeSubMask?.type === Mask.Liquify ||
-        activeSubMask?.type === Mask.Retouch)
+        activeSubMask?.type === Mask.Retouch ||
+        activeSubMask?.type === Mask.FaceRestore)
     );
   }, [isMasking, isAiEditing, activeSubMask?.type]);
 
@@ -972,6 +973,7 @@ export default function Editor({ onBackToLibrary, onContextMenu, onImageSelect, 
         activeSubMask?.type === Mask.Clone ||
         activeSubMask?.type === Mask.Liquify ||
         activeSubMask?.type === Mask.Retouch ||
+        activeSubMask?.type === Mask.FaceRestore ||
         activeSubMask?.type === Mask.Heal ||
         activeSubMask?.type === Mask.AiSubject ||
         activeSubMask?.type === Mask.QuickEraser ||

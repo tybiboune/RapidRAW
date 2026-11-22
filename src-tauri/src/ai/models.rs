@@ -156,6 +156,16 @@ const FACE_PARSER_FILENAME: &str = "face_parsing_segformer_b5.onnx";
 
 const FACE_PARSER_SHA256: &str = "6d4e67af60ff78184745ebf74cc15163c0adc27d45cdeba31e3a03d1096fb8c3";
 
+// CodeFormer (S-Lab, non-commercial), from the ONNX export facefusion publishes: a 512x512 face aligned
+// on FFHQ's five points, RGB scaled to -1..1, and a fidelity weight, in; the face restored, out.
+const FACE_RESTORER_URL: &str =
+    "https://github.com/facefusion/facefusion-assets/releases/download/models-3.0.0/codeformer.onnx";
+
+const FACE_RESTORER_FILENAME: &str = "codeformer.onnx";
+
+const FACE_RESTORER_SHA256: &str =
+    "21710e7ab61c82683576c428e9c1b6fe1ed419586b7b39e394c3449c294b550f";
+
 // ABPN's blemish detector (Alibaba's skin retouching, Apache-2.0), exported to ONNX with the sigmoid
 // folded in by scripts/export_blemish_onnx.py: a 768x768 crop of 1.5 times the face, scaled to -1..1,
 // in; how likely each pixel is to be part of a blemish, 0 to 1, out. ModelScope publishes it as PyTorch
@@ -265,6 +275,13 @@ const FACE_PARSER_ASSET: ModelAsset = ModelAsset {
     name: "Face Parsing Model",
 };
 
+const FACE_RESTORER_ASSET: ModelAsset = ModelAsset {
+    filename: FACE_RESTORER_FILENAME,
+    url: FACE_RESTORER_URL,
+    sha256: Some(FACE_RESTORER_SHA256),
+    name: "Face Restoration Model",
+};
+
 const DEPTH_ASSET: ModelAsset = ModelAsset {
     filename: DEPTH_FILENAME,
     url: DEPTH_URL,
@@ -364,6 +381,8 @@ pub enum AiMaskModel {
     Depth,
     // the face parser, which the face masks and the skin tool read when they are asked to
     FaceParsing,
+    // CodeFormer, for the Restore Face tool
+    FaceRestore,
 }
 
 impl AiMaskModel {
@@ -392,6 +411,7 @@ impl AiMaskModel {
             ],
             AiMaskModel::Depth => &[DEPTH_ASSET],
             AiMaskModel::FaceParsing => &[FACE_PARSER_ASSET],
+            AiMaskModel::FaceRestore => &[FACE_RESTORER_ASSET],
         }
     }
 }
@@ -412,6 +432,7 @@ pub struct AiModels {
     face_landmarks: Mutex<Option<SharedSession>>,
     face_segmenter: Mutex<Option<SharedSession>>,
     face_parser: Mutex<Option<SharedSession>>,
+    face_restorer: Mutex<Option<SharedSession>>,
     depth_anything: Mutex<Option<SharedSession>>,
 }
 
@@ -433,6 +454,7 @@ impl AiModels {
             face_landmarks: Mutex::new(None),
             face_segmenter: Mutex::new(None),
             face_parser: Mutex::new(None),
+            face_restorer: Mutex::new(None),
             depth_anything: Mutex::new(None),
         }
     }
@@ -541,6 +563,12 @@ impl AiModels {
 
     pub fn face_parser(&self) -> Result<SharedSession> {
         self.session(&self.face_parser, FACE_PARSER_FILENAME, true)
+    }
+
+    // on the processor: a face or two a picture is quick enough there, and its codebook lookup is not
+    // something every GPU provider takes
+    pub fn face_restorer(&self) -> Result<SharedSession> {
+        self.session(&self.face_restorer, FACE_RESTORER_FILENAME, false)
     }
 
     pub fn esam3_sky_prompt(&self) -> Result<Arc<Esam3Prompt>> {

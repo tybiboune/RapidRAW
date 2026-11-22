@@ -617,9 +617,11 @@
       "noImageSelected": "Зображення не вибрано.",
       "params": {
         "feather": "Розтушовування",
+        "fidelity": "Fidelity",
         "grow": "Розширення",
         "intensity": "Інтенсивність",
-        "pressure": "Натиск"
+        "pressure": "Натиск",
+        "strength": "Strength"
       },
       "patches": {
         "aiEdit": "Правка ШІ {{count}}",
@@ -648,6 +650,11 @@
         "quickErase_few": "Швидке стирання {{count}}",
         "quickErase_many": "Швидке стирання {{count}}",
         "quickErase_other": "Швидке стирання {{count}}",
+        "restoreFace": "Restore Face {{count}}",
+        "restoreFace_one": "Restore Face {{count}}",
+        "restoreFace_few": "Restore Face {{count}}",
+        "restoreFace_many": "Restore Face {{count}}",
+        "restoreFace_other": "Restore Face {{count}}",
         "retouch": "Ретуш {{count}}",
         "retouch_one": "Ретуш {{count}}",
         "retouch_few": "Ретуш {{count}}",
@@ -1636,6 +1643,7 @@
       "quickErase": "Швидке стирання",
       "quickEraser": "Швидка гумка",
       "radial": "Радіальний",
+      "restoreFace": "Restore Face",
       "retouch": "Ретуш",
       "sky": "Небо",
       "subject": "Об'єкт",

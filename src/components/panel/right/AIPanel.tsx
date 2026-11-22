@@ -68,7 +68,7 @@ import { useAiMasking } from '../../../hooks/useAiMasking';
 import { useCloudUsage } from '../../../hooks/useCloudUsage';
 import { useDelayedLoading } from '../../../hooks/useDelayedLoading';
 
-export const STANDALONE_MASK_TYPES: Mask[] = [Mask.Clone, Mask.Heal, Mask.Liquify, Mask.Retouch];
+export const STANDALONE_MASK_TYPES: Mask[] = [Mask.Clone, Mask.Heal, Mask.Liquify, Mask.Retouch, Mask.FaceRestore];
 
 export const isStandaloneMask = (type?: Mask): boolean => Boolean(type && STANDALONE_MASK_TYPES.includes(type));
 
@@ -105,6 +105,16 @@ const SUB_MASK_CONFIG: any = {
   [Mask.Retouch]: {
     showBrushTools: true,
     parameters: [{ key: 'intensity', min: 1, max: 100, step: 1, defaultValue: 40 }],
+  },
+  // CodeFormer over the faces under the brush: fidelity is how close to this face it stays, strength how
+  // much of the restored face is laid over the original
+  [Mask.FaceRestore]: {
+    showBrushTools: true,
+    hideToolSwitch: false,
+    parameters: [
+      { key: 'fidelity', min: 0, max: 100, step: 1, defaultValue: 50 },
+      { key: 'strength', min: 1, max: 100, step: 1, defaultValue: 80 },
+    ],
   },
   [Mask.Linear]: { parameters: [] },
   [Mask.AiSubject]: {
@@ -702,6 +712,9 @@ export default function AIPanel() {
     } else if (type === Mask.Retouch) {
       const count = countPatchesOfType(adjustments.aiPatches, Mask.Retouch) + 1;
       name = t('editor.ai.patches.retouch', { count });
+    } else if (type === Mask.FaceRestore) {
+      const count = countPatchesOfType(adjustments.aiPatches, Mask.FaceRestore) + 1;
+      name = t('editor.ai.patches.restoreFace', { count });
     } else {
       const count = (adjustments.aiPatches || []).length + 1;
       name = t('editor.ai.patches.aiEdit', { count });
@@ -2333,7 +2346,10 @@ function SettingsPanel({
                     })
                   }
                   onPointerUp={() => {
-                    const isDirectTool = activeSubMask.type === Mask.Liquify || activeSubMask.type === Mask.Retouch;
+                    const isDirectTool =
+                      activeSubMask.type === Mask.Liquify ||
+                      activeSubMask.type === Mask.Retouch ||
+                      activeSubMask.type === Mask.FaceRestore;
 
                     if (isDirectTool && activeSubMask.parameters?.lines?.length > 0) {
                       setTimeout(() => {

@@ -1031,6 +1031,20 @@ fn ffhq_frame(face: &DetectedFace) -> FaceFrame {
     }
 }
 
+/// The five points face restoration aligns a face by, as the picture shows them: the eye on its left
+/// (the face's right eye), the other eye, the tip of the nose, then the corners of the mouth, left and
+/// right.
+pub fn alignment_points(face: &DetectedFace) -> [[f32; 2]; 5] {
+    let points = &face.landmarks;
+    [
+        mean_point(points, RIGHT_EYE.iter().copied()),
+        mean_point(points, LEFT_EYE.iter().copied()),
+        points[NOSE_TIP],
+        points[MOUTH_CORNERS[0]],
+        points[MOUTH_CORNERS[1]],
+    ]
+}
+
 // The square of the blemish detector: the face's own frame, upright, half as wide again as the face, which
 // is how the pipeline it comes from cuts a face out around its box.
 fn blemish_frame(face: &DetectedFace) -> FaceFrame {

@@ -1011,7 +1011,8 @@ const MaskOverlay = memo(
       subMask.type === Mask.Clone ||
       subMask.type === Mask.Heal ||
       subMask.type === Mask.Liquify ||
-      subMask.type === Mask.Retouch
+      subMask.type === Mask.Retouch ||
+      subMask.type === Mask.FaceRestore
     ) {
       const { lines = [] } = p;
 
@@ -1837,14 +1838,16 @@ const ImageCanvas = memo(
       isAiEditing && (activeSubMask?.type === Mask.Clone || activeSubMask?.type === Mask.Heal);
 
     const isLiquifyActive = isAiEditing && activeSubMask?.type === Mask.Liquify;
-    const isRetouchActive = isAiEditing && activeSubMask?.type === Mask.Retouch;
+    const isRetouchActive =
+      isAiEditing && (activeSubMask?.type === Mask.Retouch || activeSubMask?.type === Mask.FaceRestore);
 
     const isDirectPatchActive =
       (isMasking || isAiEditing) &&
       (activeSubMask?.type === Mask.Clone ||
         activeSubMask?.type === Mask.Heal ||
         activeSubMask?.type === Mask.Liquify ||
-        activeSubMask?.type === Mask.Retouch);
+        activeSubMask?.type === Mask.Retouch ||
+        activeSubMask?.type === Mask.FaceRestore);
 
     const isBrushActive =
       (isMasking || isAiEditing) &&
@@ -2001,7 +2004,13 @@ const ImageCanvas = memo(
       const processContainers = (containers: any[], isAi: boolean) => {
         containers.forEach((container) => {
           container.subMasks.forEach((sm: SubMask) => {
-            if (sm.type !== Mask.Clone && sm.type !== Mask.Heal && sm.type !== Mask.Liquify && sm.type !== Mask.Retouch)
+            if (
+              sm.type !== Mask.Clone &&
+              sm.type !== Mask.Heal &&
+              sm.type !== Mask.Liquify &&
+              sm.type !== Mask.Retouch &&
+              sm.type !== Mask.FaceRestore
+            )
               return;
             const lines: Array<DrawnLine> = sm.parameters?.lines || [];
             const center = getStrokeCenter(lines);
@@ -2013,7 +2022,7 @@ const ImageCanvas = memo(
             let cx = center.x;
             let cy = center.y;
 
-            if (sm.type === Mask.Liquify || sm.type === Mask.Retouch) {
+            if (sm.type === Mask.Liquify || sm.type === Mask.Retouch || sm.type === Mask.FaceRestore) {
               cx = center.x + 16;
               cy = center.y - 16;
             } else if (sourceX !== undefined && sourceY !== undefined) {
@@ -3832,7 +3841,8 @@ const ImageCanvas = memo(
                                   renderSubMask.type === Mask.Clone ||
                                   renderSubMask.type === Mask.Heal ||
                                   renderSubMask.type === Mask.Liquify ||
-                                  renderSubMask.type === Mask.Retouch;
+                                  renderSubMask.type === Mask.Retouch ||
+                                  renderSubMask.type === Mask.FaceRestore;
 
                                 const isThisSubMaskActive = renderSubMask.id === activeId;
                                 const isActivelyDrawingThis = isThisSubMaskActive && isDrawing.current;
@@ -3845,7 +3855,9 @@ const ImageCanvas = memo(
                                     isHoveringThisMarker ||
                                     (isThisSubMaskActive && isMaskControlHovered) ||
                                     (isThisSubMaskActive &&
-                                      (renderSubMask.type === Mask.Liquify || renderSubMask.type === Mask.Retouch));
+                                      (renderSubMask.type === Mask.Liquify ||
+                                        renderSubMask.type === Mask.Retouch ||
+                                        renderSubMask.type === Mask.FaceRestore));
                                 }
 
                                 return (

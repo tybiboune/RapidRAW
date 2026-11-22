@@ -1163,3 +1163,106 @@ pub async fn generate_retouch_patch(
     )
     .map(|v| v.to_string())
 }
+
+/// Restores the faces under a brushed area with CodeFormer: each face reaching into the area is aligned,
+/// rebuilt, and laid back over the picture there. The brush's `fidelity` says how close to this face the
+/// result stays, its `strength` how much of the result is laid over the original.
+#[tauri::command]
+pub async fn generate_face_restore_patch(
+    patch_definition: AiPatchDefinition,
+    current_adjustments: Value,
+    _task_id: Option<String>,
+    app_handle: tauri::AppHandle,
+    state: tauri::State<'_, AppState>,
+) -> Result<String, String> {
+    let ai_models = models::get_or_init_ai_models(
+        &app_handle,
+        &state.ai_state,
+        &state.ai_init_lock,
+        models::AiMaskModel::Face,
+    )
+    .await
+    .map_err(|e| e.to_string())?;
+    models::get_or_init_ai_models(
+        &app_handle,
+        &state.ai_state,
+        &state.ai_init_lock,
+        models::AiMaskModel::FaceRestore,
+    )
+    .await
+    .map_err(|e| e.to_string())?;
+
+    let (source_image, is_raw, path) =
+        cached_source_image(&patch_definition.id, &current_adjustments, &state)?;
+    let (img_w, img_h) = source_image.dimensions();
+
+    let restore = patch_definition
+        .sub_masks
+        .iter()
+        .find(|sm| sm.mask_type.eq_ignore_ascii_case("face-restore"))
+        .ok_or("No brush strokes found for Restore Face.")?;
+    let share = |key: &str, default: f64| {
+        let value = restore.parameters.get(key).and_then(|v| v.as_f64());
+        (value.unwrap_or(default) / 100.0) as f32
+    };
+    let (fidelity, strength) = (share("fidelity", 50.0), share("strength", 80.0));
+
+    let mask_bitmap = raw_patch_mask(
+        &patch_definition,
+        &path,
+        &current_adjustments,
+        &state,
+        transformed_dimensions(img_w, img_h, &current_adjustments),
+    )?;
+    let bounds = calculate_mask_bounds(&mask_bitmap)
+        .map_err(|_| "No brush strokes found for Restore Face.".to_string())?;
+    let (min_x, max_x, min_y, max_y) = bounds;
+
+    // the faces are found on the same picture the patch is made from
+    let picture = DynamicImage::ImageRgb8(source_image.as_ref().clone());
+    let without_patch = adjustments_without_patch(&patch_definition.id, &current_adjustments);
+    let key = format!("{}#faces", patched_cache_key(&path, &without_patch));
+    let analysis = crate::ai::commands::cached_face_analysis(
+        &state.ai_state,
+        &ai_models,
+        &key,
+        &picture,
+        crate::ai::commands::MaskTransform::from_adjustments(&current_adjustments),
+    )?;
+    if analysis.faces.is_empty() {
+        return Err(crate::ai::commands::NO_FACES_FOUND.to_string());
+    }
+    let session = ai_models.face_restorer().map_err(|e| e.to_string())?;
+    let color_image = tauri::async_runtime::spawn_blocking(move || {
+        crate::retouch::face_restore::restore_faces(
+            &source_image,
+            &analysis,
+            &session,
+            bounds,
+            fidelity,
+            strength,
+        )
+    })
+    .await
+    .map_err(|e| e.to_string())?
+    .map_err(|e| e.to_string())?;
+
+    let crop_w = (max_x - min_x + 1) as u32;
+    let crop_h = (max_y - min_y + 1) as u32;
+    let output_mask =
+        image::imageops::crop_imm(&mask_bitmap, min_x as u32, min_y as u32, crop_w, crop_h)
+            .to_image();
+
+    encode_patch_result(
+        &color_image,
+        &output_mask,
+        min_x as u32,
+        min_y as u32,
+        crop_w,
+        crop_h,
+        is_raw,
+        100,
+        true,
+    )
+    .map(|v| v.to_string())
+}

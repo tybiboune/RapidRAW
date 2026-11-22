@@ -599,9 +599,11 @@
       "noImageSelected": "No s'ha seleccionat cap imatge.",
       "params": {
         "feather": "Esvaïment",
+        "fidelity": "Fidelity",
         "grow": "Expandir",
         "intensity": "Intensitat",
-        "pressure": "Pressió"
+        "pressure": "Pressió",
+        "strength": "Strength"
       },
       "patches": {
         "aiEdit": "Edició IA {{count}}",
@@ -625,6 +627,10 @@
         "quickErase_one": "Esborrat ràpid {{count}}",
         "quickErase_many": "Esborrat ràpid {{count}}",
         "quickErase_other": "Esborrat ràpid {{count}}",
+        "restoreFace": "Restore Face {{count}}",
+        "restoreFace_one": "Restore Face {{count}}",
+        "restoreFace_many": "Restore Face {{count}}",
+        "restoreFace_other": "Restore Face {{count}}",
         "retouch": "Retoc {{count}}",
         "retouch_one": "Retoc {{count}}",
         "retouch_many": "Retoc {{count}}",
@@ -1603,6 +1609,7 @@
       "quickErase": "Esborrat ràpid",
       "quickEraser": "Goma d'esborrar ràpida",
       "radial": "Radial",
+      "restoreFace": "Restore Face",
       "retouch": "Retoc",
       "sky": "Cel",
       "subject": "Subjecte",

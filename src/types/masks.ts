@@ -18,6 +18,7 @@ export enum Mask {
   Heal = 'heal',
   Liquify = 'liquify',
   Retouch = 'retouch',
+  FaceRestore = 'face-restore',
 }
 
 export enum SubMaskMode {

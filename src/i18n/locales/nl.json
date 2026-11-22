@@ -581,9 +581,11 @@
       "noImageSelected": "Geen afbeelding geselecteerd.",
       "params": {
         "feather": "Randvervaging",
+        "fidelity": "Fidelity",
         "grow": "Groeien",
         "intensity": "Intensiteit",
-        "pressure": "Druk"
+        "pressure": "Druk",
+        "strength": "Strength"
       },
       "patches": {
         "aiEdit": "AI-bewerking {{count}}",
@@ -602,6 +604,9 @@
         "quickErase": "Snel verwijderen {{count}}",
         "quickErase_one": "Snel verwijderen {{count}}",
         "quickErase_other": "Snel verwijderen {{count}}",
+        "restoreFace": "Restore Face {{count}}",
+        "restoreFace_one": "Restore Face {{count}}",
+        "restoreFace_other": "Restore Face {{count}}",
         "retouch": "Retouche {{count}}",
         "retouch_one": "Retouche {{count}}",
         "retouch_other": "Retouche {{count}}"
@@ -1570,6 +1575,7 @@
       "quickErase": "Snel wissen",
       "quickEraser": "Snel wissen",
       "radial": "Radiaal",
+      "restoreFace": "Restore Face",
       "retouch": "Retoucheren",
       "sky": "Lucht",
       "subject": "Onderwerp",

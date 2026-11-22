@@ -581,9 +581,11 @@
       "noImageSelected": "No image selected.",
       "params": {
         "feather": "Feather",
+        "fidelity": "Fidelity",
         "grow": "Grow",
         "intensity": "Intensity",
-        "pressure": "Pressure"
+        "pressure": "Pressure",
+        "strength": "Strength"
       },
       "patches": {
         "aiEdit": "AI Edit {{count}}",
@@ -602,6 +604,9 @@
         "quickErase": "Quick Erase {{count}}",
         "quickErase_one": "Quick Erase {{count}}",
         "quickErase_other": "Quick Erase {{count}}",
+        "restoreFace": "Restore Face {{count}}",
+        "restoreFace_one": "Restore Face {{count}}",
+        "restoreFace_other": "Restore Face {{count}}",
         "retouch": "Retouch {{count}}",
         "retouch_one": "Retouch {{count}}",
         "retouch_other": "Retouch {{count}}"
@@ -1570,6 +1575,7 @@
       "quickErase": "Quick Erase",
       "quickEraser": "Quick Eraser",
       "radial": "Radial",
+      "restoreFace": "Restore Face",
       "retouch": "Retouch",
       "sky": "Sky",
       "subject": "Subject",

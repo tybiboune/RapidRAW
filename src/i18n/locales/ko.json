@@ -581,9 +581,11 @@
       "noImageSelected": "선택된 이미지가 없습니다.",
       "params": {
         "feather": "페더",
+        "fidelity": "Fidelity",
         "grow": "확장",
         "intensity": "강도",
-        "pressure": "압력"
+        "pressure": "압력",
+        "strength": "Strength"
       },
       "patches": {
         "aiEdit": "AI 편집 {{count}}",
@@ -602,6 +604,9 @@
         "quickErase": "빠른 지우기 {{count}}",
         "quickErase_one": "빠른 지우기 {{count}}",
         "quickErase_other": "빠른 지우기 {{count}}",
+        "restoreFace": "Restore Face {{count}}",
+        "restoreFace_one": "Restore Face {{count}}",
+        "restoreFace_other": "Restore Face {{count}}",
         "retouch": "리터칭 {{count}}",
         "retouch_one": "Retouch {{count}}",
         "retouch_other": "리터칭 {{count}}"
@@ -1570,6 +1575,7 @@
       "quickErase": "빠른 지우기",
       "quickEraser": "빠른 지우개",
       "radial": "원형",
+      "restoreFace": "Restore Face",
       "retouch": "리터칭",
       "sky": "하늘",
       "subject": "피사체",

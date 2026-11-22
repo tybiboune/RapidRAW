@@ -617,9 +617,11 @@
       "noImageSelected": "Изображение не выбрано.",
       "params": {
         "feather": "Растушевка",
+        "fidelity": "Fidelity",
         "grow": "Расширение",
         "intensity": "Интенсивность",
-        "pressure": "Нажим"
+        "pressure": "Нажим",
+        "strength": "Strength"
       },
       "patches": {
         "aiEdit": "ИИ-правка {{count}}",
@@ -648,6 +650,11 @@
         "quickErase_few": "Быстрое стирание {{count}}",
         "quickErase_many": "Быстрое стирание {{count}}",
         "quickErase_other": "Быстрое стирание {{count}}",
+        "restoreFace": "Restore Face {{count}}",
+        "restoreFace_one": "Restore Face {{count}}",
+        "restoreFace_few": "Restore Face {{count}}",
+        "restoreFace_many": "Restore Face {{count}}",
+        "restoreFace_other": "Restore Face {{count}}",
         "retouch": "Ретушь {{count}}",
         "retouch_one": "Ретушь {{count}}",
         "retouch_few": "Ретушь {{count}}",
@@ -1636,6 +1643,7 @@
       "quickErase": "Быстрое стирание",
       "quickEraser": "Быстрый ластик",
       "radial": "Радиальный градиент",
+      "restoreFace": "Restore Face",
       "retouch": "Ретушь",
       "sky": "Небо",
       "subject": "Объект",

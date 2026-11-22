@@ -46,6 +46,7 @@ export const MASK_ICON_MAP: Record<Mask, any> = {
   [Mask.Heal]: Bandage,
   [Mask.Liquify]: Spline,
   [Mask.Retouch]: MopSparkles,
+  [Mask.FaceRestore]: ScanFace,
 };
 
 export const MASK_AI_TYPES: Array<MaskType> = [
@@ -120,6 +121,12 @@ export const AI_TOUCH_UP_TYPES: Array<MaskType> = [
     icon: MopSparkles,
     name: 'Retouch',
     type: Mask.Retouch,
+  },
+  {
+    disabled: false,
+    icon: ScanFace,
+    name: 'Restore Face',
+    type: Mask.FaceRestore,
   },
 ];
 

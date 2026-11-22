@@ -581,9 +581,11 @@
       "noImageSelected": "Kein Bild ausgewählt.",
       "params": {
         "feather": "Weiche Kante",
+        "fidelity": "Fidelity",
         "grow": "Erweitern",
         "intensity": "Intensität",
-        "pressure": "Druck"
+        "pressure": "Druck",
+        "strength": "Strength"
       },
       "patches": {
         "aiEdit": "KI-Bearbeitung {{count}}",
@@ -602,6 +604,9 @@
         "quickErase": "Schnelles Löschen {{count}}",
         "quickErase_one": "Schnelles Löschen {{count}}",
         "quickErase_other": "Schnelles Löschen {{count}}",
+        "restoreFace": "Restore Face {{count}}",
+        "restoreFace_one": "Restore Face {{count}}",
+        "restoreFace_other": "Restore Face {{count}}",
         "retouch": "Retusche {{count}}",
         "retouch_one": "Retusche {{count}}",
         "retouch_other": "Retusche {{count}}"
@@ -1570,6 +1575,7 @@
       "quickErase": "Schnelles Löschen",
       "quickEraser": "Schnell-Radierer",
       "radial": "Radial",
+      "restoreFace": "Restore Face",
       "retouch": "Retuschieren",
       "sky": "Himmel",
       "subject": "Motiv",

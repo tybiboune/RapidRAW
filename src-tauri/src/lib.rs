@@ -691,6 +691,7 @@ pub fn run() {
             retouch::inpainting::generate_manual_cleanup_patch,
             retouch::inpainting::generate_liquify_patch,
             retouch::inpainting::generate_retouch_patch,
+            retouch::inpainting::generate_face_restore_patch,
             merge::focus_stacking::stitch_focus_stack,
             merge::focus_stacking::save_focus_stack,
             decode::image_loader::load_image,

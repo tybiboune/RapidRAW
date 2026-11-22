@@ -599,9 +599,11 @@
       "noImageSelected": "Nessuna immagine selezionata.",
       "params": {
         "feather": "Sfumatura",
+        "fidelity": "Fidelity",
         "grow": "Espandi",
         "intensity": "Intensità",
-        "pressure": "Pressione"
+        "pressure": "Pressione",
+        "strength": "Strength"
       },
       "patches": {
         "aiEdit": "Modifica AI {{count}}",
@@ -625,6 +627,10 @@
         "quickErase_one": "Cancellazione Rapida {{count}}",
         "quickErase_many": "Cancellazione Rapida {{count}}",
         "quickErase_other": "Cancellazione Rapida {{count}}",
+        "restoreFace": "Restore Face {{count}}",
+        "restoreFace_one": "Restore Face {{count}}",
+        "restoreFace_many": "Restore Face {{count}}",
+        "restoreFace_other": "Restore Face {{count}}",
         "retouch": "Ritocco {{count}}",
         "retouch_one": "Ritocco {{count}}",
         "retouch_many": "Ritocco {{count}}",
@@ -1603,6 +1609,7 @@
       "quickErase": "Cancellazione Rapida",
       "quickEraser": "Gomma Rapida",
       "radial": "Radiale",
+      "restoreFace": "Restore Face",
       "retouch": "Ritocco",
       "sky": "Cielo",
       "subject": "Soggetto",

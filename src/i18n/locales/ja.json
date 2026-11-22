@@ -581,9 +581,11 @@
       "noImageSelected": "画像が選択されていません。",
       "params": {
         "feather": "ぼかし",
+        "fidelity": "Fidelity",
         "grow": "拡張",
         "intensity": "強度",
-        "pressure": "圧力"
+        "pressure": "圧力",
+        "strength": "Strength"
       },
       "patches": {
         "aiEdit": "AI編集 {{count}}",
@@ -602,6 +604,9 @@
         "quickErase": "クイック消去 {{count}}",
         "quickErase_one": "クイック消去 {{count}}",
         "quickErase_other": "クイック消去 {{count}}",
+        "restoreFace": "Restore Face {{count}}",
+        "restoreFace_one": "Restore Face {{count}}",
+        "restoreFace_other": "Restore Face {{count}}",
         "retouch": "レタッチ {{count}}",
         "retouch_one": "Retouch {{count}}",
         "retouch_other": "レタッチ {{count}}"
@@ -1570,6 +1575,7 @@
       "quickErase": "クイック消去",
       "quickEraser": "クイック消しゴム",
       "radial": "円形",
+      "restoreFace": "Restore Face",
       "retouch": "レタッチ",
       "sky": "空",
       "subject": "被写体",

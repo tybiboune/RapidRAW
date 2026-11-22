@@ -33,7 +33,7 @@ use crate::render::preview::get_cached_full_warped_image;
 const NO_FOREGROUND_FOUND: &str = "No foreground found";
 const NO_SKY_FOUND: &str = "No sky found";
 const NO_MATCH_FOUND: &str = "No match found for";
-const NO_FACES_FOUND: &str = "No faces found";
+pub(crate) const NO_FACES_FOUND: &str = "No faces found";
 const NO_RESULT_ERRORS: [&str; 4] = [
     NO_FOREGROUND_FOUND,
     NO_SKY_FOUND,
@@ -294,7 +294,7 @@ pub fn generate_text_mask(
     })
 }
 
-fn cached_face_analysis(
+pub(crate) fn cached_face_analysis(
     ai_state: &Mutex<Option<AiState>>,
     models: &AiModels,
     cache_key: &str,

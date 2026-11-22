@@ -599,9 +599,11 @@
       "noImageSelected": "No hay imagen seleccionada.",
       "params": {
         "feather": "Desvanecimiento",
+        "fidelity": "Fidelity",
         "grow": "Expandir",
         "intensity": "Intensidad",
-        "pressure": "Presión"
+        "pressure": "Presión",
+        "strength": "Strength"
       },
       "patches": {
         "aiEdit": "Edición IA {{count}}",
@@ -625,6 +627,10 @@
         "quickErase_one": "Borrado rápido {{count}}",
         "quickErase_many": "Borrado rápido {{count}}",
         "quickErase_other": "Borrado rápido {{count}}",
+        "restoreFace": "Restore Face {{count}}",
+        "restoreFace_one": "Restore Face {{count}}",
+        "restoreFace_many": "Restore Face {{count}}",
+        "restoreFace_other": "Restore Face {{count}}",
         "retouch": "Retoque {{count}}",
         "retouch_one": "Retoque {{count}}",
         "retouch_many": "Retoque {{count}}",
@@ -1603,6 +1609,7 @@
       "quickErase": "Borrado rápido",
       "quickEraser": "Borrador rápido",
       "radial": "Radial",
+      "restoreFace": "Restore Face",
       "retouch": "Retocar",
       "sky": "Cielo",
       "subject": "Sujeto",

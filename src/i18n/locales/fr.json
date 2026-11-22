@@ -599,9 +599,11 @@
       "noImageSelected": "Aucune image sélectionnée.",
       "params": {
         "feather": "Contour progressif",
+        "fidelity": "Fidelity",
         "grow": "Agrandir",
         "intensity": "Intensité",
-        "pressure": "Pression"
+        "pressure": "Pression",
+        "strength": "Strength"
       },
       "patches": {
         "aiEdit": "Retouche IA {{count}}",
@@ -625,6 +627,10 @@
         "quickErase_one": "Gommage rapide {{count}}",
         "quickErase_many": "Gommage rapide {{count}}",
         "quickErase_other": "Gommages rapides {{count}}",
+        "restoreFace": "Restore Face {{count}}",
+        "restoreFace_one": "Restore Face {{count}}",
+        "restoreFace_many": "Restore Face {{count}}",
+        "restoreFace_other": "Restore Face {{count}}",
         "retouch": "Retouche {{count}}",
         "retouch_one": "Retouche {{count}}",
         "retouch_many": "Retouche {{count}}",
@@ -1604,6 +1610,7 @@
       "quickErase": "Gommage rapide",
       "quickEraser": "Gomme rapide",
       "radial": "Radial",
+      "restoreFace": "Restore Face",
       "retouch": "Retouche",
       "sky": "Ciel",
       "subject": "Sujet",
