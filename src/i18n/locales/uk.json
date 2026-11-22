@@ -265,6 +265,7 @@
       "skinDetectionRedness": "Redness",
       "skinDetectionSpots": "Spots",
       "skinDetectionUnderEye": "Under eyes",
+      "skinFaceMethod": "Skin found by",
       "skinFindingFace": "Finding the face",
       "skinFindingLines": "Finding the lines",
       "skinFindingSpots": "Finding the spots",
@@ -895,14 +896,23 @@
         "applyPreset": "Застосувати пресет",
         "componentPropertiesTitle": "Властивості: {{name}}",
         "copySectionSettings": "Копіювати налаштування: {{section}}",
+        "faceMethod": "Found by",
+        "faceMethods": {
+          "combined": "Both",
+          "landmarks": "Landmarks",
+          "parsing": "AI parsing"
+        },
         "faceParts": {
           "bodySkin": "Шкіра тіла",
+          "ears": "Ears",
           "eyebrows": "Брови",
           "eyeWhites": "Білки очей",
           "faceSkin": "Шкіра обличчя",
+          "glasses": "Glasses",
           "hair": "Волосся",
           "iris": "Райдужка й зіниця",
           "lips": "Губи",
+          "neck": "Neck",
           "nose": "Ніс",
           "teeth": "Зуби"
         },

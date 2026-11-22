@@ -332,6 +332,7 @@
   "showClipping": false,
   "skinEnabled": false,
   "skinFaceMap": null,
+  "skinFaceMethod": "landmarks",
   "skinKeepTexture": 0,
   "skinLines": 0,
   "skinLinesAi": false,

@@ -265,6 +265,7 @@
       "skinDetectionRedness": "Redness",
       "skinDetectionSpots": "Spots",
       "skinDetectionUnderEye": "Under eyes",
+      "skinFaceMethod": "Skin found by",
       "skinFindingFace": "Finding the face",
       "skinFindingLines": "Finding the lines",
       "skinFindingSpots": "Finding the spots",
@@ -895,14 +896,23 @@
         "applyPreset": "Použít předvolbu",
         "componentPropertiesTitle": "{{name}} vlastnosti",
         "copySectionSettings": "Kopírovat {{section}} nastavení",
+        "faceMethod": "Found by",
+        "faceMethods": {
+          "combined": "Both",
+          "landmarks": "Landmarks",
+          "parsing": "AI parsing"
+        },
         "faceParts": {
           "bodySkin": "Pleť těla",
+          "ears": "Ears",
           "eyebrows": "Obočí",
           "eyeWhites": "Bělmo",
           "faceSkin": "Pleť obličeje",
+          "glasses": "Glasses",
           "hair": "Vlasy",
           "iris": "Duhovka a zornice",
           "lips": "Rty",
+          "neck": "Neck",
           "nose": "Nos",
           "teeth": "Zuby"
         },

@@ -57,6 +57,7 @@ import {
   MASK_RANGE_TYPES,
   MASK_AI_TYPES,
   ALL_MASK_TYPES,
+  FACE_METHODS,
   FACE_PARTS,
   MASK_ICON_MAP,
   NewMaskDropZone,
@@ -528,7 +529,8 @@ export default function MasksPanel() {
     if (type === Mask.Brush || type === Mask.Flow || type === Mask.MatchBrush) selectBrushToolForNewMask();
     if (type === Mask.AiForeground) handleGenerateAiForegroundMask(subMask.id);
     else if (type === Mask.AiSky) handleGenerateAiSkyMask(subMask.id);
-    else if (type === Mask.AiFace) handleGenerateAiFaceMask(subMask.id, subMask.parameters?.parts ?? []);
+    else if (type === Mask.AiFace)
+      handleGenerateAiFaceMask(subMask.id, subMask.parameters?.parts ?? [], subMask.parameters?.method);
     else if (type === Mask.AiDepth) handleGenerateAiDepthMask(subMask.id, subMask.parameters);
   };
 
@@ -560,7 +562,8 @@ export default function MasksPanel() {
     if (type === Mask.Brush || type === Mask.Flow || type === Mask.MatchBrush) selectBrushToolForNewMask();
     if (type === Mask.AiForeground) handleGenerateAiForegroundMask(subMask.id);
     else if (type === Mask.AiSky) handleGenerateAiSkyMask(subMask.id);
-    else if (type === Mask.AiFace) handleGenerateAiFaceMask(subMask.id, subMask.parameters?.parts ?? []);
+    else if (type === Mask.AiFace)
+      handleGenerateAiFaceMask(subMask.id, subMask.parameters?.parts ?? [], subMask.parameters?.method);
     else if (type === Mask.AiDepth) handleGenerateAiDepthMask(subMask.id, subMask.parameters);
   };
 
@@ -2029,6 +2032,7 @@ function SettingsPanel({
   const isFaceMask = activeSubMask?.type === Mask.AiFace;
   const isTextMaskRunning = isTextMask && Boolean(activeAiTasks?.[activeSubMask.id]);
   const faceParts: Array<string> = activeSubMask?.parameters?.parts || [];
+  const faceMethod: string = activeSubMask?.parameters?.method || 'landmarks';
 
   const handleToggleFacePart = (part: string) => {
     if (!isActive || !isFaceMask) return;
@@ -2039,7 +2043,23 @@ function SettingsPanel({
     });
     clearTimeout(faceMaskTimeoutRef.current);
     if (parts.length > 0) {
-      faceMaskTimeoutRef.current = setTimeout(() => handleGenerateAiFaceMask(subMaskId, parts), FACE_MASK_DELAY_MS);
+      faceMaskTimeoutRef.current = setTimeout(
+        () => handleGenerateAiFaceMask(subMaskId, parts, faceMethod),
+        FACE_MASK_DELAY_MS,
+      );
+    }
+  };
+
+  const handleFaceMethodChange = (method: string) => {
+    if (!isActive || !isFaceMask || method === faceMethod) return;
+    const subMaskId = activeSubMask.id;
+    updateSubMask(subMaskId, { parameters: { ...activeSubMask.parameters, method } });
+    clearTimeout(faceMaskTimeoutRef.current);
+    if (faceParts.length > 0) {
+      faceMaskTimeoutRef.current = setTimeout(
+        () => handleGenerateAiFaceMask(subMaskId, faceParts, method),
+        FACE_MASK_DELAY_MS,
+      );
     }
   };
 
@@ -2247,6 +2267,29 @@ function SettingsPanel({
           {isFaceMask && (
             <>
               <FacePartsIllustration selected={faceParts} />
+
+              <div className="space-y-1">
+                <Text variant={TextVariants.small} className="text-text-secondary">
+                  {t('editor.masks.settings.faceMethod')}
+                </Text>
+                <div className="flex gap-1">
+                  {FACE_METHODS.map((method) => (
+                    <button
+                      key={method}
+                      type="button"
+                      onClick={() => handleFaceMethodChange(method)}
+                      className={clsx(
+                        'flex-1 rounded-md px-2 py-1 text-xs transition-colors',
+                        faceMethod === method
+                          ? 'bg-accent text-button-text'
+                          : 'bg-bg-primary text-text-secondary hover:bg-card-active hover:text-text-primary',
+                      )}
+                    >
+                      {t(`editor.masks.settings.faceMethods.${method}`)}
+                    </button>
+                  ))}
+                </div>
+              </div>
 
               <div className="grid grid-cols-3 gap-2">
                 {FACE_PARTS.map((part) => (

@@ -265,6 +265,7 @@
       "skinDetectionRedness": "Redness",
       "skinDetectionSpots": "Spots",
       "skinDetectionUnderEye": "Under eyes",
+      "skinFaceMethod": "Skin found by",
       "skinFindingFace": "Finding the face",
       "skinFindingLines": "Finding the lines",
       "skinFindingSpots": "Finding the spots",
@@ -845,14 +846,23 @@
         "applyPreset": "Voorinstelling toepassen",
         "componentPropertiesTitle": "{{name}} eigenschappen",
         "copySectionSettings": "{{section}} instellingen kopiëren",
+        "faceMethod": "Found by",
+        "faceMethods": {
+          "combined": "Both",
+          "landmarks": "Landmarks",
+          "parsing": "AI parsing"
+        },
         "faceParts": {
           "bodySkin": "Lichaamshuid",
+          "ears": "Ears",
           "eyebrows": "Wenkbrauwen",
           "eyeWhites": "Oogwit",
           "faceSkin": "Gezichtshuid",
+          "glasses": "Glasses",
           "hair": "Haar",
           "iris": "Iris en pupil",
           "lips": "Lippen",
+          "neck": "Neck",
           "nose": "Neus",
           "teeth": "Tanden"
         },

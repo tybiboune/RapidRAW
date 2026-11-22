@@ -265,6 +265,7 @@
       "skinDetectionRedness": "Redness",
       "skinDetectionSpots": "Spots",
       "skinDetectionUnderEye": "Under eyes",
+      "skinFaceMethod": "Skin found by",
       "skinFindingFace": "Finding the face",
       "skinFindingLines": "Finding the lines",
       "skinFindingSpots": "Finding the spots",
@@ -895,14 +896,23 @@
         "applyPreset": "Применить пресет",
         "componentPropertiesTitle": "Свойства компонента {{name}}",
         "copySectionSettings": "Копировать настройки раздела {{section}}",
+        "faceMethod": "Found by",
+        "faceMethods": {
+          "combined": "Both",
+          "landmarks": "Landmarks",
+          "parsing": "AI parsing"
+        },
         "faceParts": {
           "bodySkin": "Кожа тела",
+          "ears": "Ears",
           "eyebrows": "Брови",
           "eyeWhites": "Белки глаз",
           "faceSkin": "Кожа лица",
+          "glasses": "Glasses",
           "hair": "Волосы",
           "iris": "Радужка и зрачок",
           "lips": "Губы",
+          "neck": "Neck",
           "nose": "Нос",
           "teeth": "Зубы"
         },

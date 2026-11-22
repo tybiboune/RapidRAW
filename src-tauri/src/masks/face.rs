@@ -78,6 +78,9 @@ pub enum FacePart {
     Teeth,
     Nose,
     Hair,
+    Ears,
+    Neck,
+    Glasses,
 }
 
 impl FacePart {
@@ -92,7 +95,32 @@ impl FacePart {
             "teeth" => Some(FacePart::Teeth),
             "nose" => Some(FacePart::Nose),
             "hair" => Some(FacePart::Hair),
+            "ears" => Some(FacePart::Ears),
+            "neck" => Some(FacePart::Neck),
+            "glasses" => Some(FacePart::Glasses),
             _ => None,
+        }
+    }
+
+    /// The parts only the face parser can find: the landmarks say nothing about them.
+    fn parsed_only(self) -> bool {
+        matches!(self, FacePart::Ears | FacePart::Neck | FacePart::Glasses)
+    }
+
+    /// The face parser's classes that make up this part.
+    fn parsed_classes(self) -> &'static [usize] {
+        match self {
+            FacePart::FaceSkin => &[PARSED_SKIN, PARSED_NOSE],
+            FacePart::BodySkin => &[],
+            FacePart::Eyebrows => &PARSED_BROWS,
+            FacePart::EyeWhites | FacePart::Iris => &PARSED_EYES,
+            FacePart::Lips => &PARSED_LIPS,
+            FacePart::Teeth => &[PARSED_MOUTH],
+            FacePart::Nose => &[PARSED_NOSE],
+            FacePart::Hair => &[PARSED_HAIR],
+            FacePart::Ears => &PARSED_EARS,
+            FacePart::Neck => &[PARSED_NECK],
+            FacePart::Glasses => &[PARSED_GLASSES],
         }
     }
 }
@@ -596,7 +624,9 @@ fn face_region(face: &DetectedFace, width: u32, height: u32) -> (u32, u32, u32, 
 fn face_parts_mask(
     image: &DynamicImage,
     face: &DetectedFace,
+    parsed: Option<&ParsedFace>,
     parts: &[FacePart],
+    method: FaceMethod,
     region: (u32, u32, u32, u32),
 ) -> GrayImage {
     let (x0, y0, x1, y1) = region;
@@ -645,37 +675,33 @@ fn face_parts_mask(
         .zip(&mouth)
         .map(|(&o, &i)| (o - i).max(0.0))
         .collect();
+    let product = |a: Vec<f32>, b: &[f32]| -> Vec<f32> {
+        a.iter().zip(b).map(|(&a, &b)| a * b).collect()
+    };
+    let less = |a: Vec<f32>, b: &[f32]| -> Vec<f32> {
+        a.iter().zip(b).map(|(&a, &b)| (a - b).max(0.0)).collect()
+    };
 
-    let mut combined = vec![0.0; w * h];
-    for &part in parts {
-        let mask = match part {
-            FacePart::EyeWhites => {
-                let refined = refine(&work_rgb, &eyes, fine_radius);
-                let iris = refine(&work_rgb, &iris, fine_radius);
-                refined
-                    .iter()
-                    .zip(&iris)
-                    .map(|(&e, &i)| (e - i).max(0.0))
-                    .collect()
-            }
+    // each part as the landmarks draw it: None for the parts only the parser can find
+    let from_landmarks = |part: FacePart| -> Option<Vec<f32>> {
+        Some(match part {
+            FacePart::EyeWhites => less(
+                refine(&work_rgb, &eyes, fine_radius),
+                &refine(&work_rgb, &iris, fine_radius),
+            ),
             FacePart::Iris => refine(&work_rgb, &iris, fine_radius),
             FacePart::Eyebrows => refine(&work_rgb, &brows, radius),
             FacePart::Lips => refine(&work_rgb, &lips, radius),
             FacePart::Teeth => {
                 let inner = polygon_mask(w, h, &scaled_polygon(&select(&LIPS_INNER), 0.95));
                 let teeth = teeth_mask(&work_rgb, &luma, &lips, &inner);
-                refine(&work_rgb, &teeth, fine_radius)
-                    .iter()
-                    .zip(&inner)
-                    .map(|(&t, &m)| t * m)
-                    .collect()
+                product(refine(&work_rgb, &teeth, fine_radius), &inner)
             }
             FacePart::Nose => refine(
                 &work_rgb,
                 &polygon_mask(w, h, &convex_hull(&select(&NOSE))),
                 radius * 2,
             ),
-            FacePart::BodySkin => continue,
             FacePart::Hair => refine(
                 &work_rgb,
                 &sharpen(&segment_probabilities(
@@ -698,25 +724,75 @@ fn face_parts_mask(
                 )
                 .unwrap();
                 let oval = imageops::blur(&oval, (size * OVAL_SOFTNESS).max(0.5)).into_raw();
-                let skin: Vec<f32> =
-                    segment_probabilities(&face.segment_frame, &face.skin, w, h, x0, y0, scale)
-                        .iter()
-                        .zip(&oval)
-                        .map(|(&s, &o)| s * o)
-                        .collect();
+                let skin = product(
+                    segment_probabilities(&face.segment_frame, &face.skin, w, h, x0, y0, scale),
+                    &oval,
+                );
                 let features = refine(
                     &work_rgb,
                     &pair(pair(brows.clone(), &eyes), &lips_outer),
                     fine_radius,
                 );
-                refine(&work_rgb, &sharpen(&skin), radius * 2)
-                    .iter()
-                    .zip(&features)
-                    .map(|(&s, &f)| s * (1.0 - f))
-                    .collect()
+                less(refine(&work_rgb, &sharpen(&skin), radius * 2), &features)
             }
+            FacePart::BodySkin | FacePart::Ears | FacePart::Neck | FacePart::Glasses => {
+                return None;
+            }
+        })
+    };
+
+    // each part as the parser finds it: None when there is no parse of this face. The parser has no
+    // iris, so the iris is the landmarks' disc kept to where the parser sees an eye.
+    let share_of = |classes: &[usize]| {
+        parsed.map(|parsed| parsed_share(parsed, classes, w, h, (x0, y0), scale))
+    };
+    let from_parser = |part: FacePart| -> Option<Vec<f32>> {
+        if part == FacePart::BodySkin {
+            return None;
+        }
+        let share = share_of(part.parsed_classes())?;
+        Some(match part {
+            FacePart::EyeWhites => less(
+                refine(&work_rgb, &share, fine_radius),
+                &refine(&work_rgb, &iris, fine_radius),
+            ),
+            FacePart::Iris => product(
+                refine(&work_rgb, &iris, fine_radius),
+                &refine(&work_rgb, &share, fine_radius),
+            ),
+            FacePart::Teeth => {
+                let lips = share_of(&PARSED_LIPS)?;
+                let teeth = teeth_mask(&work_rgb, &luma, &lips, &share);
+                product(refine(&work_rgb, &teeth, fine_radius), &share)
+            }
+            FacePart::Eyebrows | FacePart::Lips | FacePart::Glasses => {
+                refine(&work_rgb, &share, fine_radius)
+            }
+            _ => refine(&work_rgb, &share, radius),
+        })
+    };
+
+    let mut combined = vec![0.0; w * h];
+    for &part in parts {
+        let mask = match method {
+            FaceMethod::Landmarks => from_landmarks(part).or_else(|| from_parser(part)),
+            FaceMethod::Parsing => from_parser(part).or_else(|| from_landmarks(part)),
+            // the two read together: where they agree the part is sure, where only one sees it, it is
+            // half there
+            FaceMethod::Combined => match (from_landmarks(part), from_parser(part)) {
+                (Some(drawn), Some(parsed)) => Some(
+                    drawn
+                        .iter()
+                        .zip(&parsed)
+                        .map(|(&a, &b)| (a + b) / 2.0)
+                        .collect(),
+                ),
+                (drawn, parsed) => drawn.or(parsed),
+            },
         };
-        maximum(&mut combined, &mask);
+        if let Some(mask) = mask {
+            maximum(&mut combined, &mask);
+        }
     }
 
     let fade = EDGE_FADE * size;
@@ -914,8 +990,8 @@ pub fn compose_skin_regions(width: u32, height: u32, analysis: &FaceAnalysis) ->
 }
 
 const WRINKLE_INPUT_SIZE: usize = 512;
-const WRINKLE_MEAN: [f32; 3] = [0.485, 0.456, 0.406];
-const WRINKLE_STD: [f32; 3] = [0.229, 0.224, 0.225];
+const IMAGENET_MEAN: [f32; 3] = [0.485, 0.456, 0.406];
+const IMAGENET_STD: [f32; 3] = [0.229, 0.224, 0.225];
 // in the model's own pixels: the lines come back hard-edged, and a correction that follows a hard edge
 // leaves one
 const WRINKLE_SOFTNESS: f32 = 1.2;
@@ -1063,7 +1139,7 @@ fn run_face_model(
 
 fn run_wrinkles(session: &Mutex<Session>, image: &RgbImage, frame: &FaceFrame) -> Result<Vec<f32>> {
     let tensor = face_tensor(image, frame, WRINKLE_INPUT_SIZE, |rgb| {
-        std::array::from_fn(|c| (rgb[c] / 255.0 - WRINKLE_MEAN[c]) / WRINKLE_STD[c])
+        std::array::from_fn(|c| (rgb[c] / 255.0 - IMAGENET_MEAN[c]) / IMAGENET_STD[c])
     });
     run_face_model(session, tensor, WRINKLE_INPUT_SIZE, WRINKLE_SOFTNESS)
 }
@@ -1159,10 +1235,165 @@ pub fn compose_blemish_map(
     })
 }
 
+// The face parser: SegFormer trained on CelebAMask-HQ, which tells every pixel of a face which of its
+// parts it is. It takes the face cut out the way FFHQ cuts it, ImageNet-normalised, and answers at a
+// quarter of its input.
+const PARSER_INPUT_SIZE: usize = 512;
+const PARSER_OUTPUT_SIZE: usize = 128;
+const PARSER_CLASSES: usize = 19;
+// CelebAMask-HQ's classes, as the parser numbers them
+const PARSED_SKIN: usize = 1;
+const PARSED_NOSE: usize = 2;
+const PARSED_GLASSES: usize = 3;
+const PARSED_EYES: [usize; 2] = [4, 5];
+const PARSED_BROWS: [usize; 2] = [6, 7];
+const PARSED_EARS: [usize; 2] = [8, 9];
+const PARSED_MOUTH: usize = 10;
+const PARSED_LIPS: [usize; 2] = [11, 12];
+const PARSED_HAIR: usize = 13;
+const PARSED_NECK: usize = 17;
+
+/// How the parts of a face are found: from the fitted landmarks and the segmenter, as shapes drawn
+/// between the points; from the face parser, which tells every pixel which part it is; or from both,
+/// the two read together.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+pub enum FaceMethod {
+    #[default]
+    Landmarks,
+    Parsing,
+    Combined,
+}
+
+impl FaceMethod {
+    pub fn from_id(id: Option<&str>) -> Self {
+        match id {
+            Some("parsing") => Self::Parsing,
+            Some("combined") => Self::Combined,
+            _ => Self::Landmarks,
+        }
+    }
+
+    /// Whether the face parser has to be run for these parts: it always does for the parts only it
+    /// can find.
+    pub fn needs_parsing(self, parts: &[FacePart]) -> bool {
+        self != Self::Landmarks || parts.iter().any(|part| part.parsed_only())
+    }
+}
+
+/// What the face parser made of one face: the share of each of its classes at every pixel of its
+/// answer, one plane a class, laid along the frame the face was cut out along.
+pub struct ParsedFace {
+    frame: FaceFrame,
+    classes: Vec<f32>,
+}
+
+/// The face parser's answer for every face of an analysis, in the same order.
+pub struct FaceParsing {
+    pub path_hash: String,
+    faces: Vec<ParsedFace>,
+}
+
+fn run_parser(session: &Mutex<Session>, image: &RgbImage, frame: &FaceFrame) -> Result<Vec<f32>> {
+    let tensor = face_tensor(image, frame, PARSER_INPUT_SIZE, |rgb| {
+        std::array::from_fn(|c| (rgb[c] / 255.0 - IMAGENET_MEAN[c]) / IMAGENET_STD[c])
+    });
+    let mut shares: Vec<f32> = {
+        let mut session = session.lock().unwrap();
+        let outputs = session.run(ort::inputs![Tensor::from_array(tensor)?])?;
+        outputs[0]
+            .try_extract_array::<f32>()?
+            .iter()
+            .copied()
+            .collect()
+    };
+    let plane = PARSER_OUTPUT_SIZE * PARSER_OUTPUT_SIZE;
+    if shares.len() != PARSER_CLASSES * plane {
+        return Err(anyhow::anyhow!(
+            "Unexpected face parser output of {} values",
+            shares.len()
+        ));
+    }
+    // from scores to shares, pixel by pixel across the class planes
+    for i in 0..plane {
+        let at = |c: usize| c * plane + i;
+        let max = (0..PARSER_CLASSES).fold(f32::MIN, |m, c| m.max(shares[at(c)]));
+        let mut sum = 0.0;
+        for c in 0..PARSER_CLASSES {
+            let e = (shares[at(c)] - max).exp();
+            shares[at(c)] = e;
+            sum += e;
+        }
+        for c in 0..PARSER_CLASSES {
+            shares[at(c)] /= sum;
+        }
+    }
+    Ok(shares)
+}
+
+/// Runs the face parser on every face of an analysis, each cut out the way the faces it learned on were.
+pub fn parse_faces(
+    image: &DynamicImage,
+    analysis: &FaceAnalysis,
+    session: &Mutex<Session>,
+) -> Result<FaceParsing> {
+    let rgb = image.to_rgb8();
+    let faces = analysis
+        .faces
+        .iter()
+        .map(|face| {
+            let frame = ffhq_frame(face);
+            let classes = run_parser(session, &rgb, &frame)?;
+            Ok(ParsedFace { frame, classes })
+        })
+        .collect::<Result<Vec<_>>>()?;
+    Ok(FaceParsing {
+        path_hash: analysis.path_hash.clone(),
+        faces,
+    })
+}
+
+// The share of `classes` taken together at every pixel of a face's working grid: `width` by `height`,
+// its corner at (x0, y0) on the picture, `scale` of the picture's size, as face_parts_mask lays it out.
+fn parsed_share(
+    parsed: &ParsedFace,
+    classes: &[usize],
+    width: usize,
+    height: usize,
+    (x0, y0): (u32, u32),
+    scale: f32,
+) -> Vec<f32> {
+    let size = PARSER_OUTPUT_SIZE;
+    let plane = size * size;
+    let mut values = vec![0.0; width * height];
+    values
+        .par_chunks_mut(width)
+        .enumerate()
+        .for_each(|(y, row)| {
+            for (x, out) in row.iter_mut().enumerate() {
+                let p = [x0 as f32 + x as f32 / scale, y0 as f32 + y as f32 / scale];
+                let [u, v] = parsed.frame.to_frame(size, p);
+                if inside(u, v, size, size) {
+                    *out = bilinear(u, v, size, size)
+                        .iter()
+                        .map(|&(i, k)| {
+                            k * classes
+                                .iter()
+                                .map(|&c| parsed.classes[c * plane + i])
+                                .sum::<f32>()
+                        })
+                        .sum();
+                }
+            }
+        });
+    values
+}
+
 pub fn compose_face_mask(
     image: &DynamicImage,
     analysis: &FaceAnalysis,
+    parsing: Option<&FaceParsing>,
     parts: &[FacePart],
+    method: FaceMethod,
 ) -> GrayImage {
     let (width, height) = image.dimensions();
     let mut mask = GrayImage::new(width, height);
@@ -1199,11 +1430,19 @@ pub fn compose_face_mask(
         .iter()
         .map(|face| face_region(face, width, height))
         .collect();
+    // a parse made for another picture or another set of faces is no use here
+    let parsing = parsing.filter(|parsing| {
+        parsing.path_hash == analysis.path_hash && parsing.faces.len() == analysis.faces.len()
+    });
     let face_masks: Vec<GrayImage> = analysis
         .faces
         .par_iter()
+        .enumerate()
         .zip(&regions)
-        .map(|(face, &region)| face_parts_mask(image, face, parts, region))
+        .map(|((i, face), &region)| {
+            let parsed = parsing.map(|parsing| &parsing.faces[i]);
+            face_parts_mask(image, face, parsed, parts, method, region)
+        })
         .collect();
     for (face_mask, &(x0, y0, _, _)) in face_masks.iter().zip(&regions) {
         for (x, y, pixel) in face_mask.enumerate_pixels() {

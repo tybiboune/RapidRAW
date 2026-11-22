@@ -265,6 +265,7 @@
       "skinDetectionRedness": "Redness",
       "skinDetectionSpots": "Spots",
       "skinDetectionUnderEye": "Under eyes",
+      "skinFaceMethod": "Skin found by",
       "skinFindingFace": "Finding the face",
       "skinFindingLines": "Finding the lines",
       "skinFindingSpots": "Finding the spots",
@@ -932,14 +933,23 @@
         "depthAdjustment": "Gylio koregavimas",
         "depthRange": "Gylio rėžis",
         "dropComponentTooltip": "Numeskite komponentą, norėdami pakeisti tvarką",
+        "faceMethod": "Found by",
+        "faceMethods": {
+          "combined": "Both",
+          "landmarks": "Landmarks",
+          "parsing": "AI parsing"
+        },
         "faceParts": {
           "bodySkin": "Kūno oda",
+          "ears": "Ears",
           "eyebrows": "Antakiai",
           "eyeWhites": "Akių baltymai",
           "faceSkin": "Veido oda",
+          "glasses": "Glasses",
           "hair": "Plaukai",
           "iris": "Rainelė ir vyzdys",
           "lips": "Lūpos",
+          "neck": "Neck",
           "nose": "Nosis",
           "teeth": "Dantys"
         },

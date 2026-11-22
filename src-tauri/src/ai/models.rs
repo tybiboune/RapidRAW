@@ -1,5 +1,5 @@
 use crate::ai::processing::{CachedDepthMap, Esam3Features, ImageEmbeddings};
-use crate::masks::face::FaceAnalysis;
+use crate::masks::face::{FaceAnalysis, FaceParsing};
 use anyhow::Result;
 use ndarray::{Array, IxDyn};
 use ort::editor::{Graph, Model, Node, ONNX_DOMAIN, Opset, Outlet};
@@ -145,6 +145,17 @@ const NORMAL_SHA256: &str = "24eacb5dc7a2c54c7bc98f7de085ffbed79ad006ea5b664c2c2
 // to be put in the models folder by hand.
 pub const WRINKLE_FILENAME: &str = "ffhq_wrinkle_unet.onnx";
 
+// The face parser: SegFormer-B5 trained on CelebAMask-HQ (jonathandinu/face-parsing), which tells every
+// pixel of a face which of nineteen parts it is - skin, nose, eyes, brows, ears, lips, mouth, hair, neck,
+// glasses and the rest. A 512x512 FFHQ-aligned face crop, ImageNet-normalised, in; one score a class at
+// a quarter of the size, out. For non-commercial use, like the dataset it learned on.
+const FACE_PARSER_URL: &str =
+    "https://huggingface.co/jonathandinu/face-parsing/resolve/main/onnx/model.onnx?download=true";
+
+const FACE_PARSER_FILENAME: &str = "face_parsing_segformer_b5.onnx";
+
+const FACE_PARSER_SHA256: &str = "6d4e67af60ff78184745ebf74cc15163c0adc27d45cdeba31e3a03d1096fb8c3";
+
 // ABPN's blemish detector (Alibaba's skin retouching, Apache-2.0), exported to ONNX with the sigmoid
 // folded in by scripts/export_blemish_onnx.py: a 768x768 crop of 1.5 times the face, scaled to -1..1,
 // in; how likely each pixel is to be part of a blemish, 0 to 1, out. ModelScope publishes it as PyTorch
@@ -247,6 +258,13 @@ const FACE_SEGMENTER_ASSET: ModelAsset = ModelAsset {
     name: "Face Segmentation Model",
 };
 
+const FACE_PARSER_ASSET: ModelAsset = ModelAsset {
+    filename: FACE_PARSER_FILENAME,
+    url: FACE_PARSER_URL,
+    sha256: Some(FACE_PARSER_SHA256),
+    name: "Face Parsing Model",
+};
+
 const DEPTH_ASSET: ModelAsset = ModelAsset {
     filename: DEPTH_FILENAME,
     url: DEPTH_URL,
@@ -344,6 +362,8 @@ pub enum AiMaskModel {
     Text,
     Face,
     Depth,
+    // the face parser, which the face masks and the skin tool read when they are asked to
+    FaceParsing,
 }
 
 impl AiMaskModel {
@@ -371,6 +391,7 @@ impl AiMaskModel {
                 FACE_SEGMENTER_ASSET,
             ],
             AiMaskModel::Depth => &[DEPTH_ASSET],
+            AiMaskModel::FaceParsing => &[FACE_PARSER_ASSET],
         }
     }
 }
@@ -390,6 +411,7 @@ pub struct AiModels {
     clip_tokenizer: Mutex<Option<Arc<Tokenizer>>>,
     face_landmarks: Mutex<Option<SharedSession>>,
     face_segmenter: Mutex<Option<SharedSession>>,
+    face_parser: Mutex<Option<SharedSession>>,
     depth_anything: Mutex<Option<SharedSession>>,
 }
 
@@ -410,6 +432,7 @@ impl AiModels {
             clip_tokenizer: Mutex::new(None),
             face_landmarks: Mutex::new(None),
             face_segmenter: Mutex::new(None),
+            face_parser: Mutex::new(None),
             depth_anything: Mutex::new(None),
         }
     }
@@ -514,6 +537,10 @@ impl AiModels {
 
     pub fn face_segmenter(&self) -> Result<SharedSession> {
         self.session(&self.face_segmenter, FACE_SEGMENTER_FILENAME, false)
+    }
+
+    pub fn face_parser(&self) -> Result<SharedSession> {
+        self.session(&self.face_parser, FACE_PARSER_FILENAME, true)
     }
 
     pub fn esam3_sky_prompt(&self) -> Result<Arc<Esam3Prompt>> {
@@ -1318,6 +1345,7 @@ pub struct AiState {
     pub embeddings: Option<ImageEmbeddings>,
     pub esam3_features: Option<Arc<Esam3Features>>,
     pub face_analysis: Option<Arc<FaceAnalysis>>,
+    pub face_parsing: Option<Arc<FaceParsing>>,
     pub depth_map: Option<CachedDepthMap>,
 }
 
@@ -1327,6 +1355,7 @@ impl AiState {
     pub fn forget_face_results(&mut self) {
         self.esam3_features = None;
         self.face_analysis = None;
+        self.face_parsing = None;
     }
 
     pub fn release_sessions(&mut self) {

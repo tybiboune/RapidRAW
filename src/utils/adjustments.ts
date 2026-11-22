@@ -128,6 +128,7 @@ export enum Effect {
   VignetteRoundness = 'vignetteRoundness',
   SkinEnabled = 'skinEnabled',
   SkinFaceMap = 'skinFaceMap',
+  SkinFaceMethod = 'skinFaceMethod',
   SkinSpots = 'skinSpots',
   SkinRedness = 'skinRedness',
   SkinRednessWay = 'skinRednessWay',
@@ -354,6 +355,7 @@ export interface Adjustments {
   hue: number;
   skinEnabled: boolean;
   skinFaceMap: string | null;
+  skinFaceMethod: string;
   skinSpots: number;
   skinRedness: number;
   skinRednessWay: number;
@@ -860,6 +862,7 @@ export const normalizeLoadedAdjustments = (loadedAdjustments: Adjustments): any 
     halationAmount: loadedAdjustments.halationAmount ?? INITIAL_ADJUSTMENTS.halationAmount,
     skinEnabled: loadedAdjustments.skinEnabled ?? INITIAL_ADJUSTMENTS.skinEnabled,
     skinFaceMap: loadedAdjustments.skinFaceMap ?? INITIAL_ADJUSTMENTS.skinFaceMap,
+    skinFaceMethod: loadedAdjustments.skinFaceMethod ?? INITIAL_ADJUSTMENTS.skinFaceMethod,
     skinSpots: loadedAdjustments.skinSpots ?? INITIAL_ADJUSTMENTS.skinSpots,
     skinRedness: loadedAdjustments.skinRedness ?? INITIAL_ADJUSTMENTS.skinRedness,
     skinRednessWay: loadedAdjustments.skinRednessWay ?? INITIAL_ADJUSTMENTS.skinRednessWay,
@@ -1297,6 +1300,7 @@ export const ADJUSTMENT_SECTIONS: Sections = {
     Effect.VignetteCenterY,
     Effect.SkinEnabled,
     Effect.SkinFaceMap,
+    Effect.SkinFaceMethod,
     Effect.SkinSpots,
     Effect.SkinRedness,
     Effect.SkinRednessWay,

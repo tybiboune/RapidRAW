@@ -67,8 +67,15 @@ export const FACE_PARTS = [
   'teeth',
   'nose',
   'hair',
+  'ears',
+  'neck',
+  'glasses',
 ] as const;
 export type FacePart = (typeof FACE_PARTS)[number];
+
+// How the parts of a face are found: from the landmarks, from the AI face parser, or from both together.
+export const FACE_METHODS = ['landmarks', 'parsing', 'combined'] as const;
+export type FaceMethod = (typeof FACE_METHODS)[number];
 
 export const MASK_BASIC_TYPES: Array<MaskType> = [
   { disabled: false, icon: Brush, name: 'Brush', type: Mask.Brush },

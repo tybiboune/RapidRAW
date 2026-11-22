@@ -29,6 +29,7 @@ const MASK_DATA_KEYS: [&str; 2] = ["maskDataBase64", "mask_data_base64"];
 const AI_SOURCE_KEY: &str = "aiSource";
 const TEXT_PROMPT_KEY: &str = "prompt";
 const FACE_PARTS_KEY: &str = "parts";
+const FACE_METHOD_KEY: &str = "method";
 const SUBJECT_BOX_KEYS: [&str; 4] = ["startX", "startY", "endX", "endY"];
 const MASK_RESULT_KEYS: [&str; 6] = [
     "maskDataBase64",
@@ -175,6 +176,10 @@ fn face_parts(params: &Value) -> Vec<String> {
         .flatten()
         .filter_map(|part| part.as_str().map(str::to_string))
         .collect()
+}
+
+fn face_method(params: &Value) -> Option<&str> {
+    params.get(FACE_METHOD_KEY).and_then(Value::as_str)
 }
 
 fn has_subject_box(params: &Value) -> bool {
@@ -384,7 +389,10 @@ pub fn reconcile_ai_results(
                 && match kind {
                     MaskKind::Subject => same_subject_box(params, existing),
                     MaskKind::Text => text_prompt(params) == text_prompt(existing),
-                    MaskKind::Face => face_parts(params) == face_parts(existing),
+                    MaskKind::Face => {
+                        face_parts(params) == face_parts(existing)
+                            && face_method(params) == face_method(existing)
+                    }
                     _ => true,
                 }
         });
@@ -1075,6 +1083,17 @@ fn generate_mask(
         model,
     ))
     .map_err(|e| e.to_string())?;
+    if kind == MaskKind::Face
+        && commands::face_mask_needs_parser(&face_parts(&original), face_method(&original))
+    {
+        tauri::async_runtime::block_on(get_or_init_ai_models(
+            app_handle,
+            &state.ai_state,
+            &state.ai_init_lock,
+            AiMaskModel::FaceParsing,
+        ))
+        .map_err(|e| e.to_string())?;
+    }
     let transform = MaskTransform::from_adjustments(adjustments);
     let ai_source = Some(source_id.to_string());
     let cache_key = commands::ai_cache_key(
@@ -1112,6 +1131,7 @@ fn generate_mask(
             &cache_key,
             warped_image,
             &face_parts(&original),
+            face_method(&original).map(str::to_string),
             transform,
             ai_source.clone(),
         )

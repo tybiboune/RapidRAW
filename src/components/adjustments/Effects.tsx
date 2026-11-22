@@ -29,6 +29,7 @@ import { AppSettings } from '../../types/settings';
 import Text from '../ui/Text';
 import AdjustmentSubSection from './AdjustmentSubSection';
 import { TextVariants } from '../../types/typography';
+import { FACE_METHODS } from '../panel/right/Masks';
 import { DepthRangePicker } from './DepthRangePicker';
 import DepthScope from './depthScope/DepthScope';
 import { ScenePatch } from './depthScope/scene';
@@ -235,7 +236,7 @@ function EffectsPanel({
 
   // The skin tools work inside the face the masking already finds, so the first thing switching them
   // on does is ask for that one map. Nothing is applied by it: every slider still starts at zero.
-  const handleGenerateFaceMap = async () => {
+  const handleGenerateFaceMap = async (method?: string) => {
     setIsGeneratingFaceMap(true);
     try {
       // the face skin, and the two maps that say where a face folds and where it shades under the eyes
@@ -244,6 +245,7 @@ function EffectsPanel({
         {
           jsAdjustments: adjustments,
           path: selectedImagePath,
+          method: method ?? adjustments.skinFaceMethod ?? 'landmarks',
         },
       );
       setAdjustments((prev: Partial<Adjustments>) => ({
@@ -308,6 +310,13 @@ function EffectsPanel({
     if (enabled && !adjustments.skinSpotsAiMap) {
       handleGenerateBlemishMap();
     }
+  };
+
+  // The skin can be found by the landmarks, by the AI face parser, or by both: a change finds it again.
+  const handleSkinFaceMethodChange = (method: string) => {
+    if (method === (adjustments.skinFaceMethod ?? 'landmarks')) return;
+    handleAdjustmentChange(Effect.SkinFaceMethod, method);
+    handleGenerateFaceMap(method);
   };
 
   const handleSkinToggle = (enabled: boolean) => {
@@ -837,6 +846,28 @@ function EffectsPanel({
                     <MapGenerationStatus label={t('adjustments.effects.skinFindingFace')} />
                   ) : (
                     <>
+                      <div className="space-y-1">
+                        <Text variant={TextVariants.small} className="text-text-secondary">
+                          {t('adjustments.effects.skinFaceMethod')}
+                        </Text>
+                        <div className="flex gap-1">
+                          {FACE_METHODS.map((method) => (
+                            <button
+                              key={method}
+                              type="button"
+                              onClick={() => handleSkinFaceMethodChange(method)}
+                              className={`flex-1 rounded-md px-2 py-1 text-xs transition-colors ${
+                                (adjustments.skinFaceMethod ?? 'landmarks') === method
+                                  ? 'bg-card-active text-primary'
+                                  : 'bg-surface text-text-secondary hover:bg-card-active/60'
+                              }`}
+                            >
+                              {t(`editor.masks.settings.faceMethods.${method}`)}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+
                       <Slider
                         resetKey="skinSpots"
                         label={t('adjustments.effects.skinSpots')}

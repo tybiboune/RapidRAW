@@ -265,6 +265,7 @@
       "skinDetectionRedness": "Redness",
       "skinDetectionSpots": "Spots",
       "skinDetectionUnderEye": "Under eyes",
+      "skinFaceMethod": "Skin found by",
       "skinFindingFace": "Finding the face",
       "skinFindingLines": "Finding the lines",
       "skinFindingSpots": "Finding the spots",
@@ -845,14 +846,23 @@
         "applyPreset": "プリセットを適用",
         "componentPropertiesTitle": "{{name}} のプロパティ",
         "copySectionSettings": "{{section}}設定をコピー",
+        "faceMethod": "Found by",
+        "faceMethods": {
+          "combined": "Both",
+          "landmarks": "Landmarks",
+          "parsing": "AI parsing"
+        },
         "faceParts": {
           "bodySkin": "体の肌",
+          "ears": "Ears",
           "eyebrows": "眉",
           "eyeWhites": "白目",
           "faceSkin": "顔の肌",
+          "glasses": "Glasses",
           "hair": "髪",
           "iris": "虹彩と瞳孔",
           "lips": "唇",
+          "neck": "Neck",
           "nose": "鼻",
           "teeth": "歯"
         },

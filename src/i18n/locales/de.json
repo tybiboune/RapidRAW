@@ -265,6 +265,7 @@
       "skinDetectionRedness": "Redness",
       "skinDetectionSpots": "Spots",
       "skinDetectionUnderEye": "Under eyes",
+      "skinFaceMethod": "Skin found by",
       "skinFindingFace": "Finding the face",
       "skinFindingLines": "Finding the lines",
       "skinFindingSpots": "Finding the spots",
@@ -845,14 +846,23 @@
         "applyPreset": "Vorgabe anwenden",
         "componentPropertiesTitle": "{{name}}-Eigenschaften",
         "copySectionSettings": "{{section}}-Einstellungen kopieren",
+        "faceMethod": "Found by",
+        "faceMethods": {
+          "combined": "Both",
+          "landmarks": "Landmarks",
+          "parsing": "AI parsing"
+        },
         "faceParts": {
           "bodySkin": "Körperhaut",
+          "ears": "Ears",
           "eyebrows": "Augenbrauen",
           "eyeWhites": "Augenweiß",
           "faceSkin": "Gesichtshaut",
+          "glasses": "Glasses",
           "hair": "Haare",
           "iris": "Iris & Pupille",
           "lips": "Lippen",
+          "neck": "Neck",
           "nose": "Nase",
           "teeth": "Zähne"
         },

@@ -522,7 +522,7 @@ export function useAiMasking() {
     }
   };
 
-  const handleGenerateAiFaceMask = async (subMaskId: string, parts: Array<string>) => {
+  const handleGenerateAiFaceMask = async (subMaskId: string, parts: Array<string>, method?: string) => {
     const { selectedImage, adjustments, patchesSentToBackend } = useEditorStore.getState();
     if (!selectedImage?.path || parts.length === 0) return;
     registerAiTask(subMaskId, 'face');
@@ -533,6 +533,7 @@ export function useAiMasking() {
         jsAdjustments: transformAdjustments,
         path: selectedImage.path,
         parts,
+        method: method ?? null,
         flipHorizontal: adjustments.flipHorizontal,
         flipVertical: adjustments.flipVertical,
         orientationSteps: adjustments.orientationSteps,
@@ -545,6 +546,7 @@ export function useAiMasking() {
         latest.masks?.flatMap((m: MaskContainer) => m.subMasks).find((sm: SubMask) => sm.id === subMaskId) ||
         latest.aiPatches?.flatMap((p: AiPatch) => p.subMasks).find((sm: SubMask) => sm.id === subMaskId);
       if (subMask?.parameters?.parts?.join() !== parts.join()) return;
+      if ((subMask?.parameters?.method ?? 'landmarks') !== (method ?? 'landmarks')) return;
 
       const mergedParameters = { ...subMask.parameters, ...newParameters };
       patchesSentToBackend.delete(subMaskId);

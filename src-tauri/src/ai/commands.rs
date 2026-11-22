@@ -23,7 +23,9 @@ use crate::ai::processing::{
 use crate::app::settings::load_settings;
 use crate::app::state::{AiTaskGuard, AppState, LoadedImage};
 use crate::effects::maps::EffectMapKind;
-use crate::masks::face::{FaceAnalysis, FacePart, analyze_faces, compose_face_mask};
+use crate::masks::face::{
+    FaceAnalysis, FaceMethod, FaceParsing, FacePart, analyze_faces, compose_face_mask, parse_faces,
+};
 use crate::render::cache_utils::GEOMETRY_KEYS;
 use crate::render::geometry::{get_geometry_params_from_json, is_geometry_identity};
 use crate::render::preview::get_cached_full_warped_image;
@@ -380,12 +382,45 @@ fn reset_face_models(ai_state: &Mutex<Option<AiState>>, models: &AiModels) {
     }
 }
 
+/// What the face parser made of the faces of an analysis, run once for it and kept with it. The parser's
+/// files have to be in place first (`AiMaskModel::FaceParsing`).
+pub(crate) fn cached_face_parsing(
+    ai_state: &Mutex<Option<AiState>>,
+    models: &AiModels,
+    analysis: &FaceAnalysis,
+    image: &DynamicImage,
+) -> Result<Arc<FaceParsing>, String> {
+    if let Some(cached) = ai_state
+        .lock()
+        .unwrap()
+        .as_ref()
+        .and_then(|s| s.face_parsing.clone())
+        .filter(|cached| cached.path_hash == analysis.path_hash)
+    {
+        return Ok(cached);
+    }
+    let session = models.face_parser().map_err(|e| e.to_string())?;
+    let parsing = Arc::new(parse_faces(image, analysis, &session).map_err(|e| e.to_string())?);
+    if let Some(state) = ai_state.lock().unwrap().as_mut() {
+        state.face_parsing = Some(parsing.clone());
+    }
+    Ok(parsing)
+}
+
+/// Whether a face mask with these parameters needs the face parser.
+pub fn face_mask_needs_parser(parts: &[String], method: Option<&str>) -> bool {
+    let parts: Vec<FacePart> = parts.iter().filter_map(|p| FacePart::from_id(p)).collect();
+    FaceMethod::from_id(method).needs_parsing(&parts)
+}
+
+#[allow(clippy::too_many_arguments)]
 pub fn generate_face_mask(
     ai_state: &Mutex<Option<AiState>>,
     models: &AiModels,
     cache_key: &str,
     warped_image: &DynamicImage,
     parts: &[String],
+    method: Option<String>,
     transform: MaskTransform,
     ai_source: Option<String>,
 ) -> Result<AiFaceMaskParameters, String> {
@@ -394,10 +429,23 @@ pub fn generate_face_mask(
         return Err(NO_FACES_FOUND.to_string());
     }
     let face_parts: Vec<FacePart> = parts.iter().filter_map(|p| FacePart::from_id(p)).collect();
-    let mask = compose_face_mask(warped_image, &analysis, &face_parts);
+    let face_method = FaceMethod::from_id(method.as_deref());
+    let parsing = if face_method.needs_parsing(&face_parts) {
+        Some(cached_face_parsing(ai_state, models, &analysis, warped_image)?)
+    } else {
+        None
+    };
+    let mask = compose_face_mask(
+        warped_image,
+        &analysis,
+        parsing.as_deref(),
+        &face_parts,
+        face_method,
+    );
 
     Ok(AiFaceMaskParameters {
         parts: parts.to_vec(),
+        method,
         mask_data_base64: Some(encode_to_base64_png(&mask)?),
         rotation: Some(transform.rotation),
         flip_horizontal: Some(transform.flip_horizontal),
@@ -768,6 +816,7 @@ pub async fn generate_ai_face_mask(
     js_adjustments: serde_json::Value,
     path: String,
     parts: Vec<String>,
+    method: Option<String>,
     rotation: f32,
     flip_horizontal: bool,
     flip_vertical: bool,
@@ -787,6 +836,16 @@ pub async fn generate_ai_face_mask(
     )
     .await
     .map_err(|e| e.to_string())?;
+    if face_mask_needs_parser(&parts, method.as_deref()) {
+        get_or_init_ai_models(
+            &app_handle,
+            &state.ai_state,
+            &state.ai_init_lock,
+            AiMaskModel::FaceParsing,
+        )
+        .await
+        .map_err(|e| e.to_string())?;
+    }
     check_cancelled(&guard)?;
 
     let warped_image = get_cached_full_warped_image(&state, &js_adjustments)?;
@@ -806,6 +865,7 @@ pub async fn generate_ai_face_mask(
             &ai_cache_key(&path, &js_adjustments),
             &warped_image,
             &parts,
+            method,
             transform,
             ai_source.clone(),
         )
@@ -1037,6 +1097,7 @@ pub async fn generate_full_image_depth_map(
 pub async fn generate_full_image_face_map(
     js_adjustments: serde_json::Value,
     path: String,
+    method: Option<String>,
     state: tauri::State<'_, AppState>,
     app_handle: tauri::AppHandle,
 ) -> Result<FaceMaps, String> {
@@ -1048,6 +1109,18 @@ pub async fn generate_full_image_face_map(
     )
     .await
     .map_err(|e| e.to_string())?;
+    // the skin the tool works on can be found by the face parser as well as, or instead of, the landmarks
+    let face_method = FaceMethod::from_id(method.as_deref());
+    if face_method.needs_parsing(&[FacePart::FaceSkin]) {
+        get_or_init_ai_models(
+            &app_handle,
+            &state.ai_state,
+            &state.ai_init_lock,
+            AiMaskModel::FaceParsing,
+        )
+        .await
+        .map_err(|e| e.to_string())?;
+    }
 
     let loaded_image = get_loaded_image(&state)?;
     // the picture as the effects see it, before any geometry: the map is put back through the warp
@@ -1067,7 +1140,18 @@ pub async fn generate_full_image_face_map(
     if analysis.faces.is_empty() {
         return Err(NO_FACES_FOUND.to_string());
     }
-    let mask = compose_face_mask(&source_image, &analysis, &[FacePart::FaceSkin]);
+    let parsing = if face_method.needs_parsing(&[FacePart::FaceSkin]) {
+        Some(cached_face_parsing(&state.ai_state, &models, &analysis, &source_image)?)
+    } else {
+        None
+    };
+    let mask = compose_face_mask(
+        &source_image,
+        &analysis,
+        parsing.as_deref(),
+        &[FacePart::FaceSkin],
+        face_method,
+    );
     let regions = crate::masks::face::compose_skin_regions(
         source_image.width(),
         source_image.height(),

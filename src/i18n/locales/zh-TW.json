@@ -265,6 +265,7 @@
       "skinDetectionRedness": "Redness",
       "skinDetectionSpots": "Spots",
       "skinDetectionUnderEye": "Under eyes",
+      "skinFaceMethod": "Skin found by",
       "skinFindingFace": "Finding the face",
       "skinFindingLines": "Finding the lines",
       "skinFindingSpots": "Finding the spots",
@@ -845,14 +846,23 @@
         "applyPreset": "應用預設",
         "componentPropertiesTitle": "{{name}} 屬性",
         "copySectionSettings": "複製 {{section}} 設定",
+        "faceMethod": "Found by",
+        "faceMethods": {
+          "combined": "Both",
+          "landmarks": "Landmarks",
+          "parsing": "AI parsing"
+        },
         "faceParts": {
           "bodySkin": "身體皮膚",
+          "ears": "Ears",
           "eyebrows": "眉毛",
           "eyeWhites": "眼白",
           "faceSkin": "臉部皮膚",
+          "glasses": "Glasses",
           "hair": "頭髮",
           "iris": "虹膜與瞳孔",
           "lips": "嘴唇",
+          "neck": "Neck",
           "nose": "鼻子",
           "teeth": "牙齒"
         },

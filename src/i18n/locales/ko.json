@@ -265,6 +265,7 @@
       "skinDetectionRedness": "Redness",
       "skinDetectionSpots": "Spots",
       "skinDetectionUnderEye": "Under eyes",
+      "skinFaceMethod": "Skin found by",
       "skinFindingFace": "Finding the face",
       "skinFindingLines": "Finding the lines",
       "skinFindingSpots": "Finding the spots",
@@ -845,14 +846,23 @@
         "applyPreset": "프리셋 적용",
         "componentPropertiesTitle": "{{name}} 속성",
         "copySectionSettings": "{{section}} 설정 복사",
+        "faceMethod": "Found by",
+        "faceMethods": {
+          "combined": "Both",
+          "landmarks": "Landmarks",
+          "parsing": "AI parsing"
+        },
         "faceParts": {
           "bodySkin": "몸 피부",
+          "ears": "Ears",
           "eyebrows": "눈썹",
           "eyeWhites": "흰자위",
           "faceSkin": "얼굴 피부",
+          "glasses": "Glasses",
           "hair": "머리카락",
           "iris": "홍채 및 동공",
           "lips": "입술",
+          "neck": "Neck",
           "nose": "코",
           "teeth": "치아"
         },

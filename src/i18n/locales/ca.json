@@ -265,6 +265,7 @@
       "skinDetectionRedness": "Redness",
       "skinDetectionSpots": "Spots",
       "skinDetectionUnderEye": "Under eyes",
+      "skinFaceMethod": "Skin found by",
       "skinFindingFace": "Finding the face",
       "skinFindingLines": "Finding the lines",
       "skinFindingSpots": "Finding the spots",
@@ -870,14 +871,23 @@
         "applyPreset": "Aplicar ajust preestablert",
         "componentPropertiesTitle": "Propietats de {{name}}",
         "copySectionSettings": "Copiar ajustaments de {{section}}",
+        "faceMethod": "Found by",
+        "faceMethods": {
+          "combined": "Both",
+          "landmarks": "Landmarks",
+          "parsing": "AI parsing"
+        },
         "faceParts": {
           "bodySkin": "Pell del cos",
+          "ears": "Ears",
           "eyebrows": "Celles",
           "eyeWhites": "Blanc dels ulls",
           "faceSkin": "Pell de la cara",
+          "glasses": "Glasses",
           "hair": "Cabell",
           "iris": "Iris i pupil·la",
           "lips": "Llavis",
+          "neck": "Neck",
           "nose": "Nas",
           "teeth": "Dents"
         },

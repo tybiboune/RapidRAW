@@ -1072,7 +1072,7 @@ mod tests {
 
         use crate::ai::commands::{MaskTransform, compute_face_analysis};
         use crate::ai::models::AiModels;
-        use crate::masks::face::{FacePart, compose_face_mask, compose_skin_regions};
+        use crate::masks::face::{FaceMethod, FacePart, compose_face_mask, compose_skin_regions};
 
         let Ok(photo) = std::env::var("RRAW_PHOTO") else {
             return;
@@ -1126,7 +1126,13 @@ mod tests {
             analysis.faces.len(),
             started.elapsed()
         );
-        let face_map = compose_face_mask(&converted, &analysis, &[FacePart::FaceSkin]);
+        let face_map = compose_face_mask(
+            &converted,
+            &analysis,
+            None,
+            &[FacePart::FaceSkin],
+            FaceMethod::Landmarks,
+        );
         let regions = compose_skin_regions(width, height, &analysis);
 
         // the face, with room around it
