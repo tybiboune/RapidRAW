@@ -675,9 +675,8 @@ fn face_parts_mask(
         .zip(&mouth)
         .map(|(&o, &i)| (o - i).max(0.0))
         .collect();
-    let product = |a: Vec<f32>, b: &[f32]| -> Vec<f32> {
-        a.iter().zip(b).map(|(&a, &b)| a * b).collect()
-    };
+    let product =
+        |a: Vec<f32>, b: &[f32]| -> Vec<f32> { a.iter().zip(b).map(|(&a, &b)| a * b).collect() };
     let less = |a: Vec<f32>, b: &[f32]| -> Vec<f32> {
         a.iter().zip(b).map(|(&a, &b)| (a - b).max(0.0)).collect()
     };

@@ -431,7 +431,12 @@ pub fn generate_face_mask(
     let face_parts: Vec<FacePart> = parts.iter().filter_map(|p| FacePart::from_id(p)).collect();
     let face_method = FaceMethod::from_id(method.as_deref());
     let parsing = if face_method.needs_parsing(&face_parts) {
-        Some(cached_face_parsing(ai_state, models, &analysis, warped_image)?)
+        Some(cached_face_parsing(
+            ai_state,
+            models,
+            &analysis,
+            warped_image,
+        )?)
     } else {
         None
     };
@@ -1141,7 +1146,12 @@ pub async fn generate_full_image_face_map(
         return Err(NO_FACES_FOUND.to_string());
     }
     let parsing = if face_method.needs_parsing(&[FacePart::FaceSkin]) {
-        Some(cached_face_parsing(&state.ai_state, &models, &analysis, &source_image)?)
+        Some(cached_face_parsing(
+            &state.ai_state,
+            &models,
+            &analysis,
+            &source_image,
+        )?)
     } else {
         None
     };
