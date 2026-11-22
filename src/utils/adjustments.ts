@@ -90,6 +90,7 @@ export enum DetailsAdjustment {
   AiDenoiseMethod = 'aiDenoiseMethod',
   AiUpscaleDetail = 'aiUpscaleDetail',
   AiUpscaleEnabled = 'aiUpscaleEnabled',
+  AiUpscaleFactor = 'aiUpscaleFactor',
   Clarity = 'clarity',
   Dehaze = 'dehaze',
   Structure = 'structure',
@@ -320,6 +321,7 @@ export interface Adjustments {
   aiPatches: Array<AiPatch>;
   aiUpscaleDetail: number;
   aiUpscaleEnabled: boolean;
+  aiUpscaleFactor: number;
   aspectRatio: number | null;
   baselineExposure: boolean;
   blacks: number;
@@ -1035,7 +1037,7 @@ export const ADJUSTMENT_GROUPS: Record<string, AdjustmentGroup[]> = {
     },
     {
       label: 'modals.copyPaste.groups.aiUpscale',
-      keys: [DetailsAdjustment.AiUpscaleEnabled, DetailsAdjustment.AiUpscaleDetail],
+      keys: [DetailsAdjustment.AiUpscaleEnabled, DetailsAdjustment.AiUpscaleDetail, DetailsAdjustment.AiUpscaleFactor],
     },
     {
       label: 'modals.copyPaste.groups.chromaticAberration',

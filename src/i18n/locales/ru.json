@@ -151,6 +151,7 @@
       "aiDenoiseDetail": "Детализация",
       "aiUpscale": "RapidRes 2x",
       "aiUpscaleDetail": "Детализация",
+      "aiUpscaleFactorNote": "Four times needs the picture to be 4096 pixels or less on its long side; a larger one is upscaled two times.",
       "blueYellow": "Синий/Желтый",
       "centre": "Центр",
       "chromaticAberration": "Хроматическая аберрация",

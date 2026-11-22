@@ -156,6 +156,7 @@ pub fn all_available_adjustments() -> HashSet<String> {
         "aiDenoiseDetail",
         "aiUpscaleEnabled",
         "aiUpscaleDetail",
+        "aiUpscaleFactor",
         "chromaticAberrationRedCyan",
         "chromaticAberrationBlueYellow",
         "negativeConversionEnabled",

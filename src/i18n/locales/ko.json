@@ -151,6 +151,7 @@
       "aiDenoiseDetail": "디테일",
       "aiUpscale": "RapidRes 2x",
       "aiUpscaleDetail": "디테일",
+      "aiUpscaleFactorNote": "Four times needs the picture to be 4096 pixels or less on its long side; a larger one is upscaled two times.",
       "blueYellow": "파랑/노랑",
       "centre": "중앙",
       "chromaticAberration": "색수차",

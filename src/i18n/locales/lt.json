@@ -151,6 +151,7 @@
       "aiDenoiseDetail": "Detalumas",
       "aiUpscale": "RapidRes 2x",
       "aiUpscaleDetail": "Detalumas",
+      "aiUpscaleFactorNote": "Four times needs the picture to be 4096 pixels or less on its long side; a larger one is upscaled two times.",
       "blueYellow": "Mėlyna / Geltona",
       "centre": "Centras",
       "chromaticAberration": "Chromatinė aberacija",

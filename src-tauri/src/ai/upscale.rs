@@ -9,8 +9,12 @@ use std::path::Path;
 use std::sync::{Arc, Mutex};
 use tauri::Manager;
 
-pub const FACTOR: u32 = 2;
 const MODEL_TAG: &str = "upscale-v3";
+// the four-times model is another network, so its results are cached apart
+const MODEL_TAG_4X: &str = "upscale4-realplksr-v1";
+/// The longest side an upscaled picture may have: the render works on GPU textures, which most cards cap
+/// at this many pixels. A picture that would come out larger is upscaled two times instead of four.
+const MAX_OUTPUT_SIDE: u32 = 16384;
 const GAMMA: f32 = 2.2;
 const DETAIL_GAIN: f32 = 1.5;
 const DETAIL_NOISE_FLOOR: f32 = 2.0;
@@ -50,9 +54,29 @@ fn denoise_input(adjustments: &serde_json::Value) -> Option<DenoiseMethod> {
         .then(|| DenoiseMethod::from_adjustments(adjustments))
 }
 
-fn key(path: &str, denoise: Option<DenoiseMethod>) -> String {
+/// The factor asked for: four when the owner chose it, otherwise two.
+pub fn requested_factor(adjustments: &serde_json::Value) -> u32 {
+    if adjustments["aiUpscaleFactor"].as_u64() == Some(4) {
+        4
+    } else {
+        2
+    }
+}
+
+/// The factor a picture of this size is upscaled by: four when it is asked for and the result fits on
+/// the card, otherwise two.
+pub fn factor(adjustments: &serde_json::Value, (w, h): (u32, u32)) -> u32 {
+    if requested_factor(adjustments) == 4 && w.max(h).saturating_mul(4) <= MAX_OUTPUT_SIDE {
+        4
+    } else {
+        2
+    }
+}
+
+fn key(path: &str, denoise: Option<DenoiseMethod>, factor: u32) -> String {
     let input = denoise.map_or("none", DenoiseMethod::tag);
-    entry_key(&source_string(path), &format!("{MODEL_TAG}+{input}"))
+    let model = if factor == 4 { MODEL_TAG_4X } else { MODEL_TAG };
+    entry_key(&source_string(path), &format!("{model}+{input}"))
 }
 
 pub fn scale_between(base: &DynamicImage, prepared: &DynamicImage) -> f32 {
@@ -63,29 +87,27 @@ pub fn scale_between(base: &DynamicImage, prepared: &DynamicImage) -> f32 {
     }
 }
 
-fn taps(o: usize, len: usize) -> (usize, usize) {
-    let i = o / 2;
-    let j = if o.is_multiple_of(2) {
-        i.saturating_sub(1)
-    } else {
-        (i + 1).min(len - 1)
-    };
-    (i, j)
+// Where output pixel `o` of an upsampling by `factor` reads from a line of `len` source pixels: the two
+// source pixels either side of its centre, and how far it is from the first to the second.
+fn taps(o: usize, len: usize, factor: usize) -> (usize, usize, f32) {
+    let x = ((o as f32 + 0.5) / factor as f32 - 0.5).max(0.0);
+    let i = (x.floor() as usize).min(len - 1);
+    (i, (i + 1).min(len - 1), (x - i as f32).min(1.0))
 }
 
-fn upsample_add(dst: &mut [f32], src: &[f32], width: usize, height: usize) {
-    let out_w = width * FACTOR as usize;
+fn upsample_add(dst: &mut [f32], src: &[f32], width: usize, height: usize, factor: usize) {
+    let out_w = width * factor;
     dst.par_chunks_exact_mut(out_w * 3)
         .enumerate()
         .for_each(|(oy, row)| {
-            let (y0, y1) = taps(oy, height);
+            let (y0, y1, wy) = taps(oy, height, factor);
             let (r0, r1) = (&src[y0 * width * 3..], &src[y1 * width * 3..]);
             for ox in 0..out_w {
-                let (x0, x1) = taps(ox, width);
+                let (x0, x1, wx) = taps(ox, width, factor);
                 for c in 0..3 {
-                    let near = 0.75 * r0[x0 * 3 + c] + 0.25 * r0[x1 * 3 + c];
-                    let far = 0.75 * r1[x0 * 3 + c] + 0.25 * r1[x1 * 3 + c];
-                    row[ox * 3 + c] += 0.75 * near + 0.25 * far;
+                    let near = r0[x0 * 3 + c] + (r0[x1 * 3 + c] - r0[x0 * 3 + c]) * wx;
+                    let far = r1[x0 * 3 + c] + (r1[x1 * 3 + c] - r1[x0 * 3 + c]) * wx;
+                    row[ox * 3 + c] += near + (far - near) * wy;
                 }
             }
         });
@@ -103,6 +125,7 @@ struct DetailField<'a> {
     source_luma: &'a [f32],
     width: usize,
     height: usize,
+    factor: usize,
 }
 
 struct DetailScratch {
@@ -116,8 +139,8 @@ struct DetailScratch {
 }
 
 impl DetailScratch {
-    fn new(width: usize, rows: usize) -> Self {
-        let out_w = width * FACTOR as usize;
+    fn new(width: usize, rows: usize, factor: usize) -> Self {
+        let out_w = width * factor;
         let n = rows * out_w;
         Self {
             width: out_w,
@@ -162,46 +185,37 @@ impl DetailScratch {
 
 impl DetailField<'_> {
     fn out_width(&self) -> usize {
-        self.width * FACTOR as usize
+        self.width * self.factor
     }
 
     fn row(&self, oy: usize, pixels: &[f32], scratch: &mut DetailScratch, slot: usize) {
-        let (y0, y1) = taps(oy, self.height);
+        let (y0, y1, wy) = taps(oy, self.height, self.factor);
         let near = &self.source_luma[y0 * self.width..][..self.width];
         let far = &self.source_luma[y1 * self.width..][..self.width];
         for ((b, n), f) in scratch.blend.iter_mut().zip(near).zip(far) {
-            *b = 0.75 * n + 0.25 * f;
+            *b = n + (f - n) * wy;
         }
         let span = scratch.span(slot);
         let blend = &scratch.blend;
-        let last = self.width - 1;
-        for (x, (pair, (s, r))) in pixels
-            .as_chunks::<6>()
+        let signal = scratch.signal[span.clone()].iter_mut();
+        let residual = scratch.residual[span].iter_mut();
+        for (ox, ((pixel, s), r)) in pixels
+            .as_chunks::<3>()
             .0
             .iter()
-            .zip(
-                scratch.signal[span.clone()]
-                    .as_chunks_mut::<2>()
-                    .0
-                    .iter_mut()
-                    .zip(scratch.residual[span].as_chunks_mut::<2>().0.iter_mut()),
-            )
+            .zip(signal)
+            .zip(residual)
             .enumerate()
         {
-            let centre = 0.75 * blend[x];
-            let up = [
-                centre + 0.25 * blend[x.saturating_sub(1)],
-                centre + 0.25 * blend[(x + 1).min(last)],
-            ];
-            for k in 0..2 {
-                s[k] = luma(&pair[k * 3..k * 3 + 3]).max(0.0).sqrt();
-                r[k] = s[k] - up[k].max(0.0).sqrt();
-            }
+            let (x0, x1, wx) = taps(ox, self.width, self.factor);
+            let up = blend[x0] + (blend[x1] - blend[x0]) * wx;
+            *s = luma(pixel).max(0.0).sqrt();
+            *r = *s - up.max(0.0).sqrt();
         }
     }
 
     fn row_owned(&self, oy: usize, pixels: &[f32]) -> (Vec<f32>, Vec<f32>) {
-        let mut scratch = DetailScratch::new(self.width, 1);
+        let mut scratch = DetailScratch::new(self.width, 1, self.factor);
         self.row(oy, pixels, &mut scratch, 0);
         (scratch.signal, scratch.residual)
     }
@@ -246,6 +260,7 @@ fn enhance_detail(out: &mut Rgb32FImage, source: &Rgb32FImage, amount: f32) {
         source_luma: &source_luma,
         width: source.width() as usize,
         height: source.height() as usize,
+        factor: (out.width() / source.width().max(1)) as usize,
     };
     let out_w = field.out_width();
     let stride = out_w * 3;
@@ -265,7 +280,7 @@ fn enhance_detail(out: &mut Rgb32FImage, source: &Rgb32FImage, amount: f32) {
 
     let strength = DETAIL_GAIN * amount;
     out.par_chunks_mut(band_len).enumerate().for_each_init(
-        || DetailScratch::new(field.width, 3),
+        || DetailScratch::new(field.width, 3, field.factor),
         |scratch, (band, chunk)| {
             let first = band * DETAIL_BAND;
             let rows = chunk.len() / stride;
@@ -339,10 +354,11 @@ pub fn apply_ai_upscale<'a>(
         return image;
     }
     let source = source_string(path);
+    let factor = factor(adjustments, (w, h));
     let load = |input| {
         CACHE
-            .load(&key(path, input), &source)
-            .filter(|entry| (entry.width, entry.height) == (w * FACTOR, h * FACTOR))
+            .load(&key(path, input, factor), &source)
+            .filter(|entry| (entry.width, entry.height) == (w * factor, h * factor))
     };
 
     let strength = crate::ai::denoise::blend_strength(adjustments);
@@ -387,6 +403,7 @@ fn input_for(
 fn run_upscaler(
     input: &Rgb32FImage,
     session: &Session,
+    factor: u32,
     on_progress: &(dyn Fn(f32) + Sync),
 ) -> Result<Rgb32FImage, String> {
     let (w, h) = input.dimensions();
@@ -395,10 +412,10 @@ fn run_upscaler(
         .par_iter_mut()
         .for_each(|v| *v = v.clamp(0.0, 1.0).powf(1.0 / GAMMA));
 
-    let mut output = crate::ai::tiling::run_ai_upscale(&encoded, session, FACTOR, on_progress)
+    let mut output = crate::ai::tiling::run_ai_upscale(&encoded, session, factor, on_progress)
         .map_err(|e| e.to_string())?;
     drop(encoded);
-    if output.dimensions() != (w * FACTOR, h * FACTOR) {
+    if output.dimensions() != (w * factor, h * factor) {
         return Err(format!(
             "Upscale model returned {}x{} for a {}x{} input",
             output.width(),
@@ -414,15 +431,19 @@ fn run_upscaler(
         .par_iter()
         .map(|&v| v - v.clamp(0.0, 1.0))
         .collect();
-    upsample_add(&mut output, &excess, w as usize, h as usize);
+    upsample_add(&mut output, &excess, w as usize, h as usize, factor as usize);
     Ok(output)
 }
 
-async fn load_session(app_handle: tauri::AppHandle) -> Result<Session, String> {
+async fn load_session(app_handle: tauri::AppHandle, factor: u32) -> Result<Session, String> {
     let state = app_handle.state::<AppState>();
-    crate::ai::models::get_or_init_upscale_model(&app_handle, &state.ai_state, &state.ai_init_lock)
-        .await
-        .map_err(|e| e.to_string())
+    let (ai_state, lock) = (&state.ai_state, &state.ai_init_lock);
+    let session = if factor == 4 {
+        crate::ai::models::get_or_init_upscale4_model(&app_handle, ai_state, lock).await
+    } else {
+        crate::ai::models::get_or_init_upscale_model(&app_handle, ai_state, lock).await
+    };
+    session.map_err(|e| e.to_string())
 }
 
 fn waiting_for_denoise(path: &str, denoise: Option<DenoiseMethod>) -> bool {
@@ -438,11 +459,12 @@ pub fn ensure_generated(
         return;
     }
     let path = loaded_image.path.clone();
+    let factor = factor(adjustments, loaded_image.image.dimensions());
     for input in inputs(adjustments) {
         if waiting_for_denoise(&path, input) {
             continue;
         }
-        let key = key(&path, input);
+        let key = key(&path, input, factor);
         if CACHE.is_pending(&key) {
             return;
         }
@@ -455,26 +477,35 @@ pub fn ensure_generated(
             loaded_image,
             job,
             false,
-            load_session(app_handle.clone()),
+            load_session(app_handle.clone(), factor),
             move |session, base, progress| {
-                run_upscaler(&input_for(base, &path, input)?, &session, progress)
+                run_upscaler(&input_for(base, &path, input)?, &session, factor, progress)
             },
         );
         return;
     }
 }
 
+// The size is not known here, so a picture asked to go four times is taken as done when either factor
+// is there: one too big for four is only ever made at two.
 pub fn has_cached_entry(path: &str, adjustments: &serde_json::Value) -> bool {
     let source = source_string(path);
-    inputs(adjustments)
-        .into_iter()
-        .all(|input| CACHE.has_entry(&key(path, input), &source))
+    let factors: &[u32] = if requested_factor(adjustments) == 4 {
+        &[4, 2]
+    } else {
+        &[2]
+    };
+    factors.iter().any(|&factor| {
+        inputs(adjustments)
+            .into_iter()
+            .all(|input| CACHE.has_entry(&key(path, input, factor), &source))
+    })
 }
 
 pub fn is_generating(path: &str) -> bool {
     std::iter::once(None)
         .chain(DenoiseMethod::ALL.into_iter().map(Some))
-        .any(|input| CACHE.is_pending(&key(path, input)))
+        .any(|input| [2, 4].iter().any(|&f| CACHE.is_pending(&key(path, input, f))))
 }
 
 pub fn generate_for_base(
@@ -483,6 +514,7 @@ pub fn generate_for_base(
     base: &DynamicImage,
     adjustments: &serde_json::Value,
 ) -> Result<bool, String> {
+    let factor = factor(adjustments, base.dimensions());
     for input in inputs(adjustments) {
         if waiting_for_denoise(path, input) {
             return if crate::ai::denoise::is_generating(path) {
@@ -495,10 +527,10 @@ pub fn generate_for_base(
             app_handle,
             path,
             base,
-            key(path, input),
-            load_session(app_handle.clone()),
+            key(path, input, factor),
+            load_session(app_handle.clone(), factor),
             |session, base, progress| {
-                run_upscaler(&input_for(base, path, input)?, &session, progress)
+                run_upscaler(&input_for(base, path, input)?, &session, factor, progress)
             },
         )?;
         if !generated {

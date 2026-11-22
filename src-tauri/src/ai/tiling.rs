@@ -28,6 +28,15 @@ const UPSCALE_TILE: TileParams = TileParams {
     overlap: 16,
 };
 
+/// The four-times model takes a square of exactly this size.
+pub const UPSCALE4_TILE_SIZE: usize = 256;
+
+const UPSCALE4_TILE: TileParams = TileParams {
+    cs: UPSCALE4_TILE_SIZE,
+    margin: 16,
+    overlap: 16,
+};
+
 #[inline]
 fn mirror_coord(c: i32, size: i32) -> i32 {
     if c < 0 {
@@ -223,7 +232,12 @@ pub fn run_ai_upscale(
     on_progress: &dyn Fn(f32),
 ) -> Result<Rgb32FImage> {
     let infer = |tile| run_plain(session, tile);
-    run_tiled(rgb_img, &infer, UPSCALE_TILE, scale, on_progress)
+    let tile = if scale == 4 {
+        UPSCALE4_TILE
+    } else {
+        UPSCALE_TILE
+    };
+    run_tiled(rgb_img, &infer, tile, scale, on_progress)
 }
 
 pub const RAWFORGE_TILE_SIZE: usize = 256;

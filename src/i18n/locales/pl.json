@@ -151,6 +151,7 @@
       "aiDenoiseDetail": "Szczegóły",
       "aiUpscale": "RapidRes 2x",
       "aiUpscaleDetail": "Szczegóły",
+      "aiUpscaleFactorNote": "Four times needs the picture to be 4096 pixels or less on its long side; a larger one is upscaled two times.",
       "blueYellow": "Niebieski/Żółty",
       "centre": "Środek",
       "chromaticAberration": "Aberracja chromatyczna",

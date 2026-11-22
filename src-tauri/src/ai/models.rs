@@ -120,6 +120,14 @@ const UPSCALE_SHA256: &str = "9d3a51deab2518cde257048180070b078840f2aa32326b8bf0
 
 const UPSCALE_SPATIAL_DIMS: [&str; 2] = ["h", "w"];
 
+// darktable's four-times upscaler (RealPLKSR, MIT): RGB 0..1 in a fixed 256x256 square in, 1024x1024
+// out. Slower than the two-times SPAN, and made for photographs.
+const UPSCALE4_URL: &str = "https://huggingface.co/darktable-org/upscale-realplksr-onnx/resolve/main/onnx/model_x4.onnx?download=true";
+
+const UPSCALE4_FILENAME: &str = "realplksr_x4_darktable.onnx";
+
+const UPSCALE4_SHA256: &str = "8ce692652494e2e5c31e1f7c7ab61eb084e9a450cde727a374f5d6746cfe054b";
+
 const LAMA_URL: &str =
     "https://huggingface.co/CyberTimon/RapidRAW-Models/resolve/main/lama_fp16.onnx?download=true";
 
@@ -355,6 +363,13 @@ const UPSCALE_ASSET: ModelAsset = ModelAsset {
     url: UPSCALE_URL,
     sha256: Some(UPSCALE_SHA256),
     name: "Super Resolution Model",
+};
+
+const UPSCALE4_ASSET: ModelAsset = ModelAsset {
+    filename: UPSCALE4_FILENAME,
+    url: UPSCALE4_URL,
+    sha256: Some(UPSCALE4_SHA256),
+    name: "Super Resolution Model (x4)",
 };
 
 const LAMA_ASSET: ModelAsset = ModelAsset {
@@ -1156,6 +1171,45 @@ pub async fn get_or_init_upscale_model(
     Ok(upscale_model)
 }
 
+pub async fn get_or_init_upscale4_model(
+    app_handle: &tauri::AppHandle,
+    ai_state_mutex: &Mutex<Option<AiState>>,
+    ai_init_lock: &TokioMutex<()>,
+) -> Result<Arc<Mutex<Session>>> {
+    let cached = || cached_ai_state(ai_state_mutex, |state| state.upscale4_model.clone());
+    if let Some(session) = cached() {
+        return Ok(session);
+    }
+
+    let _guard = ai_init_lock.lock().await;
+
+    if let Some(session) = cached() {
+        return Ok(session);
+    }
+
+    let models_dir = get_models_dir(app_handle)?;
+    download_and_verify_model(app_handle, &models_dir, &UPSCALE4_ASSET).await?;
+
+    let _ = ort::init().with_name("AI-Upscale").commit();
+    // its square is fixed in the file, so there is nothing to pin
+    let session = Arc::new(Mutex::new(build_session(
+        &models_dir.join(UPSCALE4_FILENAME),
+        SessionKind::Persistent,
+        gpu_acceleration_enabled(app_handle),
+        None,
+    )?));
+
+    crate::register_exit_handler();
+
+    ai_state_mutex
+        .lock()
+        .unwrap()
+        .get_or_insert_with(AiState::default)
+        .upscale4_model = Some(session.clone());
+
+    Ok(session)
+}
+
 pub async fn get_or_init_clip_models(
     app_handle: &tauri::AppHandle,
     ai_state_mutex: &Mutex<Option<AiState>>,
@@ -1369,6 +1423,7 @@ pub struct AiState {
     /// The RawForge network in use, with the size it is.
     pub rawforge_model: Option<(RawForgeVariant, Arc<Mutex<Session>>)>,
     pub upscale_model: Option<Arc<Mutex<Session>>>,
+    pub upscale4_model: Option<Arc<Mutex<Session>>>,
     pub clip_models: Option<Arc<ClipModels>>,
     pub lama_model: Option<Arc<Mutex<Session>>>,
     pub normal_model: Option<Arc<Mutex<Session>>>,
@@ -1394,6 +1449,7 @@ impl AiState {
         self.denoise_model = None;
         self.rawforge_model = None;
         self.upscale_model = None;
+        self.upscale4_model = None;
         self.clip_models = None;
         self.lama_model = None;
         self.normal_model = None;

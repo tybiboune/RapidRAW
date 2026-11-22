@@ -7,6 +7,7 @@
   "aiPatches": [],
   "aiUpscaleDetail": 30,
   "aiUpscaleEnabled": false,
+  "aiUpscaleFactor": 2,
   "aspectRatio": 0,
   "baselineExposure": true,
   "blacks": 0,

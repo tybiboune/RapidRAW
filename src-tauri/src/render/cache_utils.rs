@@ -109,7 +109,7 @@ fn hash_ai_denoise(adjustments: &serde_json::Value, hasher: &mut DefaultHasher) 
     let upscale = crate::ai::upscale::is_enabled(adjustments);
     upscale.hash(hasher);
     if upscale {
-        hash_effect_keys(adjustments, &["aiUpscaleDetail"], hasher);
+        hash_effect_keys(adjustments, &["aiUpscaleDetail", "aiUpscaleFactor"], hasher);
         crate::ai::upscale::cache_epoch().hash(hasher);
     }
 }
