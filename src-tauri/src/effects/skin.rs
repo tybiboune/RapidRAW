@@ -836,7 +836,10 @@ mod tests {
         let (shade_in, shade_out) = (gap(&input[..], SHADE), gap(&out[..], SHADE));
         eprintln!("patch {patch_in:.4} -> {patch_out:.4}, shade {shade_in:.4} -> {shade_out:.4}");
         assert!(patch_out < patch_in * 0.6, "pigment patch not lifted");
-        assert!(shade_out > shade_in * 0.85, "a plain shadow was taken for pigment");
+        assert!(
+            shade_out > shade_in * 0.85,
+            "a plain shadow was taken for pigment"
+        );
 
         // the even-tone slider runs and changes nothing far from any blotch
         let even = render(&context, &img, adj(json!({ "skinTone": 100 })));
