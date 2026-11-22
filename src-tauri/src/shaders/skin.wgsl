@@ -38,6 +38,11 @@ struct Params {
     thr_lines: f32,
     thr_redness: f32,
     thr_under_eye: f32,
+    // 1 when the lines are read from the wrinkle model's map rather than from the curvature, else 0
+    lines_ai: f32,
+    _pad0: u32,
+    _pad1: u32,
+    _pad2: u32,
 }
 
 @group(0) @binding(7) var<uniform> params: Params;
@@ -307,8 +312,9 @@ fn ridge(t: texture_2d<f32>, p: vec2<i32>, h: i32, yardstick: f32) -> vec4<f32> 
 }
 
 // t0, t1, t2: the split picture blurred to the three widths lines are looked for at. t3: the yardstick,
-// blurred. t4: the regions of the face, the folds in the first channel and the band under each eye in the
-// second. t5: the split picture blurred wide, the lie of the face.
+// blurred. t4: the regions of the face, the folds in the first channel, the band under each eye in the
+// second, and where the wrinkle model found lines in the third. t5: the split picture blurred wide, the
+// lie of the face.
 // Out: how sure this is a line, how much of it is under-eye shadow, the brightness of the skin on either
 // side of the line (what it is lifted towards), and the skin weight.
 @compute @workgroup_size(8, 8, 1)
@@ -356,7 +362,18 @@ fn sk_lines(@builtin(global_invocation_id) id: vec3<u32>) {
     // eyes, across the forehead - something everywhere else on the skin, little under the nose, where the
     // shadows are the shape of the face
     let folds = clamp(region.x, 0.0, 1.0);
-    let line = skin * best.x * folds * balanced;
+    var line = skin * best.x * folds * balanced;
+    // When the wrinkle model's map is there, how sure this is a line comes from it instead: it has seen
+    // thousands of faces and knows a crease from a pore or the edge of a shadow better than the curvature
+    // does. The curvature still says which way is across, and so where the skin on either side is, and a
+    // valley between two different stretches of skin is still left alone. Its probabilities are near
+    // all-or-nothing, so the detection slider moves where the map starts counting.
+    if (params.lines_ai > 0.0) {
+        let low = clamp(0.12 * params.thr_lines, 0.02, 0.6);
+        let high = clamp(0.5 * params.thr_lines, low + 0.05, 0.95);
+        let found = smooth_step(low, high, region.z);
+        line = mix(line, skin * found * balanced, params.lines_ai);
+    }
 
     // under the eye is darker than the cheek below it, inside the band where that happens
     let l_wide = textureLoad(t5, p, 0).x / max(textureLoad(t5, p, 0).w, 1e-4);

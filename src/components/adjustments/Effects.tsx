@@ -219,6 +219,7 @@ function EffectsPanel({
   const { t } = useTranslation();
   const [isGeneratingDepth, setIsGeneratingDepth] = useState(false);
   const [isGeneratingFaceMap, setIsGeneratingFaceMap] = useState(false);
+  const [isGeneratingWrinkleMap, setIsGeneratingWrinkleMap] = useState(false);
   const selectedImagePath = useEditorStore((state) => state.selectedImage?.path ?? null);
   const [isGeneratingNormals, setIsGeneratingNormals] = useState(false);
   const [isGeneratingFogDepth, setIsGeneratingFogDepth] = useState(false);
@@ -255,6 +256,31 @@ function EffectsPanel({
       setAdjustments((prev: Partial<Adjustments>) => ({ ...prev, skinEnabled: false }));
     } finally {
       setIsGeneratingFaceMap(false);
+    }
+  };
+
+  // The lines can be read from the FFHQ-Wrinkle model instead of from the curvature of the brightness.
+  // Its map is asked for once, the first time this is switched on for a picture, and kept with the edit.
+  const handleGenerateWrinkleMap = async () => {
+    setIsGeneratingWrinkleMap(true);
+    try {
+      const b64: string = await invoke('generate_full_image_wrinkle_map', {
+        jsAdjustments: adjustments,
+        path: selectedImagePath,
+      });
+      setAdjustments((prev: Partial<Adjustments>) => ({ ...prev, skinLinesAiMap: b64 }));
+    } catch (e) {
+      toast.error(`Failed to find the lines: ${e}`);
+      setAdjustments((prev: Partial<Adjustments>) => ({ ...prev, skinLinesAi: false }));
+    } finally {
+      setIsGeneratingWrinkleMap(false);
+    }
+  };
+
+  const handleLinesAiToggle = (enabled: boolean) => {
+    handleAdjustmentChange(Effect.SkinLinesAi, enabled);
+    if (enabled && !adjustments.skinLinesAiMap) {
+      handleGenerateWrinkleMap();
     }
   };
 
@@ -856,6 +882,17 @@ function EffectsPanel({
                         value={adjustments.skinLines ?? 0}
                         onDragStateChange={onDragStateChange}
                       />
+
+                      {(adjustments.skinLines ?? 0) > 0 &&
+                        (isGeneratingWrinkleMap ? (
+                          <MapGenerationStatus label={t('adjustments.effects.skinFindingLines')} />
+                        ) : (
+                          <Switch
+                            label={t('adjustments.effects.skinLinesAi')}
+                            checked={!!adjustments.skinLinesAi}
+                            onChange={handleLinesAiToggle}
+                          />
+                        ))}
 
                       <Slider
                         resetKey="skinUnderEye"

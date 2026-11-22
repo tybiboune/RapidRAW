@@ -913,6 +913,187 @@ pub fn compose_skin_regions(width: u32, height: u32, analysis: &FaceAnalysis) ->
     }
 }
 
+const WRINKLE_INPUT_SIZE: usize = 512;
+const WRINKLE_MEAN: [f32; 3] = [0.485, 0.456, 0.406];
+const WRINKLE_STD: [f32; 3] = [0.229, 0.224, 0.225];
+// in the model's own pixels: the lines come back hard-edged, and a correction that follows a hard edge
+// leaves one
+const WRINKLE_SOFTNESS: f32 = 1.2;
+// below this the picture is shrunk properly before it is sampled, so a face many times the size of the
+// model's input is averaged rather than picked at
+const WRINKLE_PRESHRINK: f32 = 0.75;
+
+// The square the FFHQ faces were cut to, which is what the wrinkle model learned on: built from the eyes
+// and the mouth exactly as that dataset's alignment builds it, so a face here is framed, sized and turned
+// the way every face it was trained on was.
+fn ffhq_frame(face: &DetectedFace) -> FaceFrame {
+    let points = &face.landmarks;
+    let eye_a = mean_point(points, RIGHT_EYE.iter().copied());
+    let eye_b = mean_point(points, LEFT_EYE.iter().copied());
+    let mouth = mean_point(points, MOUTH_CORNERS.iter().copied());
+    let eye_avg = [(eye_a[0] + eye_b[0]) / 2.0, (eye_a[1] + eye_b[1]) / 2.0];
+    let eye_to_eye = [eye_b[0] - eye_a[0], eye_b[1] - eye_a[1]];
+    let eye_to_mouth = [mouth[0] - eye_avg[0], mouth[1] - eye_avg[1]];
+    let across = [
+        eye_to_eye[0] + eye_to_mouth[1],
+        eye_to_eye[1] - eye_to_mouth[0],
+    ];
+    let half = (eye_to_eye[0].hypot(eye_to_eye[1]) * 2.0)
+        .max(eye_to_mouth[0].hypot(eye_to_mouth[1]) * 1.8);
+    FaceFrame {
+        center: [
+            eye_avg[0] + eye_to_mouth[0] * 0.1,
+            eye_avg[1] + eye_to_mouth[1] * 0.1,
+        ],
+        side: (half * 2.0).max(1.0),
+        angle: across[1].atan2(across[0]),
+    }
+}
+
+// The face cut out along its frame, ImageNet-normalised, channels first. A face much bigger than the
+// model's input is shrunk with a proper filter first and then sampled; sampled straight from the full
+// picture, the fine lines this is looking for would alias into noise.
+fn wrinkle_tensor(image: &RgbImage, frame: &FaceFrame) -> Array4<f32> {
+    let size = WRINKLE_INPUT_SIZE;
+    let factor = size as f32 / frame.side;
+    let shrunk = if factor < WRINKLE_PRESHRINK {
+        let corners: Vec<[f32; 2]> = [[0.0, 0.0], [1.0, 0.0], [0.0, 1.0], [1.0, 1.0]]
+            .into_iter()
+            .map(|[u, v]| frame.to_image(size, u * size as f32, v * size as f32))
+            .collect();
+        let (min, max) = bounds(&corners);
+        let (w, h) = (image.width() as f32, image.height() as f32);
+        let x0 = min[0].floor().clamp(0.0, w) as u32;
+        let y0 = min[1].floor().clamp(0.0, h) as u32;
+        let x1 = max[0].ceil().clamp(0.0, w) as u32;
+        let y1 = max[1].ceil().clamp(0.0, h) as u32;
+        (x1 > x0 + 1 && y1 > y0 + 1).then(|| {
+            let (cw, ch) = (x1 - x0, y1 - y0);
+            let sw = ((cw as f32 * factor).round() as u32).max(1);
+            let sh = ((ch as f32 * factor).round() as u32).max(1);
+            let crop = imageops::crop_imm(image, x0, y0, cw, ch).to_image();
+            let small = imageops::resize(&crop, sw, sh, imageops::FilterType::Triangle);
+            let (fx, fy) = (sw as f32 / cw as f32, sh as f32 / ch as f32);
+            let small_frame = FaceFrame {
+                center: [
+                    (frame.center[0] - x0 as f32 + 0.5) * fx - 0.5,
+                    (frame.center[1] - y0 as f32 + 0.5) * fy - 0.5,
+                ],
+                side: frame.side * (fx + fy) / 2.0,
+                angle: frame.angle,
+            };
+            (small, small_frame)
+        })
+    } else {
+        None
+    };
+    let (source, frame) = match &shrunk {
+        Some((small, small_frame)) => (small, small_frame),
+        None => (image, frame),
+    };
+
+    let plane = size * size;
+    let mut tensor = Array4::<f32>::zeros((1, 3, size, size));
+    let data = tensor.as_slice_mut().unwrap();
+    let (red, rest) = data.split_at_mut(plane);
+    let (green, blue) = rest.split_at_mut(plane);
+    red.par_chunks_mut(size)
+        .zip(green.par_chunks_mut(size))
+        .zip(blue.par_chunks_mut(size))
+        .enumerate()
+        .for_each(|(y, ((r, g), b))| {
+            let row = r.iter_mut().zip(g.iter_mut()).zip(b.iter_mut());
+            for (x, ((r, g), b)) in row.enumerate() {
+                let [sx, sy] = frame.to_image(size, x as f32, y as f32);
+                let rgb = sample_rgb(source, sx, sy, true);
+                *r = (rgb[0] / 255.0 - WRINKLE_MEAN[0]) / WRINKLE_STD[0];
+                *g = (rgb[1] / 255.0 - WRINKLE_MEAN[1]) / WRINKLE_STD[1];
+                *b = (rgb[2] / 255.0 - WRINKLE_MEAN[2]) / WRINKLE_STD[2];
+            }
+        });
+    tensor
+}
+
+fn run_wrinkles(session: &Mutex<Session>, image: &RgbImage, frame: &FaceFrame) -> Result<Vec<f32>> {
+    let tensor = wrinkle_tensor(image, frame);
+    let probabilities: Vec<f32> = {
+        let mut session = session.lock().unwrap();
+        let outputs = session.run(ort::inputs![Tensor::from_array(tensor)?])?;
+        outputs[0]
+            .try_extract_array::<f32>()?
+            .iter()
+            .copied()
+            .collect()
+    };
+    if probabilities.len() != WRINKLE_INPUT_SIZE * WRINKLE_INPUT_SIZE {
+        return Err(anyhow::anyhow!(
+            "Unexpected wrinkle model output of {} values",
+            probabilities.len()
+        ));
+    }
+    let grid = ImageBuffer::<Luma<f32>, Vec<f32>>::from_raw(
+        WRINKLE_INPUT_SIZE as u32,
+        WRINKLE_INPUT_SIZE as u32,
+        probabilities,
+    )
+    .unwrap();
+    Ok(imageops::blur(&grid, WRINKLE_SOFTNESS).into_raw())
+}
+
+/// Where the lines are on every face in the picture, as one map over the whole frame: how likely each
+/// place is to be a wrinkle, 0 to 1, found by the FFHQ-Wrinkle model on each face in turn. The map is at
+/// most `long_side` pixels across, which is all the skin tool looks for faults at. It is not cut to the
+/// skin here; the skin tool reads it through its own face-skin weight, which already leaves out the eyes,
+/// brows and lips the model sometimes takes for lines.
+pub fn compose_wrinkle_map(
+    image: &DynamicImage,
+    analysis: &FaceAnalysis,
+    session: &Mutex<Session>,
+    long_side: u32,
+) -> Result<GrayImage> {
+    let (width, height) = image.dimensions();
+    let scale = (long_side as f32 / width.max(height) as f32).min(1.0);
+    let w = ((width as f32 * scale).round() as usize).max(1);
+    let h = ((height as f32 * scale).round() as usize).max(1);
+    let rgb = image.to_rgb8();
+    let size = WRINKLE_INPUT_SIZE;
+    let mut map = vec![0.0f32; w * h];
+    for face in &analysis.faces {
+        let frame = ffhq_frame(face);
+        let probabilities = run_wrinkles(session, &rgb, &frame)?;
+        // the face's region, in pixels of the map
+        let (x0, y0, x1, y1) = face_region(face, width, height);
+        let to_map = |v: u32, limit: usize| ((v as f32 * scale) as usize).min(limit);
+        let (mx0, my0) = (to_map(x0, w), to_map(y0, h));
+        let (mx1, my1) = (
+            ((x1 as f32 * scale).ceil() as usize).min(w),
+            ((y1 as f32 * scale).ceil() as usize).min(h),
+        );
+        map.par_chunks_mut(w)
+            .enumerate()
+            .skip(my0)
+            .take(my1.saturating_sub(my0))
+            .for_each(|(y, row)| {
+                for (x, out) in row.iter_mut().enumerate().take(mx1).skip(mx0) {
+                    // where this pixel of the map lies on the picture
+                    let p = [
+                        (x as f32 + 0.5) / scale - 0.5,
+                        (y as f32 + 0.5) / scale - 0.5,
+                    ];
+                    let [u, v] = frame.to_frame(size, p);
+                    if inside(u, v, size, size) {
+                        let found: f32 = bilinear(u, v, size, size)
+                            .iter()
+                            .map(|&(i, k)| probabilities[i] * k)
+                            .sum();
+                        *out = out.max(found);
+                    }
+                }
+            });
+    }
+    Ok(to_gray(&map, w, h))
+}
+
 pub fn compose_face_mask(
     image: &DynamicImage,
     analysis: &FaceAnalysis,

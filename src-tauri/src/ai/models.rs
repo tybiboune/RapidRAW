@@ -139,6 +139,12 @@ const NORMAL_FILENAME: &str = "moge-2-vits-normal-onnx.onnx";
 
 const NORMAL_SHA256: &str = "24eacb5dc7a2c54c7bc98f7de085ffbed79ad006ea5b664c2c2cdc02ff3a52f0";
 
+// The FFHQ-Wrinkle U-Net (ResNet50 encoder), exported to ONNX with the sigmoid folded in: a 512x512
+// face crop, ImageNet-normalised, in; how likely each pixel is to be a wrinkle, 0 to 1, out. Its
+// weights are CC BY-NC-SA and nothing hosts the export, so it is not downloaded: the file is expected
+// to be put in the models folder by hand.
+pub const WRINKLE_FILENAME: &str = "ffhq_wrinkle_unet.onnx";
+
 type SharedSession = Arc<Mutex<Session>>;
 
 const GPU_IDLE: u8 = 0;
@@ -1209,6 +1215,54 @@ pub async fn get_or_init_normal_model(
     Ok(normal_model)
 }
 
+pub async fn get_or_init_wrinkle_model(
+    app_handle: &tauri::AppHandle,
+    ai_state_mutex: &Mutex<Option<AiState>>,
+    ai_init_lock: &TokioMutex<()>,
+) -> Result<Arc<Mutex<Session>>> {
+    if let Some(wrinkle_model) =
+        cached_ai_state(ai_state_mutex, |state| state.wrinkle_model.clone())
+    {
+        return Ok(wrinkle_model);
+    }
+
+    let _guard = ai_init_lock.lock().await;
+
+    if let Some(wrinkle_model) =
+        cached_ai_state(ai_state_mutex, |state| state.wrinkle_model.clone())
+    {
+        return Ok(wrinkle_model);
+    }
+
+    let model_path = get_models_dir(app_handle)?.join(WRINKLE_FILENAME);
+    if !model_path.exists() {
+        return Err(anyhow::anyhow!(
+            "The wrinkle model is not installed: put {} in {}",
+            WRINKLE_FILENAME,
+            model_path.parent().unwrap_or(&model_path).display()
+        ));
+    }
+
+    let _ = ort::init().with_name("AI-Wrinkles").commit();
+    let session = build_session(
+        &model_path,
+        SessionKind::OneShot,
+        gpu_allowed_on_platform() && gpu_acceleration_enabled(app_handle),
+        None,
+    )?;
+    let wrinkle_model = Arc::new(Mutex::new(session));
+
+    crate::register_exit_handler();
+
+    ai_state_mutex
+        .lock()
+        .unwrap()
+        .get_or_insert_with(AiState::default)
+        .wrinkle_model = Some(wrinkle_model.clone());
+
+    Ok(wrinkle_model)
+}
+
 const ESAM3_PROMPT_TOKENS: usize = 16;
 
 const ESAM3_EMBED_DIM: usize = 256;
@@ -1228,6 +1282,7 @@ pub struct AiState {
     pub clip_models: Option<Arc<ClipModels>>,
     pub lama_model: Option<Arc<Mutex<Session>>>,
     pub normal_model: Option<Arc<Mutex<Session>>>,
+    pub wrinkle_model: Option<Arc<Mutex<Session>>>,
     pub embeddings: Option<ImageEmbeddings>,
     pub esam3_features: Option<Arc<Esam3Features>>,
     pub face_analysis: Option<Arc<FaceAnalysis>>,
@@ -1250,6 +1305,7 @@ impl AiState {
         self.clip_models = None;
         self.lama_model = None;
         self.normal_model = None;
+        self.wrinkle_model = None;
     }
 }
 

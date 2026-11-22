@@ -24,7 +24,7 @@ const STATS_LONG_SIDE: f32 = 512.0;
 /// cards have free, and the render failed (the screen kept the picture from before). On the copy it is a
 /// few hundred megabytes. The faults are measured in shares of the face anyway, so they are found the
 /// same way at any size, and the result no longer changes with the zoom.
-const DETECT_LONG_SIDE: u32 = 2048;
+pub const DETECT_LONG_SIDE: u32 = 2048;
 
 /// The size the faults are looked for at: the picture's own, or scaled down to `DETECT_LONG_SIDE`.
 fn detect_size((w, h): (u32, u32)) -> (u32, u32) {
@@ -64,6 +64,11 @@ struct Params {
     thr_lines: f32,
     thr_redness: f32,
     thr_under_eye: f32,
+    // 1 when the lines are read from the wrinkle model's map rather than from the curvature, else 0
+    lines_ai: f32,
+    _pad0: u32,
+    _pad1: u32,
+    _pad2: u32,
 }
 
 // the widths lines and blemishes are looked for at, as a share of the face's width: a fine crease or a
@@ -71,11 +76,27 @@ struct Params {
 // picture is blurred to about this much.
 const DETAIL_WIDTHS: [f32; 3] = [0.0025, 0.005, 0.010];
 
-// where a face folds and where it shades under the eyes: two soft maps made from the landmarks
+// where a face folds and where it shades under the eyes: two soft maps made from the landmarks; and,
+// when the lines are to be read from the wrinkle model, where it found them
 struct Regions {
     lines: Arc<GrayImage>,
     under_eye: Arc<GrayImage>,
+    ai_lines: Option<Arc<GrayImage>>,
     key: u64,
+}
+
+// A soft map read at a place given as a share of its width and height, between its pixels.
+fn sample_share(map: &GrayImage, u: f32, v: f32) -> f32 {
+    let (w, h) = map.dimensions();
+    let x = (u * w as f32 - 0.5).clamp(0.0, (w - 1) as f32);
+    let y = (v * h as f32 - 0.5).clamp(0.0, (h - 1) as f32);
+    let (x0, y0) = (x.floor() as u32, y.floor() as u32);
+    let (x1, y1) = ((x0 + 1).min(w - 1), (y0 + 1).min(h - 1));
+    let (fx, fy) = (x - x0 as f32, y - y0 as f32);
+    let at = |x: u32, y: u32| map.get_pixel(x, y)[0] as f32 / 255.0;
+    let top = at(x0, y0) + (at(x1, y0) - at(x0, y0)) * fx;
+    let bottom = at(x0, y1) + (at(x1, y1) - at(x0, y1)) * fx;
+    top + (bottom - top) * fy
 }
 
 pub struct Skin {
@@ -200,14 +221,24 @@ pub fn prepare(
         let key = crate::effects::maps::effect_map_key(data, adjustments);
         Some((map, key))
     };
+    // the wrinkle model's map, only when it is asked for and the lines are
+    let ai_wanted = lines > 0.0 && adjustments["skinLinesAi"].as_bool().unwrap_or(false);
+    let ai_lines = if ai_wanted {
+        map_of("skinLinesAiMap")
+            .filter(|(map, _)| map.width() >= 2 && map.height() >= 2)
+    } else {
+        None
+    };
     let regions = match (map_of("skinLinesMap"), map_of("skinUnderEyeMap")) {
         (Some((lines, lines_key)), Some((under_eye, under_eye_key)))
             if lines.dimensions() == under_eye.dimensions() && lines.width() >= 2 =>
         {
+            let ai_key = ai_lines.as_ref().map_or(0, |(_, key)| *key);
             Some(Regions {
                 lines,
                 under_eye,
-                key: lines_key ^ under_eye_key.rotate_left(17),
+                ai_lines: ai_lines.map(|(map, _)| map),
+                key: lines_key ^ under_eye_key.rotate_left(17) ^ ai_key.rotate_left(41),
             })
         }
         _ => None,
@@ -256,29 +287,61 @@ pub fn encode(enc: &mut ComputeEncoder, job: &Skin, src: &Slot, dst: &Slot) {
         job.face_map.pixels().map(|p| p[0] as f32 / 255.0).collect()
     });
 
-    // the two region maps travel as one texture, the folds in the first channel and the under-eye band
-    // in the second; without them a single empty texel stands in, which reads as no region at all
-    let rg32 = wgpu::TextureFormat::Rg32Float;
+    // The region maps travel as one texture: the folds in the first channel, the under-eye band in the
+    // second, and where the wrinkle model found lines in the third. The model's lines are thin, so when
+    // they are there the texture takes their size and the two soft regions are read up to it; otherwise
+    // it is the regions' own size. Without any of them a single empty texel stands in, which reads as no
+    // region at all.
     let (region_size, regions) = match &job.regions {
         Some(regions) => {
-            let size = regions.lines.dimensions();
-            let texture = enc.cached_map("Skin Regions", regions.key, size, rg32, || {
-                regions
-                    .lines
-                    .pixels()
-                    .zip(regions.under_eye.pixels())
-                    .flat_map(|(lines, under_eye)| {
-                        [lines[0] as f32 / 255.0, under_eye[0] as f32 / 255.0]
-                    })
-                    .collect()
+            let size = regions
+                .ai_lines
+                .as_ref()
+                .map_or(regions.lines.dimensions(), |map| map.dimensions());
+            let texture = enc.cached_map("Skin Regions", regions.key, size, f32x4, || {
+                match &regions.ai_lines {
+                    Some(ai_lines) => {
+                        let (w, h) = size;
+                        (0..h)
+                            .flat_map(|y| (0..w).map(move |x| (x, y)))
+                            .flat_map(|(x, y)| {
+                                let u = (x as f32 + 0.5) / w as f32;
+                                let v = (y as f32 + 0.5) / h as f32;
+                                [
+                                    sample_share(&regions.lines, u, v),
+                                    sample_share(&regions.under_eye, u, v),
+                                    ai_lines.get_pixel(x, y)[0] as f32 / 255.0,
+                                    0.0,
+                                ]
+                            })
+                            .collect()
+                    }
+                    None => regions
+                        .lines
+                        .pixels()
+                        .zip(regions.under_eye.pixels())
+                        .flat_map(|(lines, under_eye)| {
+                            [
+                                lines[0] as f32 / 255.0,
+                                under_eye[0] as f32 / 255.0,
+                                0.0,
+                                0.0,
+                            ]
+                        })
+                        .collect(),
+                }
             });
             (size, texture)
         }
         None => (
             (1, 1),
-            enc.cached_map("Skin Regions", 0, (1, 1), rg32, || vec![0.45, 0.0]),
+            enc.cached_map("Skin Regions", 0, (1, 1), f32x4, || vec![0.45, 0.0, 0.0, 0.0]),
         ),
     };
+    let lines_ai = job
+        .regions
+        .as_ref()
+        .is_some_and(|regions| regions.ai_lines.is_some());
 
     // Everything a face does is measured in faces, not in pixels: a blemish, a crease and the shading of
     // a cheek are a fixed share of its width, so a small face in a big picture and a large one are
@@ -306,6 +369,8 @@ pub fn encode(enc: &mut ComputeEncoder, job: &Skin, src: &Slot, dst: &Slot) {
         thr_lines: job.thresholds[1],
         thr_redness: job.thresholds[2],
         thr_under_eye: job.thresholds[3],
+        lines_ai: if lines_ai { 1.0 } else { 0.0 },
+        ..Default::default()
     };
 
     // what this face's own skin colour comes to, left in scratch for the passes that read against it

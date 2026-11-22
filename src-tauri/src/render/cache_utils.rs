@@ -291,6 +291,8 @@ pub fn calculate_effects_hash(adjustments: &serde_json::Value) -> u64 {
                 "skinFaceMap",
                 "skinLinesMap",
                 "skinUnderEyeMap",
+                "skinLinesAi",
+                "skinLinesAiMap",
                 "skinSensitivity",
                 "skinSpotsSensitivity",
                 "skinLinesSensitivity",
@@ -413,12 +415,18 @@ pub fn calculate_transform_hash(adjustments: &serde_json::Value) -> u64 {
             "skinLinesSensitivity",
             "skinRednessSensitivity",
             "skinUnderEyeSensitivity",
+            "skinLinesAi",
         ] {
             if let Some(val) = adjustments.get(key) {
                 val.to_string().hash(&mut hasher);
             }
         }
-        for key in ["skinFaceMap", "skinLinesMap", "skinUnderEyeMap"] {
+        for key in [
+            "skinFaceMap",
+            "skinLinesMap",
+            "skinUnderEyeMap",
+            "skinLinesAiMap",
+        ] {
             if let Some(val) = adjustments.get(key) {
                 val.as_str().unwrap_or("").len().hash(&mut hasher);
             }

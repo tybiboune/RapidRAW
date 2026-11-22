@@ -1096,6 +1096,69 @@ pub struct FaceMaps {
     under_eye_map: String,
 }
 
+/// Where the lines are on the faces of the loaded picture, found by the FFHQ-Wrinkle model rather than
+/// by the curvature of the brightness, for the skin tool's lines to be read from instead. It works on the
+/// same faces the face map was made from, and like the other skin maps it is in the picture's own space
+/// and put back through the warp when it is used.
+#[tauri::command]
+pub async fn generate_full_image_wrinkle_map(
+    js_adjustments: serde_json::Value,
+    path: String,
+    state: tauri::State<'_, AppState>,
+    app_handle: tauri::AppHandle,
+) -> Result<String, String> {
+    // the model is checked for first: without it there is no point finding the faces
+    let session = crate::ai::models::get_or_init_wrinkle_model(
+        &app_handle,
+        &state.ai_state,
+        &state.ai_init_lock,
+    )
+    .await
+    .map_err(|e| e.to_string())?;
+    let models = get_or_init_ai_models(
+        &app_handle,
+        &state.ai_state,
+        &state.ai_init_lock,
+        AiMaskModel::Face,
+    )
+    .await
+    .map_err(|e| e.to_string())?;
+
+    let loaded_image = get_loaded_image(&state)?;
+    let source_image = crate::masks::generation::build_converted_source_image(
+        &loaded_image.image,
+        loaded_image.is_raw,
+        &js_adjustments,
+    );
+    let analysis = cached_face_analysis(
+        &state.ai_state,
+        &models,
+        &skin_cache_key(&path, &js_adjustments),
+        &source_image,
+        MaskTransform::from_adjustments(&js_adjustments),
+    )?;
+    if analysis.faces.is_empty() {
+        return Err(NO_FACES_FOUND.to_string());
+    }
+    let map = tauri::async_runtime::spawn_blocking(move || {
+        crate::masks::face::compose_wrinkle_map(
+            &source_image,
+            &analysis,
+            &session,
+            crate::effects::skin::DETECT_LONG_SIDE,
+        )
+    })
+    .await
+    .map_err(|e| e.to_string())?
+    .map_err(|e| e.to_string())?;
+    let encoded = encode_to_base64_png(&map)?;
+    Ok(format!(
+        "{}{}",
+        crate::effects::maps::SOURCE_SPACE_MAP_PREFIX,
+        encoded.trim_start_matches("data:image/png;base64,")
+    ))
+}
+
 #[tauri::command]
 pub async fn generate_relight_normal_map(
     js_adjustments: serde_json::Value,

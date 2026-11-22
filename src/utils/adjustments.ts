@@ -135,6 +135,8 @@ export enum Effect {
   SkinKeepTexture = 'skinKeepTexture',
   SkinLines = 'skinLines',
   SkinLinesMap = 'skinLinesMap',
+  SkinLinesAi = 'skinLinesAi',
+  SkinLinesAiMap = 'skinLinesAiMap',
   SkinUnderEye = 'skinUnderEye',
   SkinUnderEyeMap = 'skinUnderEyeMap',
   SkinSensitivity = 'skinSensitivity',
@@ -354,6 +356,8 @@ export interface Adjustments {
   skinKeepTexture: number;
   skinLines: number;
   skinLinesMap: string | null;
+  skinLinesAi: boolean;
+  skinLinesAiMap: string | null;
   skinUnderEye: number;
   skinUnderEyeMap: string | null;
   skinSensitivity: number;
@@ -853,6 +857,8 @@ export const normalizeLoadedAdjustments = (loadedAdjustments: Adjustments): any 
     skinKeepTexture: loadedAdjustments.skinKeepTexture ?? INITIAL_ADJUSTMENTS.skinKeepTexture,
     skinLines: loadedAdjustments.skinLines ?? INITIAL_ADJUSTMENTS.skinLines,
     skinLinesMap: loadedAdjustments.skinLinesMap ?? INITIAL_ADJUSTMENTS.skinLinesMap,
+    skinLinesAi: loadedAdjustments.skinLinesAi ?? INITIAL_ADJUSTMENTS.skinLinesAi,
+    skinLinesAiMap: loadedAdjustments.skinLinesAiMap ?? INITIAL_ADJUSTMENTS.skinLinesAiMap,
     skinUnderEye: loadedAdjustments.skinUnderEye ?? INITIAL_ADJUSTMENTS.skinUnderEye,
     skinUnderEyeMap: loadedAdjustments.skinUnderEyeMap ?? INITIAL_ADJUSTMENTS.skinUnderEyeMap,
     skinSensitivity: loadedAdjustments.skinSensitivity ?? INITIAL_ADJUSTMENTS.skinSensitivity,
@@ -1066,6 +1072,7 @@ export const ADJUSTMENT_GROUPS: Record<string, AdjustmentGroup[]> = {
         Effect.SkinRednessWay,
         Effect.SkinShine,
         Effect.SkinLines,
+        Effect.SkinLinesAi,
         Effect.SkinUnderEye,
         Effect.SkinKeepTexture,
         Effect.SkinSensitivity,
@@ -1278,6 +1285,8 @@ export const ADJUSTMENT_SECTIONS: Sections = {
     Effect.SkinKeepTexture,
     Effect.SkinLines,
     Effect.SkinLinesMap,
+    Effect.SkinLinesAi,
+    Effect.SkinLinesAiMap,
     Effect.SkinUnderEye,
     Effect.SkinUnderEyeMap,
     Effect.SkinSensitivity,
