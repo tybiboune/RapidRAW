@@ -860,6 +860,30 @@ function EffectsPanel({
                       )}
 
                       <Slider
+                        resetKey="skinPigment"
+                        label={t('adjustments.effects.skinPigment')}
+                        max={100}
+                        min={0}
+                        defaultValue={0}
+                        onChange={(e: SliderChangeEvent) => handleAdjustmentChange(Effect.SkinPigment, e.target.value)}
+                        step={1}
+                        value={adjustments.skinPigment ?? 0}
+                        onDragStateChange={onDragStateChange}
+                      />
+
+                      <Slider
+                        resetKey="skinTone"
+                        label={t('adjustments.effects.skinTone')}
+                        max={100}
+                        min={0}
+                        defaultValue={0}
+                        onChange={(e: SliderChangeEvent) => handleAdjustmentChange(Effect.SkinTone, e.target.value)}
+                        step={1}
+                        value={adjustments.skinTone ?? 0}
+                        onDragStateChange={onDragStateChange}
+                      />
+
+                      <Slider
                         resetKey="skinShine"
                         label={t('adjustments.effects.skinShine')}
                         max={100}
@@ -993,6 +1017,20 @@ function EffectsPanel({
                         }
                         step={1}
                         value={adjustments.skinUnderEyeSensitivity ?? 50}
+                        onDragStateChange={onDragStateChange}
+                      />
+
+                      <Slider
+                        resetKey="skinPigmentSensitivity"
+                        label={t('adjustments.effects.skinDetectionPigment')}
+                        max={100}
+                        min={0}
+                        defaultValue={50}
+                        onChange={(e: SliderChangeEvent) =>
+                          handleAdjustmentChange(Effect.SkinPigmentSensitivity, e.target.value)
+                        }
+                        step={1}
+                        value={adjustments.skinPigmentSensitivity ?? 50}
                         onDragStateChange={onDragStateChange}
                       />
                     </>

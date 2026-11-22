@@ -66,9 +66,10 @@ struct Params {
     thr_under_eye: f32,
     // 1 when the lines are read from the wrinkle model's map rather than from the curvature, else 0
     lines_ai: f32,
-    _pad0: u32,
-    _pad1: u32,
-    _pad2: u32,
+    // the brown and dark patches of pigment, and how even the skin's colour is made
+    pigment: f32,
+    tone: f32,
+    thr_pigment: f32,
 }
 
 // the widths lines and blemishes are looked for at, as a share of the face's width: a fine crease or a
@@ -112,8 +113,11 @@ pub struct Skin {
     under_eye: f32,
     keep_texture: f32,
     redness_way: u32,
-    // the threshold of each kind of fault, as a factor of the usual one: spots, lines, redness, under eyes
-    thresholds: [f32; 4],
+    pigment: f32,
+    tone: f32,
+    // the threshold of each kind of fault, as a factor of the usual one: spots, lines, redness, under
+    // eyes, pigment
+    thresholds: [f32; 5],
 }
 
 // The width of the face as a fraction of the picture's width, from the area of the largest blob on the
@@ -203,7 +207,12 @@ pub fn prepare(
     let shine = get("skinShine");
     let lines = get("skinLines");
     let under_eye = get("skinUnderEye");
-    if spots <= 0.0 && redness <= 0.0 && shine <= 0.0 && lines <= 0.0 && under_eye <= 0.0 {
+    let pigment = get("skinPigment");
+    let tone = get("skinTone");
+    if [spots, redness, shine, lines, under_eye, pigment, tone]
+        .iter()
+        .all(|&amount| amount <= 0.0)
+    {
         return None;
     }
     if w < 8 || h < 8 {
@@ -255,11 +264,14 @@ pub fn prepare(
         under_eye,
         keep_texture: get("skinKeepTexture"),
         redness_way: adjustments["skinRednessWay"].as_u64().unwrap_or(0).min(3) as u32,
+        pigment,
+        tone,
         thresholds: [
             threshold("skinSpotsSensitivity"),
             threshold("skinLinesSensitivity"),
             threshold("skinRednessSensitivity"),
             threshold("skinUnderEyeSensitivity"),
+            threshold("skinPigmentSensitivity"),
         ],
     })
 }
@@ -370,7 +382,9 @@ pub fn encode(enc: &mut ComputeEncoder, job: &Skin, src: &Slot, dst: &Slot) {
         thr_redness: job.thresholds[2],
         thr_under_eye: job.thresholds[3],
         lines_ai: if lines_ai { 1.0 } else { 0.0 },
-        ..Default::default()
+        pigment: job.pigment,
+        tone: job.tone,
+        thr_pigment: job.thresholds[4],
     };
 
     // what this face's own skin colour comes to, left in scratch for the passes that read against it
@@ -785,6 +799,49 @@ mod tests {
             );
         }
     }
+
+    // A brown patch is pigment and comes up to the skin around it; a shadow of the same depth keeps its
+    // colour, so it is not pigment and is left alone.
+    #[test]
+    fn pigment_lifts_a_brown_patch_and_leaves_a_shadow() {
+        const PATCH: (f32, f32) = (120.0, 140.0);
+        const SHADE: (f32, f32) = (270.0, 250.0);
+        let context = gpu();
+        let mut img = Rgb32FImage::new(N, N);
+        for (x, y, px) in img.enumerate_pixels_mut() {
+            let g = noise(x, y) * 0.02;
+            let d = |c: (f32, f32)| ((x as f32 - c.0).powi(2) + (y as f32 - c.1).powi(2)).sqrt();
+            let patch = (-(d(PATCH) / 14.0).powi(2)).exp();
+            let shade = (-(d(SHADE) / 14.0).powi(2)).exp();
+            let dim = 1.0 - 0.25 * shade;
+            px.0 = [
+                (0.50 + g) * (1.0 - 0.18 * patch) * dim,
+                (0.36 + g) * (1.0 - 0.30 * patch) * dim,
+                (0.28 + g) * (1.0 - 0.45 * patch) * dim,
+            ];
+        }
+        let input: Vec<[f32; 3]> = img.pixels().map(|p| p.0).collect();
+        assert!(prepare(&adj(json!({ "skinPigment": 50 })), None, (N, N)).is_some());
+        let out = render(&context, &img, adj(json!({ "skinPigment": 100 })));
+        assert!(out.iter().all(|p| p.iter().all(|v| v.is_finite())));
+
+        let bg = luma(mean(&input, (330.0, 60.0), 25.0));
+        let gap = |px: &[[f32; 3]], at| bg - luma(mean(px, at, 5.0));
+        let (patch_in, patch_out) = (gap(&input[..], PATCH), gap(&out[..], PATCH));
+        let (shade_in, shade_out) = (gap(&input[..], SHADE), gap(&out[..], SHADE));
+        eprintln!("patch {patch_in:.4} -> {patch_out:.4}, shade {shade_in:.4} -> {shade_out:.4}");
+        assert!(patch_out < patch_in * 0.6, "pigment patch not lifted");
+        assert!(shade_out > shade_in * 0.85, "a plain shadow was taken for pigment");
+
+        // the even-tone slider runs and changes nothing far from any blotch
+        let even = render(&context, &img, adj(json!({ "skinTone": 100 })));
+        let far_in = mean(&input, (330.0, 60.0), 20.0);
+        let far_out = mean(&even, (330.0, 60.0), 20.0);
+        for i in 0..3 {
+            assert!((far_in[i] - far_out[i]).abs() < 0.02, "even skin changed");
+        }
+    }
+
     #[test]
     fn skin_runs_on_the_gpu_and_corrects_each_fault() {
         let context = gpu();

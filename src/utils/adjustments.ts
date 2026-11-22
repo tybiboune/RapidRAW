@@ -132,6 +132,9 @@ export enum Effect {
   SkinRedness = 'skinRedness',
   SkinRednessWay = 'skinRednessWay',
   SkinShine = 'skinShine',
+  SkinPigment = 'skinPigment',
+  SkinPigmentSensitivity = 'skinPigmentSensitivity',
+  SkinTone = 'skinTone',
   SkinKeepTexture = 'skinKeepTexture',
   SkinLines = 'skinLines',
   SkinLinesMap = 'skinLinesMap',
@@ -353,6 +356,9 @@ export interface Adjustments {
   skinRedness: number;
   skinRednessWay: number;
   skinShine: number;
+  skinPigment: number;
+  skinPigmentSensitivity: number;
+  skinTone: number;
   skinKeepTexture: number;
   skinLines: number;
   skinLinesMap: string | null;
@@ -854,6 +860,9 @@ export const normalizeLoadedAdjustments = (loadedAdjustments: Adjustments): any 
     skinRedness: loadedAdjustments.skinRedness ?? INITIAL_ADJUSTMENTS.skinRedness,
     skinRednessWay: loadedAdjustments.skinRednessWay ?? INITIAL_ADJUSTMENTS.skinRednessWay,
     skinShine: loadedAdjustments.skinShine ?? INITIAL_ADJUSTMENTS.skinShine,
+    skinPigment: loadedAdjustments.skinPigment ?? INITIAL_ADJUSTMENTS.skinPigment,
+    skinPigmentSensitivity: loadedAdjustments.skinPigmentSensitivity ?? INITIAL_ADJUSTMENTS.skinPigmentSensitivity,
+    skinTone: loadedAdjustments.skinTone ?? INITIAL_ADJUSTMENTS.skinTone,
     skinKeepTexture: loadedAdjustments.skinKeepTexture ?? INITIAL_ADJUSTMENTS.skinKeepTexture,
     skinLines: loadedAdjustments.skinLines ?? INITIAL_ADJUSTMENTS.skinLines,
     skinLinesMap: loadedAdjustments.skinLinesMap ?? INITIAL_ADJUSTMENTS.skinLinesMap,
@@ -1071,6 +1080,8 @@ export const ADJUSTMENT_GROUPS: Record<string, AdjustmentGroup[]> = {
         Effect.SkinRedness,
         Effect.SkinRednessWay,
         Effect.SkinShine,
+        Effect.SkinPigment,
+        Effect.SkinTone,
         Effect.SkinLines,
         Effect.SkinLinesAi,
         Effect.SkinUnderEye,
@@ -1080,6 +1091,7 @@ export const ADJUSTMENT_GROUPS: Record<string, AdjustmentGroup[]> = {
         Effect.SkinLinesSensitivity,
         Effect.SkinRednessSensitivity,
         Effect.SkinUnderEyeSensitivity,
+        Effect.SkinPigmentSensitivity,
       ],
     },
     {
@@ -1282,6 +1294,8 @@ export const ADJUSTMENT_SECTIONS: Sections = {
     Effect.SkinRedness,
     Effect.SkinRednessWay,
     Effect.SkinShine,
+    Effect.SkinPigment,
+    Effect.SkinTone,
     Effect.SkinKeepTexture,
     Effect.SkinLines,
     Effect.SkinLinesMap,
@@ -1294,6 +1308,7 @@ export const ADJUSTMENT_SECTIONS: Sections = {
     Effect.SkinLinesSensitivity,
     Effect.SkinRednessSensitivity,
     Effect.SkinUnderEyeSensitivity,
+    Effect.SkinPigmentSensitivity,
     Effect.LensBlurEnabled,
     Effect.LensBlurAmount,
     Effect.lensBlurDiffusion,

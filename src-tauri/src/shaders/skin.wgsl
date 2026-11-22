@@ -40,9 +40,10 @@ struct Params {
     thr_under_eye: f32,
     // 1 when the lines are read from the wrinkle model's map rather than from the curvature, else 0
     lines_ai: f32,
-    _pad0: u32,
-    _pad1: u32,
-    _pad2: u32,
+    // the brown and dark patches of pigment, and how even the skin's colour is made
+    pigment: f32,
+    tone: f32,
+    thr_pigment: f32,
 }
 
 @group(0) @binding(7) var<uniform> params: Params;
@@ -621,6 +622,49 @@ fn sk_apply(@builtin(global_invocation_id) id: vec3<u32>) {
         if (under > 0.0) { level += under * extra.y * params.under_eye * 0.8; }
         touched = max(touched, extra.y * params.under_eye);
     }
+    // Pigment and an uneven complexion are read from the colour a patch has for its brightness, not
+    // from the colour axes as they are: those shrink with the brightness, so in absolute terms every
+    // shadow on a face - the eye sockets, under the nose - would read as a patch of something, and
+    // evening them would paint the shadows the colour of the lit cheek.
+    if (params.pigment > 0.0 || params.tone > 0.0) {
+        let lf = max(l_fine, 0.05);
+        let lw = max(l_wide, 0.05);
+        let blue_fine = fine.y / max(fine.w, 1e-4) / lf;
+        let red_fine = fine.z / max(fine.w, 1e-4) / lf;
+        let blue_wide = wide.y / max(wide.w, 1e-4) / lw;
+        let red_wide = wide.z / max(wide.w, 1e-4) / lw;
+        // A patch of pigment - a sun spot, an age spot, a freckle, the mask of melasma - is browner than
+        // the skin around it for its brightness, and darker. A shadow is darker and no browner, so it is
+        // left alone. The patch is brought up to its surroundings by the difference of the two blurred
+        // copies alone, which leaves the grain running through it where it was: nothing is healed over,
+        // the patch only stops being darker and browner than the skin around it.
+        if (params.pigment > 0.0) {
+            let darker = max(l_wide - l_fine, 0.0);
+            // brown is down the blue axis and up the red one: melanin takes the blue out first
+            let browner = max(blue_wide - blue_fine, 0.0) + max(red_fine - red_wide, 0.0) * 0.5;
+            let k = smooth_step(2.0 * params.thr_pigment, 8.0 * params.thr_pigment, browner)
+                * smooth_step(0.0, 0.02, darker) * params.pigment;
+            let before = level;
+            level += darker * k * 0.9;
+            // the colour grows with the brightness it was lifted by, then loses the brown
+            let grow = level / max(before, 0.05);
+            ycc.y = ycc.y * grow + (blue_wide - blue_fine) * level * k * 0.9;
+            ycc.z = ycc.z * grow + (red_wide - red_fine) * level * k * 0.6;
+            touched = max(touched, k);
+        }
+        // An even complexion: the blotches of colour across the face - a cheek warmer than the forehead,
+        // a sallow patch, the mottling of tired skin - given the colour the skin around them has, for
+        // their own brightness. Only the blurred copies are compared, so the grain is left alone and the
+        // skin is evened, not smoothed. The brightness gets a touch of the same for blotchy skin, and no
+        // more: most of what the brightness does at this size is the shape of the face.
+        if (params.tone > 0.0) {
+            let k = params.tone;
+            ycc.y += (blue_wide - blue_fine) * level * k * 0.85;
+            ycc.z += (red_wide - red_fine) * level * k * 0.85;
+            level += (l_wide - l_fine) * k * 0.15;
+        }
+    }
+
     // and the skin's own grain goes back on top of whatever was done to it - only where something was, or
     // the grain would be added to skin nothing had touched and the picture would just get noisier
     if (params.keep_texture > 0.0) {

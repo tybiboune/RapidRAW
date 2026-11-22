@@ -261,6 +261,7 @@
       "skinDetection": "Detection (higher finds fainter faults)",
       "skinDetectionAll": "Overall",
       "skinDetectionLines": "Lines",
+      "skinDetectionPigment": "Pigment spots",
       "skinDetectionRedness": "Redness",
       "skinDetectionSpots": "Spots",
       "skinDetectionUnderEye": "Under eyes",
@@ -269,6 +270,7 @@
       "skinKeepTexture": "Keep texture",
       "skinLines": "Lines",
       "skinLinesAi": "Find lines with AI",
+      "skinPigment": "Pigment spots",
       "skinRedness": "Redness",
       "skinRednessEven": "Even",
       "skinRednessHalfWay": "Half way",
@@ -276,6 +278,7 @@
       "skinRednessWarm": "Warm",
       "skinShine": "Shine",
       "skinSpots": "Spots",
+      "skinTone": "Even tone",
       "skinUnderEye": "Under eyes",
       "spatial": "Erdvinis",
       "vignette": "Vinjetė"
