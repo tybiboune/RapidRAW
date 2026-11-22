@@ -431,7 +431,13 @@ fn run_upscaler(
         .par_iter()
         .map(|&v| v - v.clamp(0.0, 1.0))
         .collect();
-    upsample_add(&mut output, &excess, w as usize, h as usize, factor as usize);
+    upsample_add(
+        &mut output,
+        &excess,
+        w as usize,
+        h as usize,
+        factor as usize,
+    );
     Ok(output)
 }
 
@@ -505,7 +511,11 @@ pub fn has_cached_entry(path: &str, adjustments: &serde_json::Value) -> bool {
 pub fn is_generating(path: &str) -> bool {
     std::iter::once(None)
         .chain(DenoiseMethod::ALL.into_iter().map(Some))
-        .any(|input| [2, 4].iter().any(|&f| CACHE.is_pending(&key(path, input, f))))
+        .any(|input| {
+            [2, 4]
+                .iter()
+                .any(|&f| CACHE.is_pending(&key(path, input, f)))
+        })
 }
 
 pub fn generate_for_base(
