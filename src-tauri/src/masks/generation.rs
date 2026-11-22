@@ -130,9 +130,13 @@ fn generate_sub_mask_bitmap(
             crop_offset,
         )),
         "brush" | "clone" | "heal" | "liquify" | "retouch" | "face-restore" | "deblur"
-        | "dust-removal" | "wire-removal" => Some(
-            generate_brush_bitmap(&sub_mask.parameters, width, height, scale, crop_offset),
-        ),
+        | "dust-removal" | "wire-removal" => Some(generate_brush_bitmap(
+            &sub_mask.parameters,
+            width,
+            height,
+            scale,
+            crop_offset,
+        )),
         "flow" => Some(generate_flow_bitmap(
             &sub_mask.parameters,
             width,

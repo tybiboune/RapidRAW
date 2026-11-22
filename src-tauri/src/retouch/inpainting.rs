@@ -1361,7 +1361,11 @@ pub async fn generate_deblur_patch(
         "deblur",
         "Deblur",
     )?;
-    let model = match brushed.parameters.get("deblurMode").and_then(|v| v.as_str()) {
+    let model = match brushed
+        .parameters
+        .get("deblurMode")
+        .and_then(|v| v.as_str())
+    {
         Some("defocus") => models::ManualModel::DeblurDefocus,
         _ => models::ManualModel::DeblurMotion,
     };

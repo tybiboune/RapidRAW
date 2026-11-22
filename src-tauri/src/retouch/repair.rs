@@ -28,7 +28,9 @@ fn to_linear(v: u8) -> f32 {
 }
 
 fn to_code(v: f32) -> u8 {
-    (v.max(0.0).powf(1.0 / 2.2) * 255.0).round().clamp(0.0, 255.0) as u8
+    (v.max(0.0).powf(1.0 / 2.2) * 255.0)
+        .round()
+        .clamp(0.0, 255.0) as u8
 }
 
 fn blur(plane: &[f32], w: usize, h: usize, sigma: f32) -> Plane {
@@ -241,7 +243,11 @@ pub fn remove_dust(image: &RgbImage, bounds: Bounds, size: f32, sensitivity: f32
         .map(|(&v, &b)| (1.0 - v / b.max(1e-4)).max(0.0))
         .collect();
     // how busy the area is: dust only shows, and is only told apart, where it is flat
-    let detail: Plane = luma.iter().zip(&fine).map(|(&v, &f)| (v - f).abs()).collect();
+    let detail: Plane = luma
+        .iter()
+        .zip(&fine)
+        .map(|(&v, &f)| (v - f).abs())
+        .collect();
     let busy = blur(&detail, sw, sh, r as f32);
     let busy: Plane = busy
         .iter()
@@ -271,7 +277,10 @@ pub fn remove_dust(image: &RgbImage, bounds: Bounds, size: f32, sensitivity: f32
         };
         let (red, green, blue) = (share(0), share(1), share(2));
         let mean = (red + green + blue) / 3.0;
-        if mean <= 0.0 || (red - blue).abs() > 0.5 * mean + 0.01 || (green - mean).abs() > 0.4 * mean {
+        if mean <= 0.0
+            || (red - blue).abs() > 0.5 * mean + 0.01
+            || (green - mean).abs() > 0.4 * mean
+        {
             continue;
         }
         for &i in &piece {
@@ -461,7 +470,10 @@ mod tests {
         let around = image.get_pixel(100, 140).0[1] as i32;
         let out = remove_dust(&image, (0, 199, 0, 199), 30.0, 0.5);
         let after = out.get_pixel(100, 100).0[1] as i32;
-        assert!((after - around).abs() < (before - around).abs() / 2, "{before} {after} {around}");
+        assert!(
+            (after - around).abs() < (before - around).abs() / 2,
+            "{before} {after} {around}"
+        );
     }
 
     #[test]
