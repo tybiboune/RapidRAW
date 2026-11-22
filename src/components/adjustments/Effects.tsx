@@ -315,8 +315,14 @@ function EffectsPanel({
   // The skin can be found by the landmarks, by the AI face parser, or by both: a change finds it again.
   const handleSkinFaceMethodChange = (method: string) => {
     if (method === (adjustments.skinFaceMethod ?? 'landmarks')) return;
-    handleAdjustmentChange(Effect.SkinFaceMethod, method);
+    // the method is a word: handleAdjustmentChange reads numbers and would turn it into NaN
+    setAdjustments((prev: Partial<Adjustments>) => ({ ...prev, [Effect.SkinFaceMethod]: method }));
     handleGenerateFaceMap(method);
+  };
+
+  // The one-button renewal: it works out everything else from the picture, so all this does is ask for it.
+  const handleAutoRenew = () => {
+    setAdjustments((prev: Partial<Adjustments>) => ({ ...prev, skinRenewal: 70, skinRenewalTexture: 50 }));
   };
 
   const handleSkinToggle = (enabled: boolean) => {
@@ -866,6 +872,47 @@ function EffectsPanel({
                             </button>
                           ))}
                         </div>
+                      </div>
+
+                      <div className="space-y-2 rounded-md bg-surface p-2">
+                        <button
+                          type="button"
+                          onClick={handleAutoRenew}
+                          className="w-full rounded-md bg-card-active px-2 py-2 text-sm text-primary transition-colors hover:bg-card-active/80"
+                        >
+                          {t('adjustments.effects.skinRenewAuto')}
+                        </button>
+                        <Text variant={TextVariants.small} className="text-text-secondary">
+                          {t('adjustments.effects.skinRenewHint')}
+                        </Text>
+                        <Slider
+                          resetKey="skinRenewal"
+                          label={t('adjustments.effects.skinRenewal')}
+                          max={100}
+                          min={0}
+                          defaultValue={0}
+                          onChange={(e: SliderChangeEvent) =>
+                            handleAdjustmentChange(Effect.SkinRenewal, e.target.value)
+                          }
+                          step={1}
+                          value={adjustments.skinRenewal ?? 0}
+                          onDragStateChange={onDragStateChange}
+                        />
+                        {(adjustments.skinRenewal ?? 0) > 0 && (
+                          <Slider
+                            resetKey="skinRenewalTexture"
+                            label={t('adjustments.effects.skinRenewalTexture')}
+                            max={100}
+                            min={0}
+                            defaultValue={50}
+                            onChange={(e: SliderChangeEvent) =>
+                              handleAdjustmentChange(Effect.SkinRenewalTexture, e.target.value)
+                            }
+                            step={1}
+                            value={adjustments.skinRenewalTexture ?? 50}
+                            onDragStateChange={onDragStateChange}
+                          />
+                        )}
                       </div>
 
                       <Slider

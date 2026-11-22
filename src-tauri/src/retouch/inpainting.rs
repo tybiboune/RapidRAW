@@ -1402,7 +1402,7 @@ pub async fn generate_dust_patch(
         "dust-removal",
         "Dust Spots",
     )?;
-    let size = brushed.number("spotSize", 30.0);
+    let size = brushed.number("spotSize", 80.0);
     let sensitivity = brushed.share("sensitivity", 50.0);
     let (source, bounds) = (brushed.source.clone(), brushed.bounds);
     let color_image = tauri::async_runtime::spawn_blocking(move || {

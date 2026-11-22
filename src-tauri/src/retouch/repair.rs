@@ -206,14 +206,18 @@ fn elongation(piece: &[usize], w: usize) -> (f32, f32) {
 /// flat area, as dark in every colour, no wider than `size` pixels across; it is corrected by dividing
 /// it by how much it darkens, so the sky or wall under it comes back as it was. `sensitivity` from 0 to 1
 /// lets fainter spots count.
+///
+/// `size` is how wide a spot looks: a dust spot's soft edge reaches well past what the eye takes for its
+/// edge, so the area looked at for each spot is 1.6 times as wide as that.
 pub fn remove_dust(image: &RgbImage, bounds: Bounds, size: f32, sensitivity: f32) -> RgbImage {
-    let radius = (size / 2.0).max(2.0);
+    let radius = (size * 1.6 / 2.0).max(2.0);
     let pad = (radius * 3.0).ceil() as usize;
     let (x0, y0, w, h) = padded(bounds, pad, image);
     let region = imageops::crop_imm(image, x0 as u32, y0 as u32, w as u32, h as u32).to_image();
 
-    // looked for on a copy small enough that a spot is a dozen pixels across
-    let down = (radius / 6.0).max(1.0);
+    // looked for on a copy small enough that a spot is a couple of dozen pixels across: smaller than that
+    // and the shrinking blurs a spot's darkest point, which is then taken out only in part
+    let down = (radius / 12.0).max(1.0);
     let (sw, sh) = (
         ((w as f32 / down).round() as usize).max(8),
         ((h as f32 / down).round() as usize).max(8),
@@ -467,13 +471,93 @@ mod tests {
             *p = Rgb(p.0.map(|v| to_code(to_linear(v) * t)));
         }
         let before = image.get_pixel(100, 100).0[1] as i32;
-        let around = image.get_pixel(100, 140).0[1] as i32;
+        // beside the spot, on its own row: the sky is brighter further down, which is no part of the spot
+        let around = image.get_pixel(140, 100).0[1] as i32;
         let out = remove_dust(&image, (0, 199, 0, 199), 30.0, 0.5);
         let after = out.get_pixel(100, 100).0[1] as i32;
         assert!(
             (after - around).abs() < (before - around).abs() / 2,
             "{before} {after} {around}"
         );
+    }
+
+    // The five soft spots of different sizes the practical test used, on a sky gradient: how much of each
+    // is still there after the repair, for several settings.
+    fn dusty_sky() -> (RgbImage, Vec<(u32, u32, f32)>) {
+        let (w, h) = (2400u32, 1600u32);
+        let spots: Vec<(u32, u32, f32)> = vec![
+            (500, 300, 22.0),
+            (1200, 500, 30.0),
+            (1800, 350, 18.0),
+            (900, 900, 26.0),
+            (2000, 1000, 34.0),
+        ];
+        let mut dark = vec![0.0f32; (w * h) as usize];
+        for &(cx, cy, r) in &spots {
+            for y in cy.saturating_sub(r as u32 * 3)..(cy + r as u32 * 3).min(h) {
+                for x in cx.saturating_sub(r as u32 * 3)..(cx + r as u32 * 3).min(w) {
+                    let d = (((x as f32 - cx as f32).powi(2) + (y as f32 - cy as f32).powi(2))
+                        .sqrt()
+                        - r)
+                        / 9.0;
+                    // a disc with an edge softened over about 9 pixels, 27 % darker at its middle
+                    let v = 0.5 * (1.0 - (d * 1.2).tanh());
+                    dark[(y * w + x) as usize] = dark[(y * w + x) as usize].max(0.27 * v);
+                }
+            }
+        }
+        let image = RgbImage::from_fn(w, h, |x, y| {
+            let t = y as f32 / h as f32;
+            let k = 1.0 - dark[(y * w + x) as usize];
+            let base = [115.0 + 64.0 * t, 158.0 + 46.0 * t, 230.0 - 25.0 * t];
+            Rgb(base.map(|v| (v * k).round() as u8))
+        });
+        (image, spots)
+    }
+
+    #[test]
+    #[ignore]
+    fn dust_profile() {
+        let mut image = sky(200, 200);
+        for (x, y, p) in image.enumerate_pixels_mut() {
+            let d = ((x as f32 - 100.0).powi(2) + (y as f32 - 100.0).powi(2)).sqrt();
+            let t = 1.0 - 0.12 * (-(d / 8.0).powi(2)).exp();
+            *p = Rgb(p.0.map(|v| to_code(to_linear(v) * t)));
+        }
+        let out = remove_dust(&image, (0, 199, 0, 199), 30.0, 0.5);
+        let row = |img: &RgbImage| -> Vec<i32> {
+            (60..=140)
+                .step_by(5)
+                .map(|x| img.get_pixel(x, 100).0[1] as i32)
+                .collect()
+        };
+        println!("before {:?}", row(&image));
+        println!("after  {:?}", row(&out));
+    }
+
+    #[test]
+    #[ignore]
+    fn dust_table() {
+        let (image, spots) = dusty_sky();
+        let darkening = |img: &RgbImage, (cx, cy, _): (u32, u32, f32)| {
+            let l = |x: u32, y: u32| img.get_pixel(x, y).0[1] as f32;
+            let centre = l(cx, cy);
+            let ring = (l(cx - 110, cy) + l(cx + 110, cy)) / 2.0;
+            ring - centre
+        };
+        let before: Vec<f32> = spots.iter().map(|&s| darkening(&image, s)).collect();
+        for (size, sensitivity) in [(30.0, 0.5), (60.0, 0.5), (100.0, 0.5), (60.0, 1.0)] {
+            let out = remove_dust(&image, (0, 2399, 0, 1599), size, sensitivity);
+            let left: Vec<String> = spots
+                .iter()
+                .zip(&before)
+                .map(|(&s, b)| format!("{:3.0}%", 100.0 * darkening(&out, s) / b))
+                .collect();
+            println!(
+                "size {size:5} sensitivity {sensitivity}: left {}",
+                left.join(" ")
+            );
+        }
     }
 
     #[test]

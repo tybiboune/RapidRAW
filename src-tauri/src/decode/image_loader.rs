@@ -107,8 +107,17 @@ pub fn prepare_base_image_cow<'a>(
 
     let denoised = crate::ai::denoise::apply_ai_denoise(base_image, path, adjustments);
     let upscaled = crate::ai::upscale::apply_ai_upscale(base_image, denoised, path, adjustments);
-    match crate::adjustments::negative_conversion::apply_negative_conversion(upscaled, adjustments)
-    {
+    let converted =
+        crate::adjustments::negative_conversion::apply_negative_conversion(upscaled, adjustments);
+    // the skin renewed, before the brushed repairs go on top of it
+    let source_path = crate::library::sidecars::parse_virtual_path(path).0;
+    let renewed = crate::effects::renewal::apply(
+        converted,
+        path,
+        is_raw_file(source_path.to_string_lossy().as_ref()),
+        adjustments,
+    );
+    match renewed {
         Cow::Owned(prepared) if !has_patches => Ok(Cow::Owned(prepared)),
         prepared => composite_patches_cow(prepared, base_image.dimensions(), path, adjustments),
     }

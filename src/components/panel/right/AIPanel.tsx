@@ -137,7 +137,7 @@ const SUB_MASK_CONFIG: any = {
   [Mask.DustRemoval]: {
     showBrushTools: true,
     parameters: [
-      { key: 'spotSize', min: 4, max: 160, step: 1, defaultValue: 30 },
+      { key: 'spotSize', min: 4, max: 160, step: 1, defaultValue: 80 },
       { key: 'sensitivity', min: 0, max: 100, step: 1, defaultValue: 50 },
     ],
   },

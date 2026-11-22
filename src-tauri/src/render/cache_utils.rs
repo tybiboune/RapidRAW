@@ -112,6 +112,8 @@ fn hash_ai_denoise(adjustments: &serde_json::Value, hasher: &mut DefaultHasher) 
         hash_effect_keys(adjustments, &["aiUpscaleDetail", "aiUpscaleFactor"], hasher);
         crate::ai::upscale::cache_epoch().hash(hasher);
     }
+    // the skin renewal changes the picture itself, so it belongs with what the picture is made from
+    crate::effects::renewal::hash_inputs(adjustments, hasher);
 }
 
 fn hash_negative_conversion(adjustments: &serde_json::Value, hasher: &mut DefaultHasher) {

@@ -342,6 +342,8 @@
   "skinLinesSensitivity": 50,
   "skinPigment": 0,
   "skinPigmentSensitivity": 50,
+  "skinRenewal": 0,
+  "skinRenewalTexture": 50,
   "skinRedness": 0,
   "skinRednessSensitivity": 50,
   "skinRednessWay": 0,

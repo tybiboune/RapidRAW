@@ -136,6 +136,8 @@ export enum Effect {
   SkinShine = 'skinShine',
   SkinPigment = 'skinPigment',
   SkinPigmentSensitivity = 'skinPigmentSensitivity',
+  SkinRenewal = 'skinRenewal',
+  SkinRenewalTexture = 'skinRenewalTexture',
   SkinTone = 'skinTone',
   SkinKeepTexture = 'skinKeepTexture',
   SkinLines = 'skinLines',
@@ -364,6 +366,8 @@ export interface Adjustments {
   skinShine: number;
   skinPigment: number;
   skinPigmentSensitivity: number;
+  skinRenewal: number;
+  skinRenewalTexture: number;
   skinTone: number;
   skinKeepTexture: number;
   skinLines: number;
@@ -871,6 +875,8 @@ export const normalizeLoadedAdjustments = (loadedAdjustments: Adjustments): any 
     skinShine: loadedAdjustments.skinShine ?? INITIAL_ADJUSTMENTS.skinShine,
     skinPigment: loadedAdjustments.skinPigment ?? INITIAL_ADJUSTMENTS.skinPigment,
     skinPigmentSensitivity: loadedAdjustments.skinPigmentSensitivity ?? INITIAL_ADJUSTMENTS.skinPigmentSensitivity,
+    skinRenewal: loadedAdjustments.skinRenewal ?? INITIAL_ADJUSTMENTS.skinRenewal,
+    skinRenewalTexture: loadedAdjustments.skinRenewalTexture ?? INITIAL_ADJUSTMENTS.skinRenewalTexture,
     skinTone: loadedAdjustments.skinTone ?? INITIAL_ADJUSTMENTS.skinTone,
     skinKeepTexture: loadedAdjustments.skinKeepTexture ?? INITIAL_ADJUSTMENTS.skinKeepTexture,
     skinLines: loadedAdjustments.skinLines ?? INITIAL_ADJUSTMENTS.skinLines,
@@ -1104,6 +1110,8 @@ export const ADJUSTMENT_GROUPS: Record<string, AdjustmentGroup[]> = {
         Effect.SkinRednessSensitivity,
         Effect.SkinUnderEyeSensitivity,
         Effect.SkinPigmentSensitivity,
+        Effect.SkinRenewal,
+        Effect.SkinRenewalTexture,
       ],
     },
     {
@@ -1324,6 +1332,8 @@ export const ADJUSTMENT_SECTIONS: Sections = {
     Effect.SkinRednessSensitivity,
     Effect.SkinUnderEyeSensitivity,
     Effect.SkinPigmentSensitivity,
+    Effect.SkinRenewal,
+    Effect.SkinRenewalTexture,
     Effect.LensBlurEnabled,
     Effect.LensBlurAmount,
     Effect.lensBlurDiffusion,
