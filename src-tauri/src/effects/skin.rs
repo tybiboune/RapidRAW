@@ -100,6 +100,40 @@ fn sample_share(map: &GrayImage, u: f32, v: f32) -> f32 {
     top + (bottom - top) * fy
 }
 
+// The region texture's texels at `size`: the folds, the under-eye band and the wrinkle model's lines,
+// four floats to a texel. With the model's lines the texture is their size and the two soft regions are
+// read up to it; without them it is the regions' own size and they are copied across as they are.
+fn region_texels(regions: &Regions, (w, h): (u32, u32)) -> Vec<f32> {
+    let Some(ai_lines) = &regions.ai_lines else {
+        return regions
+            .lines
+            .pixels()
+            .zip(regions.under_eye.pixels())
+            .flat_map(|(lines, under_eye)| {
+                [
+                    lines[0] as f32 / 255.0,
+                    under_eye[0] as f32 / 255.0,
+                    0.0,
+                    0.0,
+                ]
+            })
+            .collect();
+    };
+    (0..h)
+        .flat_map(|y| (0..w).map(move |x| (x, y)))
+        .flat_map(|(x, y)| {
+            let u = (x as f32 + 0.5) / w as f32;
+            let v = (y as f32 + 0.5) / h as f32;
+            [
+                sample_share(&regions.lines, u, v),
+                sample_share(&regions.under_eye, u, v),
+                ai_lines.get_pixel(x, y)[0] as f32 / 255.0,
+                0.0,
+            ]
+        })
+        .collect()
+}
+
 pub struct Skin {
     face_map: Arc<GrayImage>,
     map_key: u64,
@@ -233,8 +267,7 @@ pub fn prepare(
     // the wrinkle model's map, only when it is asked for and the lines are
     let ai_wanted = lines > 0.0 && adjustments["skinLinesAi"].as_bool().unwrap_or(false);
     let ai_lines = if ai_wanted {
-        map_of("skinLinesAiMap")
-            .filter(|(map, _)| map.width() >= 2 && map.height() >= 2)
+        map_of("skinLinesAiMap").filter(|(map, _)| map.width() >= 2 && map.height() >= 2)
     } else {
         None
     };
@@ -311,43 +344,15 @@ pub fn encode(enc: &mut ComputeEncoder, job: &Skin, src: &Slot, dst: &Slot) {
                 .as_ref()
                 .map_or(regions.lines.dimensions(), |map| map.dimensions());
             let texture = enc.cached_map("Skin Regions", regions.key, size, f32x4, || {
-                match &regions.ai_lines {
-                    Some(ai_lines) => {
-                        let (w, h) = size;
-                        (0..h)
-                            .flat_map(|y| (0..w).map(move |x| (x, y)))
-                            .flat_map(|(x, y)| {
-                                let u = (x as f32 + 0.5) / w as f32;
-                                let v = (y as f32 + 0.5) / h as f32;
-                                [
-                                    sample_share(&regions.lines, u, v),
-                                    sample_share(&regions.under_eye, u, v),
-                                    ai_lines.get_pixel(x, y)[0] as f32 / 255.0,
-                                    0.0,
-                                ]
-                            })
-                            .collect()
-                    }
-                    None => regions
-                        .lines
-                        .pixels()
-                        .zip(regions.under_eye.pixels())
-                        .flat_map(|(lines, under_eye)| {
-                            [
-                                lines[0] as f32 / 255.0,
-                                under_eye[0] as f32 / 255.0,
-                                0.0,
-                                0.0,
-                            ]
-                        })
-                        .collect(),
-                }
+                region_texels(regions, size)
             });
             (size, texture)
         }
         None => (
             (1, 1),
-            enc.cached_map("Skin Regions", 0, (1, 1), f32x4, || vec![0.45, 0.0, 0.0, 0.0]),
+            enc.cached_map("Skin Regions", 0, (1, 1), f32x4, || {
+                vec![0.45, 0.0, 0.0, 0.0]
+            }),
         ),
     };
     let lines_ai = job

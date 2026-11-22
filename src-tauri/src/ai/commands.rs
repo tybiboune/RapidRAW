@@ -1125,11 +1125,13 @@ pub async fn generate_full_image_wrinkle_map(
     .map_err(|e| e.to_string())?;
 
     let loaded_image = get_loaded_image(&state)?;
+    // owned, because it goes on to the blocking task below, which may outlive the loaded picture
     let source_image = crate::masks::generation::build_converted_source_image(
         &loaded_image.image,
         loaded_image.is_raw,
         &js_adjustments,
-    );
+    )
+    .into_owned();
     let analysis = cached_face_analysis(
         &state.ai_state,
         &models,
