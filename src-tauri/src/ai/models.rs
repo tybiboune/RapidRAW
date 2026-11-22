@@ -179,6 +179,13 @@ const FACE_RESTORER_SHA256: &str =
 // weights only, so like the wrinkle model it is put in the models folder by hand.
 pub const BLEMISH_FILENAME: &str = "abpn_blemish_detection.onnx";
 
+// The two deblurring networks, exported from their authors' weights by scripts/export_deblur_onnx.py
+// (both MIT): NAFNet trained on GoPro camera shake, and Restormer trained on single-image defocus. RGB
+// 0..1 in, deblurred out, any size that is a multiple of 16. Nothing hosts them as ONNX, so they are put
+// in the models folder by hand.
+pub const DEBLUR_MOTION_FILENAME: &str = "deblur_motion_nafnet.onnx";
+pub const DEBLUR_DEFOCUS_FILENAME: &str = "deblur_defocus_restormer.onnx";
+
 type SharedSession = Arc<Mutex<Session>>;
 
 const GPU_IDLE: u8 = 0;
@@ -1335,6 +1342,8 @@ pub async fn get_or_init_normal_model(
 pub enum ManualModel {
     Wrinkles,
     Blemishes,
+    DeblurMotion,
+    DeblurDefocus,
 }
 
 impl ManualModel {
@@ -1342,6 +1351,8 @@ impl ManualModel {
         match self {
             Self::Wrinkles => WRINKLE_FILENAME,
             Self::Blemishes => BLEMISH_FILENAME,
+            Self::DeblurMotion => DEBLUR_MOTION_FILENAME,
+            Self::DeblurDefocus => DEBLUR_DEFOCUS_FILENAME,
         }
     }
 
@@ -1349,6 +1360,8 @@ impl ManualModel {
         match self {
             Self::Wrinkles => "wrinkle",
             Self::Blemishes => "blemish",
+            Self::DeblurMotion => "motion deblur",
+            Self::DeblurDefocus => "defocus deblur",
         }
     }
 }

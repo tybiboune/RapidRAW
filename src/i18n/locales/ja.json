@@ -561,6 +561,13 @@
       },
       "createNewTitle": "新しい生成編集を作成",
       "createNewTooltip": "新しい {{name}} 編集を作成",
+      "deblur": {
+        "mode": "Blur",
+        "modes": {
+          "defocus": "Out of focus",
+          "motion": "Camera shake"
+        }
+      },
       "denoising": "AIノイズ除去を実行中...",
       "dropzoneText": "ここにドロップして新しい編集を作成",
       "editSettingsTitle": "編集設定",
@@ -581,12 +588,16 @@
       "manualCleanupTitle": "手動クリーンアップ",
       "noImageSelected": "画像が選択されていません。",
       "params": {
+        "blurSize": "Blur Size",
         "feather": "ぼかし",
         "fidelity": "Fidelity",
         "grow": "拡張",
         "intensity": "強度",
         "pressure": "圧力",
-        "strength": "Strength"
+        "sensitivity": "Sensitivity",
+        "spotSize": "Spot Size",
+        "strength": "Strength",
+        "wireWidth": "Wire Width"
       },
       "patches": {
         "aiEdit": "AI編集 {{count}}",
@@ -595,6 +606,12 @@
         "clone": "クローン {{count}}",
         "clone_one": "Clone {{count}}",
         "clone_other": "クローン {{count}}",
+        "deblur": "Deblur {{count}}",
+        "deblur_one": "Deblur {{count}}",
+        "deblur_other": "Deblur {{count}}",
+        "dustRemoval": "Dust Spots {{count}}",
+        "dustRemoval_one": "Dust Spots {{count}}",
+        "dustRemoval_other": "Dust Spots {{count}}",
         "heal": "修復 {{count}}",
         "heal_one": "Heal {{count}}",
         "heal_other": "修復 {{count}}",
@@ -610,7 +627,10 @@
         "restoreFace_other": "Restore Face {{count}}",
         "retouch": "レタッチ {{count}}",
         "retouch_one": "Retouch {{count}}",
-        "retouch_other": "レタッチ {{count}}"
+        "retouch_other": "レタッチ {{count}}",
+        "wireRemoval": "Power Lines {{count}}",
+        "wireRemoval_one": "Power Lines {{count}}",
+        "wireRemoval_other": "Power Lines {{count}}"
       },
       "resetInpaintingTooltip": "インペインティングをリセット",
       "settings": {
@@ -1563,7 +1583,9 @@
       "brush": "ブラシ",
       "clone": "クローン",
       "color": "カラー",
+      "deblur": "Deblur",
       "depth": "奥行き",
+      "dustRemoval": "Dust Spots",
       "face": "顔",
       "flow": "流量",
       "foreground": "手前",
@@ -1580,7 +1602,8 @@
       "retouch": "レタッチ",
       "sky": "空",
       "subject": "被写体",
-      "text": "テキスト"
+      "text": "テキスト",
+      "wireRemoval": "Power Lines"
     }
   },
   "menus": {

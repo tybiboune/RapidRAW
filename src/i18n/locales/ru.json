@@ -597,6 +597,13 @@
       },
       "createNewTitle": "Создать новую генеративную правку",
       "createNewTooltip": "Создать правку: {{name}}",
+      "deblur": {
+        "mode": "Blur",
+        "modes": {
+          "defocus": "Out of focus",
+          "motion": "Camera shake"
+        }
+      },
       "denoising": "Выполняется ИИ-шумоподавление...",
       "dropzoneText": "Перетащите сюда, чтобы создать новую правку",
       "editSettingsTitle": "Настройки редактирования",
@@ -617,12 +624,16 @@
       "manualCleanupTitle": "Ручная очистка",
       "noImageSelected": "Изображение не выбрано.",
       "params": {
+        "blurSize": "Blur Size",
         "feather": "Растушевка",
         "fidelity": "Fidelity",
         "grow": "Расширение",
         "intensity": "Интенсивность",
         "pressure": "Нажим",
-        "strength": "Strength"
+        "sensitivity": "Sensitivity",
+        "spotSize": "Spot Size",
+        "strength": "Strength",
+        "wireWidth": "Wire Width"
       },
       "patches": {
         "aiEdit": "ИИ-правка {{count}}",
@@ -635,6 +646,16 @@
         "clone_few": "Штамп {{count}}",
         "clone_many": "Штамп {{count}}",
         "clone_other": "Штамп {{count}}",
+        "deblur": "Deblur {{count}}",
+        "deblur_one": "Deblur {{count}}",
+        "deblur_few": "Deblur {{count}}",
+        "deblur_many": "Deblur {{count}}",
+        "deblur_other": "Deblur {{count}}",
+        "dustRemoval": "Dust Spots {{count}}",
+        "dustRemoval_one": "Dust Spots {{count}}",
+        "dustRemoval_few": "Dust Spots {{count}}",
+        "dustRemoval_many": "Dust Spots {{count}}",
+        "dustRemoval_other": "Dust Spots {{count}}",
         "heal": "Восстановление {{count}}",
         "heal_one": "Восстановление {{count}}",
         "heal_few": "Восстановление {{count}}",
@@ -660,7 +681,12 @@
         "retouch_one": "Ретушь {{count}}",
         "retouch_few": "Ретушь {{count}}",
         "retouch_many": "Ретушь {{count}}",
-        "retouch_other": "Ретушь {{count}}"
+        "retouch_other": "Ретушь {{count}}",
+        "wireRemoval": "Power Lines {{count}}",
+        "wireRemoval_one": "Power Lines {{count}}",
+        "wireRemoval_few": "Power Lines {{count}}",
+        "wireRemoval_many": "Power Lines {{count}}",
+        "wireRemoval_other": "Power Lines {{count}}"
       },
       "resetInpaintingTooltip": "Сбросить восстановление",
       "settings": {
@@ -1631,7 +1657,9 @@
       "brush": "Кисть",
       "clone": "Штамп",
       "color": "Цвет",
+      "deblur": "Deblur",
       "depth": "Глубина",
+      "dustRemoval": "Dust Spots",
       "face": "Лицо",
       "flow": "Поток",
       "foreground": "Передний план",
@@ -1648,7 +1676,8 @@
       "retouch": "Ретушь",
       "sky": "Небо",
       "subject": "Объект",
-      "text": "Текст"
+      "text": "Текст",
+      "wireRemoval": "Power Lines"
     }
   },
   "menus": {

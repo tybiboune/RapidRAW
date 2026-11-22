@@ -240,6 +240,23 @@ pub fn run_ai_upscale(
     run_tiled(rgb_img, &infer, tile, scale, on_progress)
 }
 
+/// The deblurring networks look at a whole tile at once (NAFNet's channel attention pools over it), so
+/// a tile about the size they were tested at keeps them doing what they learned.
+const DEBLUR_TILE: TileParams = TileParams {
+    cs: 384,
+    margin: 32,
+    overlap: 32,
+};
+
+pub fn run_ai_deblur(
+    rgb_img: &Rgb32FImage,
+    session: &Mutex<Session>,
+    on_progress: &dyn Fn(f32),
+) -> Result<Rgb32FImage> {
+    let infer = |tile| run_plain(session, tile);
+    run_tiled(rgb_img, &infer, DEBLUR_TILE, 1, on_progress)
+}
+
 pub const RAWFORGE_TILE_SIZE: usize = 256;
 
 const RAWFORGE_TILE: TileParams = TileParams {

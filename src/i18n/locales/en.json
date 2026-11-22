@@ -561,6 +561,13 @@
       },
       "createNewTitle": "Create New Generative Edit",
       "createNewTooltip": "Create New {{name}} Edit",
+      "deblur": {
+        "mode": "Blur",
+        "modes": {
+          "defocus": "Out of focus",
+          "motion": "Camera shake"
+        }
+      },
       "denoising": "Running AI Denoise...",
       "dropzoneText": "Drop here to create a new edit",
       "editSettingsTitle": "Edit Settings",
@@ -581,12 +588,16 @@
       "manualCleanupTitle": "Manual Cleanup",
       "noImageSelected": "No image selected.",
       "params": {
+        "blurSize": "Blur Size",
         "feather": "Feather",
         "fidelity": "Fidelity",
         "grow": "Grow",
         "intensity": "Intensity",
         "pressure": "Pressure",
-        "strength": "Strength"
+        "sensitivity": "Sensitivity",
+        "spotSize": "Spot Size",
+        "strength": "Strength",
+        "wireWidth": "Wire Width"
       },
       "patches": {
         "aiEdit": "AI Edit {{count}}",
@@ -595,6 +606,12 @@
         "clone": "Clone {{count}}",
         "clone_one": "Clone {{count}}",
         "clone_other": "Clone {{count}}",
+        "deblur": "Deblur {{count}}",
+        "deblur_one": "Deblur {{count}}",
+        "deblur_other": "Deblur {{count}}",
+        "dustRemoval": "Dust Spots {{count}}",
+        "dustRemoval_one": "Dust Spots {{count}}",
+        "dustRemoval_other": "Dust Spots {{count}}",
         "heal": "Heal {{count}}",
         "heal_one": "Heal {{count}}",
         "heal_other": "Heal {{count}}",
@@ -610,7 +627,10 @@
         "restoreFace_other": "Restore Face {{count}}",
         "retouch": "Retouch {{count}}",
         "retouch_one": "Retouch {{count}}",
-        "retouch_other": "Retouch {{count}}"
+        "retouch_other": "Retouch {{count}}",
+        "wireRemoval": "Power Lines {{count}}",
+        "wireRemoval_one": "Power Lines {{count}}",
+        "wireRemoval_other": "Power Lines {{count}}"
       },
       "resetInpaintingTooltip": "Reset Inpainting",
       "settings": {
@@ -1563,7 +1583,9 @@
       "brush": "Brush",
       "clone": "Clone",
       "color": "Color",
+      "deblur": "Deblur",
       "depth": "Depth",
+      "dustRemoval": "Dust Spots",
       "face": "Face",
       "flow": "Flow",
       "foreground": "Foreground",
@@ -1580,7 +1602,8 @@
       "retouch": "Retouch",
       "sky": "Sky",
       "subject": "Subject",
-      "text": "Text"
+      "text": "Text",
+      "wireRemoval": "Power Lines"
     }
   },
   "menus": {

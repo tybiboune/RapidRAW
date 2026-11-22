@@ -17,6 +17,9 @@ import {
   MopSparkles,
   TextSearch,
   ScanFace,
+  Focus,
+  CircleDot,
+  Cable,
   Magnet,
 } from 'lucide-react';
 import { motion } from 'framer-motion';
@@ -47,6 +50,9 @@ export const MASK_ICON_MAP: Record<Mask, any> = {
   [Mask.Liquify]: Spline,
   [Mask.Retouch]: MopSparkles,
   [Mask.FaceRestore]: ScanFace,
+  [Mask.Deblur]: Focus,
+  [Mask.DustRemoval]: CircleDot,
+  [Mask.WireRemoval]: Cable,
 };
 
 export const MASK_AI_TYPES: Array<MaskType> = [
@@ -127,6 +133,24 @@ export const AI_TOUCH_UP_TYPES: Array<MaskType> = [
     icon: ScanFace,
     name: 'Restore Face',
     type: Mask.FaceRestore,
+  },
+  {
+    disabled: false,
+    icon: Focus,
+    name: 'Deblur',
+    type: Mask.Deblur,
+  },
+  {
+    disabled: false,
+    icon: CircleDot,
+    name: 'Dust Spots',
+    type: Mask.DustRemoval,
+  },
+  {
+    disabled: false,
+    icon: Cable,
+    name: 'Power Lines',
+    type: Mask.WireRemoval,
   },
 ];
 

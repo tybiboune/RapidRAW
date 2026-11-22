@@ -1277,6 +1277,9 @@ async fn skin_model_map(
         let compose = match model {
             ManualModel::Wrinkles => crate::masks::face::compose_wrinkle_map,
             ManualModel::Blemishes => crate::masks::face::compose_blemish_map,
+            ManualModel::DeblurMotion | ManualModel::DeblurDefocus => {
+                return Err(anyhow::anyhow!("{model:?} does not make a skin map"));
+            }
         };
         compose(
             &source_image,

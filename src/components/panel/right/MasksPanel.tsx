@@ -166,6 +166,9 @@ const SUB_MASK_CONFIG: Record<Mask, any> = {
   [Mask.Liquify]: {},
   [Mask.Retouch]: {},
   [Mask.FaceRestore]: {},
+  [Mask.Deblur]: {},
+  [Mask.DustRemoval]: {},
+  [Mask.WireRemoval]: {},
 };
 
 const BrushTools = ({

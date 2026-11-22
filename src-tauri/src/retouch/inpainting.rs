@@ -1266,3 +1266,172 @@ pub async fn generate_face_restore_patch(
     )
     .map(|v| v.to_string())
 }
+
+// What every brushed repair starts from: the picture the patch is made on, the brushed mask and its
+// bounds, and the settings of the brush.
+struct Brushed {
+    source: Arc<RgbImage>,
+    is_raw: bool,
+    mask: GrayImage,
+    bounds: crate::retouch::clone_heal::Bounds,
+    parameters: Value,
+}
+
+impl Brushed {
+    fn new(
+        patch_definition: &AiPatchDefinition,
+        current_adjustments: &Value,
+        state: &tauri::State<'_, AppState>,
+        mask_type: &str,
+        what: &str,
+    ) -> Result<Self, String> {
+        let missing = || format!("No brush strokes found for {what}.");
+        let (source, is_raw, path) =
+            cached_source_image(&patch_definition.id, current_adjustments, state)?;
+        let (img_w, img_h) = source.dimensions();
+        let parameters = patch_definition
+            .sub_masks
+            .iter()
+            .find(|sm| sm.mask_type.eq_ignore_ascii_case(mask_type))
+            .map(|sm| sm.parameters.clone())
+            .ok_or_else(missing)?;
+        let mask = raw_patch_mask(
+            patch_definition,
+            &path,
+            current_adjustments,
+            state,
+            transformed_dimensions(img_w, img_h, current_adjustments),
+        )?;
+        let bounds = calculate_mask_bounds(&mask).map_err(|_| missing())?;
+        Ok(Self {
+            source,
+            is_raw,
+            mask,
+            bounds,
+            parameters,
+        })
+    }
+
+    fn number(&self, key: &str, default: f64) -> f32 {
+        let value = self.parameters.get(key).and_then(|v| v.as_f64());
+        value.unwrap_or(default) as f32
+    }
+
+    // a 0-100 slider as a share
+    fn share(&self, key: &str, default: f64) -> f32 {
+        self.number(key, default) / 100.0
+    }
+
+    fn patch(&self, color_image: &RgbImage) -> Result<String, String> {
+        let (min_x, max_x, min_y, max_y) = self.bounds;
+        let (crop_w, crop_h) = ((max_x - min_x + 1) as u32, (max_y - min_y + 1) as u32);
+        let output_mask =
+            image::imageops::crop_imm(&self.mask, min_x as u32, min_y as u32, crop_w, crop_h)
+                .to_image();
+        encode_patch_result(
+            color_image,
+            &output_mask,
+            min_x as u32,
+            min_y as u32,
+            crop_w,
+            crop_h,
+            self.is_raw,
+            100,
+            true,
+        )
+        .map(|v| v.to_string())
+    }
+}
+
+/// Deblurs the brushed area: camera shake with NAFNet, missed focus with Restormer. The brush's blur
+/// size says how wide the blur is, so a wide one is worked on a smaller copy where it is the size the
+/// networks learned on; its strength, how much of the change is kept.
+#[tauri::command]
+pub async fn generate_deblur_patch(
+    patch_definition: AiPatchDefinition,
+    current_adjustments: Value,
+    _task_id: Option<String>,
+    app_handle: tauri::AppHandle,
+    state: tauri::State<'_, AppState>,
+) -> Result<String, String> {
+    let brushed = Brushed::new(
+        &patch_definition,
+        &current_adjustments,
+        &state,
+        "deblur",
+        "Deblur",
+    )?;
+    let model = match brushed.parameters.get("deblurMode").and_then(|v| v.as_str()) {
+        Some("defocus") => models::ManualModel::DeblurDefocus,
+        _ => models::ManualModel::DeblurMotion,
+    };
+    let session =
+        models::get_or_init_manual_model(&app_handle, &state.ai_state, &state.ai_init_lock, model)
+            .await
+            .map_err(|e| e.to_string())?;
+    // 0 is a blur of a pixel or two, worked at full size; 100 is a wide one, worked at a quarter
+    let scale = 1.0 / (1.0 + 3.0 * brushed.share("blurSize", 0.0));
+    let strength = brushed.share("strength", 80.0);
+    let (source, bounds) = (brushed.source.clone(), brushed.bounds);
+    let color_image = tauri::async_runtime::spawn_blocking(move || {
+        crate::retouch::repair::deblur(&source, bounds, &session, scale, strength)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+    .map_err(|e| e.to_string())?;
+    brushed.patch(&color_image)
+}
+
+/// Takes the sensor dust spots out of the brushed area: soft, round, neutral darkenings of a flat area
+/// up to the brush's spot size across, divided back out so what was under them comes back.
+#[tauri::command]
+pub async fn generate_dust_patch(
+    patch_definition: AiPatchDefinition,
+    current_adjustments: Value,
+    _task_id: Option<String>,
+    state: tauri::State<'_, AppState>,
+) -> Result<String, String> {
+    let brushed = Brushed::new(
+        &patch_definition,
+        &current_adjustments,
+        &state,
+        "dust-removal",
+        "Dust Spots",
+    )?;
+    let size = brushed.number("spotSize", 30.0);
+    let sensitivity = brushed.share("sensitivity", 50.0);
+    let (source, bounds) = (brushed.source.clone(), brushed.bounds);
+    let color_image = tauri::async_runtime::spawn_blocking(move || {
+        crate::retouch::repair::remove_dust(&source, bounds, size, sensitivity)
+    })
+    .await
+    .map_err(|e| e.to_string())?;
+    brushed.patch(&color_image)
+}
+
+/// Takes the wires and cables out of the brushed area: long thin dark lines up to the brush's wire
+/// width across, filled from the sky either side of them.
+#[tauri::command]
+pub async fn generate_wire_patch(
+    patch_definition: AiPatchDefinition,
+    current_adjustments: Value,
+    _task_id: Option<String>,
+    state: tauri::State<'_, AppState>,
+) -> Result<String, String> {
+    let brushed = Brushed::new(
+        &patch_definition,
+        &current_adjustments,
+        &state,
+        "wire-removal",
+        "Power Lines",
+    )?;
+    let width = brushed.number("wireWidth", 6.0);
+    let sensitivity = brushed.share("sensitivity", 50.0);
+    let (source, bounds) = (brushed.source.clone(), brushed.bounds);
+    let color_image = tauri::async_runtime::spawn_blocking(move || {
+        crate::retouch::repair::remove_wires(&source, bounds, width, sensitivity)
+    })
+    .await
+    .map_err(|e| e.to_string())?;
+    brushed.patch(&color_image)
+}

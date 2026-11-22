@@ -95,13 +95,20 @@ export function useAiMasking() {
       try {
         const isLiquify = patchDefinitionForBackend.subMasks.some((sm: SubMask) => sm.type === 'liquify');
         const isRetouch = patchDefinitionForBackend.subMasks.some((sm: SubMask) => sm.type === 'retouch');
-        const isFaceRestore = patchDefinitionForBackend.subMasks.some((sm: SubMask) => sm.type === 'face-restore');
+        // the brushed repairs each have their own command, named by their type
+        const repairCommands: Record<string, string> = {
+          'face-restore': 'generate_face_restore_patch',
+          deblur: 'generate_deblur_patch',
+          'dust-removal': 'generate_dust_patch',
+          'wire-removal': 'generate_wire_patch',
+        };
+        const repair = patchDefinitionForBackend.subMasks.find((sm: SubMask) => sm.type in repairCommands);
         const command = isLiquify
           ? 'generate_liquify_patch'
           : isRetouch
             ? 'generate_retouch_patch'
-            : isFaceRestore
-              ? 'generate_face_restore_patch'
+            : repair
+              ? repairCommands[repair.type]
               : 'generate_manual_cleanup_patch';
 
         const newPatchDataJson: any = await invoke(command, {

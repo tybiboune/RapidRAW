@@ -597,6 +597,13 @@
       },
       "createNewTitle": "Vytvořit novou generativní úpravu",
       "createNewTooltip": "Vytvořit novou {{name}} úpravu",
+      "deblur": {
+        "mode": "Blur",
+        "modes": {
+          "defocus": "Out of focus",
+          "motion": "Camera shake"
+        }
+      },
       "denoising": "Probíhá AI odšumění...",
       "dropzoneText": "Přetažením sem vytvoříte novou úpravu",
       "editSettingsTitle": "Upravit nastavení",
@@ -617,12 +624,16 @@
       "manualCleanupTitle": "Ruční čištění",
       "noImageSelected": "Nebyl vybrán žádný snímek.",
       "params": {
+        "blurSize": "Blur Size",
         "feather": "Prolnutí",
         "fidelity": "Fidelity",
         "grow": "Rozšíření",
         "intensity": "Intenzita",
         "pressure": "Tlak",
-        "strength": "Strength"
+        "sensitivity": "Sensitivity",
+        "spotSize": "Spot Size",
+        "strength": "Strength",
+        "wireWidth": "Wire Width"
       },
       "patches": {
         "aiEdit": "AI úpravy {{count}}",
@@ -635,6 +646,16 @@
         "clone_few": "Klonování {{count}}",
         "clone_many": "Klonování {{count}}",
         "clone_other": "Klonování {{count}}",
+        "deblur": "Deblur {{count}}",
+        "deblur_one": "Deblur {{count}}",
+        "deblur_few": "Deblur {{count}}",
+        "deblur_many": "Deblur {{count}}",
+        "deblur_other": "Deblur {{count}}",
+        "dustRemoval": "Dust Spots {{count}}",
+        "dustRemoval_one": "Dust Spots {{count}}",
+        "dustRemoval_few": "Dust Spots {{count}}",
+        "dustRemoval_many": "Dust Spots {{count}}",
+        "dustRemoval_other": "Dust Spots {{count}}",
         "heal": "Oprava {{count}}",
         "heal_one": "Oprava {{count}}",
         "heal_few": "Oprava {{count}}",
@@ -660,7 +681,12 @@
         "retouch_one": "Retuš {{count}}",
         "retouch_few": "Retuš {{count}}",
         "retouch_many": "Retuš {{count}}",
-        "retouch_other": "Retuš {{count}}"
+        "retouch_other": "Retuš {{count}}",
+        "wireRemoval": "Power Lines {{count}}",
+        "wireRemoval_one": "Power Lines {{count}}",
+        "wireRemoval_few": "Power Lines {{count}}",
+        "wireRemoval_many": "Power Lines {{count}}",
+        "wireRemoval_other": "Power Lines {{count}}"
       },
       "resetInpaintingTooltip": "Obnovit AI retuš",
       "settings": {
@@ -1631,7 +1657,9 @@
       "brush": "Štětec",
       "clone": "Klonování",
       "color": "Barva",
+      "deblur": "Deblur",
       "depth": "Hloubka",
+      "dustRemoval": "Dust Spots",
       "face": "Obličej",
       "flow": "Krytí",
       "foreground": "Popředí",
@@ -1648,7 +1676,8 @@
       "retouch": "Retuš",
       "sky": "Obloha",
       "subject": "Objekt",
-      "text": "Text"
+      "text": "Text",
+      "wireRemoval": "Power Lines"
     }
   },
   "menus": {

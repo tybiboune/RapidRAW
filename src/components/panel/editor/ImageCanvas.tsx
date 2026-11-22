@@ -19,7 +19,7 @@ import {
   RelightLight,
   createRelightLight,
 } from '../../../utils/adjustments';
-import { Mask, SubMask, SubMaskMode, ToolType } from '../../../types/masks';
+import { Mask, SubMask, SubMaskMode, ToolType, isRepairTool } from '../../../types/masks';
 import { AppSettings } from '../../../types/settings';
 import { BrushSettings, SelectedImage, TransformState, type OverlayMode } from '../../../types/editor';
 import { Invokes } from '../../../types/invokes';
@@ -1012,7 +1012,7 @@ const MaskOverlay = memo(
       subMask.type === Mask.Heal ||
       subMask.type === Mask.Liquify ||
       subMask.type === Mask.Retouch ||
-      subMask.type === Mask.FaceRestore
+      isRepairTool(subMask.type)
     ) {
       const { lines = [] } = p;
 
@@ -1838,8 +1838,7 @@ const ImageCanvas = memo(
       isAiEditing && (activeSubMask?.type === Mask.Clone || activeSubMask?.type === Mask.Heal);
 
     const isLiquifyActive = isAiEditing && activeSubMask?.type === Mask.Liquify;
-    const isRetouchActive =
-      isAiEditing && (activeSubMask?.type === Mask.Retouch || activeSubMask?.type === Mask.FaceRestore);
+    const isRetouchActive = isAiEditing && (activeSubMask?.type === Mask.Retouch || isRepairTool(activeSubMask?.type));
 
     const isDirectPatchActive =
       (isMasking || isAiEditing) &&
@@ -1847,7 +1846,7 @@ const ImageCanvas = memo(
         activeSubMask?.type === Mask.Heal ||
         activeSubMask?.type === Mask.Liquify ||
         activeSubMask?.type === Mask.Retouch ||
-        activeSubMask?.type === Mask.FaceRestore);
+        isRepairTool(activeSubMask?.type));
 
     const isBrushActive =
       (isMasking || isAiEditing) &&
@@ -2009,7 +2008,7 @@ const ImageCanvas = memo(
               sm.type !== Mask.Heal &&
               sm.type !== Mask.Liquify &&
               sm.type !== Mask.Retouch &&
-              sm.type !== Mask.FaceRestore
+              !isRepairTool(sm.type)
             )
               return;
             const lines: Array<DrawnLine> = sm.parameters?.lines || [];
@@ -2022,7 +2021,7 @@ const ImageCanvas = memo(
             let cx = center.x;
             let cy = center.y;
 
-            if (sm.type === Mask.Liquify || sm.type === Mask.Retouch || sm.type === Mask.FaceRestore) {
+            if (sm.type === Mask.Liquify || sm.type === Mask.Retouch || isRepairTool(sm.type)) {
               cx = center.x + 16;
               cy = center.y - 16;
             } else if (sourceX !== undefined && sourceY !== undefined) {
@@ -3842,7 +3841,7 @@ const ImageCanvas = memo(
                                   renderSubMask.type === Mask.Heal ||
                                   renderSubMask.type === Mask.Liquify ||
                                   renderSubMask.type === Mask.Retouch ||
-                                  renderSubMask.type === Mask.FaceRestore;
+                                  isRepairTool(renderSubMask.type);
 
                                 const isThisSubMaskActive = renderSubMask.id === activeId;
                                 const isActivelyDrawingThis = isThisSubMaskActive && isDrawing.current;
@@ -3857,7 +3856,7 @@ const ImageCanvas = memo(
                                     (isThisSubMaskActive &&
                                       (renderSubMask.type === Mask.Liquify ||
                                         renderSubMask.type === Mask.Retouch ||
-                                        renderSubMask.type === Mask.FaceRestore));
+                                        isRepairTool(renderSubMask.type)));
                                 }
 
                                 return (

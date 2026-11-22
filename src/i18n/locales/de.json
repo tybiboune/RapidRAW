@@ -561,6 +561,13 @@
       },
       "createNewTitle": "Neue generative Bearbeitung erstellen",
       "createNewTooltip": "Neue {{name}}-Bearbeitung erstellen",
+      "deblur": {
+        "mode": "Blur",
+        "modes": {
+          "defocus": "Out of focus",
+          "motion": "Camera shake"
+        }
+      },
       "denoising": "KI-Entrauschen läuft...",
       "dropzoneText": "Hier ablegen, um eine neue Bearbeitung zu erstellen",
       "editSettingsTitle": "Bearbeitungseinstellungen",
@@ -581,12 +588,16 @@
       "manualCleanupTitle": "Manuelle Bereinigung",
       "noImageSelected": "Kein Bild ausgewählt.",
       "params": {
+        "blurSize": "Blur Size",
         "feather": "Weiche Kante",
         "fidelity": "Fidelity",
         "grow": "Erweitern",
         "intensity": "Intensität",
         "pressure": "Druck",
-        "strength": "Strength"
+        "sensitivity": "Sensitivity",
+        "spotSize": "Spot Size",
+        "strength": "Strength",
+        "wireWidth": "Wire Width"
       },
       "patches": {
         "aiEdit": "KI-Bearbeitung {{count}}",
@@ -595,6 +606,12 @@
         "clone": "Klonen {{count}}",
         "clone_one": "Klonen {{count}}",
         "clone_other": "Klonen {{count}}",
+        "deblur": "Deblur {{count}}",
+        "deblur_one": "Deblur {{count}}",
+        "deblur_other": "Deblur {{count}}",
+        "dustRemoval": "Dust Spots {{count}}",
+        "dustRemoval_one": "Dust Spots {{count}}",
+        "dustRemoval_other": "Dust Spots {{count}}",
         "heal": "Reparieren {{count}}",
         "heal_one": "Reparieren {{count}}",
         "heal_other": "Reparieren {{count}}",
@@ -610,7 +627,10 @@
         "restoreFace_other": "Restore Face {{count}}",
         "retouch": "Retusche {{count}}",
         "retouch_one": "Retusche {{count}}",
-        "retouch_other": "Retusche {{count}}"
+        "retouch_other": "Retusche {{count}}",
+        "wireRemoval": "Power Lines {{count}}",
+        "wireRemoval_one": "Power Lines {{count}}",
+        "wireRemoval_other": "Power Lines {{count}}"
       },
       "resetInpaintingTooltip": "Reparieren zurücksetzen",
       "settings": {
@@ -1563,7 +1583,9 @@
       "brush": "Pinsel",
       "clone": "Klonen",
       "color": "Farbe",
+      "deblur": "Deblur",
       "depth": "Tiefe",
+      "dustRemoval": "Dust Spots",
       "face": "Gesicht",
       "flow": "Fluss",
       "foreground": "Vordergrund",
@@ -1580,7 +1602,8 @@
       "retouch": "Retuschieren",
       "sky": "Himmel",
       "subject": "Motiv",
-      "text": "Text"
+      "text": "Text",
+      "wireRemoval": "Power Lines"
     }
   },
   "menus": {

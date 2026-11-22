@@ -597,6 +597,13 @@
       },
       "createNewTitle": "Створити нову генеративну правку",
       "createNewTooltip": "Створити нову правку: {{name}}",
+      "deblur": {
+        "mode": "Blur",
+        "modes": {
+          "defocus": "Out of focus",
+          "motion": "Camera shake"
+        }
+      },
       "denoising": "Зменшення шуму за допомогою ШІ...",
       "dropzoneText": "Перетягніть сюди, щоб створити нову правку",
       "editSettingsTitle": "Налаштування правки",
@@ -617,12 +624,16 @@
       "manualCleanupTitle": "Ручне очищення",
       "noImageSelected": "Зображення не вибрано.",
       "params": {
+        "blurSize": "Blur Size",
         "feather": "Розтушовування",
         "fidelity": "Fidelity",
         "grow": "Розширення",
         "intensity": "Інтенсивність",
         "pressure": "Натиск",
-        "strength": "Strength"
+        "sensitivity": "Sensitivity",
+        "spotSize": "Spot Size",
+        "strength": "Strength",
+        "wireWidth": "Wire Width"
       },
       "patches": {
         "aiEdit": "Правка ШІ {{count}}",
@@ -635,6 +646,16 @@
         "clone_few": "Клонування {{count}}",
         "clone_many": "Клонування {{count}}",
         "clone_other": "Клонування {{count}}",
+        "deblur": "Deblur {{count}}",
+        "deblur_one": "Deblur {{count}}",
+        "deblur_few": "Deblur {{count}}",
+        "deblur_many": "Deblur {{count}}",
+        "deblur_other": "Deblur {{count}}",
+        "dustRemoval": "Dust Spots {{count}}",
+        "dustRemoval_one": "Dust Spots {{count}}",
+        "dustRemoval_few": "Dust Spots {{count}}",
+        "dustRemoval_many": "Dust Spots {{count}}",
+        "dustRemoval_other": "Dust Spots {{count}}",
         "heal": "Відновлення {{count}}",
         "heal_one": "Відновлення {{count}}",
         "heal_few": "Відновлення {{count}}",
@@ -660,7 +681,12 @@
         "retouch_one": "Ретуш {{count}}",
         "retouch_few": "Ретуш {{count}}",
         "retouch_many": "Ретуш {{count}}",
-        "retouch_other": "Ретуш {{count}}"
+        "retouch_other": "Ретуш {{count}}",
+        "wireRemoval": "Power Lines {{count}}",
+        "wireRemoval_one": "Power Lines {{count}}",
+        "wireRemoval_few": "Power Lines {{count}}",
+        "wireRemoval_many": "Power Lines {{count}}",
+        "wireRemoval_other": "Power Lines {{count}}"
       },
       "resetInpaintingTooltip": "Скинути домальовування",
       "settings": {
@@ -1631,7 +1657,9 @@
       "brush": "Пензель",
       "clone": "Клонування",
       "color": "Колір",
+      "deblur": "Deblur",
       "depth": "Глибина",
+      "dustRemoval": "Dust Spots",
       "face": "Обличчя",
       "flow": "Потік",
       "foreground": "Передній план",
@@ -1648,7 +1676,8 @@
       "retouch": "Ретуш",
       "sky": "Небо",
       "subject": "Об'єкт",
-      "text": "Текст"
+      "text": "Текст",
+      "wireRemoval": "Power Lines"
     }
   },
   "menus": {

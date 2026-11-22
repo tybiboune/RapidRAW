@@ -597,6 +597,13 @@
       },
       "createNewTitle": "Sukurti naują generatyvinį redagavimą",
       "createNewTooltip": "Sukurti naują „{{name}}“ redagavimą",
+      "deblur": {
+        "mode": "Blur",
+        "modes": {
+          "defocus": "Out of focus",
+          "motion": "Camera shake"
+        }
+      },
       "denoising": "Vykdomas DI triukšmo slopinimas...",
       "dropzoneText": "Užtempkite čia, norėdami sukurti naują redagavimą",
       "editSettingsTitle": "Redagavimo nustatymai",
@@ -617,12 +624,16 @@
       "manualCleanupTitle": "Rankinis valymas",
       "noImageSelected": "Nepasirinkta jokia nuotrauka.",
       "params": {
+        "blurSize": "Blur Size",
         "feather": "Kraštų suliejimas",
         "fidelity": "Fidelity",
         "grow": "Išplėsti plotą",
         "intensity": "Intensyvumas",
         "pressure": "Spaudimas",
-        "strength": "Strength"
+        "sensitivity": "Sensitivity",
+        "spotSize": "Spot Size",
+        "strength": "Strength",
+        "wireWidth": "Wire Width"
       },
       "patches": {
         "aiEdit": "DI redagavimas {{count}}",
@@ -635,6 +646,16 @@
         "clone_few": "Klonuoti {{count}}",
         "clone_many": "Klonuoti {{count}}",
         "clone_other": "Klonuoti {{count}}",
+        "deblur": "Deblur {{count}}",
+        "deblur_one": "Deblur {{count}}",
+        "deblur_few": "Deblur {{count}}",
+        "deblur_many": "Deblur {{count}}",
+        "deblur_other": "Deblur {{count}}",
+        "dustRemoval": "Dust Spots {{count}}",
+        "dustRemoval_one": "Dust Spots {{count}}",
+        "dustRemoval_few": "Dust Spots {{count}}",
+        "dustRemoval_many": "Dust Spots {{count}}",
+        "dustRemoval_other": "Dust Spots {{count}}",
         "heal": "Taisyti {{count}}",
         "heal_one": "Taisyti {{count}}",
         "heal_few": "Taisyti {{count}}",
@@ -660,7 +681,12 @@
         "retouch_one": "Retušavimas {{count}}",
         "retouch_few": "Retušavimai {{count}}",
         "retouch_many": "Retušavimų {{count}}",
-        "retouch_other": "Retušavimų {{count}}"
+        "retouch_other": "Retušavimų {{count}}",
+        "wireRemoval": "Power Lines {{count}}",
+        "wireRemoval_one": "Power Lines {{count}}",
+        "wireRemoval_few": "Power Lines {{count}}",
+        "wireRemoval_many": "Power Lines {{count}}",
+        "wireRemoval_other": "Power Lines {{count}}"
       },
       "resetInpaintingTooltip": "Atstatyti visus generatyvinius redagavimus",
       "settings": {
@@ -1670,7 +1696,9 @@
       "brush": "Teptukas",
       "clone": "Klonuoti",
       "color": "Spalva",
+      "deblur": "Deblur",
       "depth": "Gylis",
+      "dustRemoval": "Dust Spots",
       "face": "Veidas",
       "flow": "Srautas",
       "foreground": "Pirmas planas",
@@ -1687,7 +1715,8 @@
       "retouch": "Retušavimas",
       "sky": "Dangus",
       "subject": "Pagrindinis objektas",
-      "text": "Tekstas"
+      "text": "Tekstas",
+      "wireRemoval": "Power Lines"
     }
   },
   "menus": {

@@ -561,6 +561,13 @@
       },
       "createNewTitle": "Nieuwe generatieve bewerking maken",
       "createNewTooltip": "Nieuwe {{name}} bewerking maken",
+      "deblur": {
+        "mode": "Blur",
+        "modes": {
+          "defocus": "Out of focus",
+          "motion": "Camera shake"
+        }
+      },
       "denoising": "AI-ruisonderdrukking wordt uitgevoerd...",
       "dropzoneText": "Hier neerzetten om een nieuwe bewerking te maken",
       "editSettingsTitle": "Bewerkingsinstellingen",
@@ -581,12 +588,16 @@
       "manualCleanupTitle": "Handmatig opruimen",
       "noImageSelected": "Geen afbeelding geselecteerd.",
       "params": {
+        "blurSize": "Blur Size",
         "feather": "Randvervaging",
         "fidelity": "Fidelity",
         "grow": "Groeien",
         "intensity": "Intensiteit",
         "pressure": "Druk",
-        "strength": "Strength"
+        "sensitivity": "Sensitivity",
+        "spotSize": "Spot Size",
+        "strength": "Strength",
+        "wireWidth": "Wire Width"
       },
       "patches": {
         "aiEdit": "AI-bewerking {{count}}",
@@ -595,6 +606,12 @@
         "clone": "Kloon {{count}}",
         "clone_one": "Kloon {{count}}",
         "clone_other": "Kloon {{count}}",
+        "deblur": "Deblur {{count}}",
+        "deblur_one": "Deblur {{count}}",
+        "deblur_other": "Deblur {{count}}",
+        "dustRemoval": "Dust Spots {{count}}",
+        "dustRemoval_one": "Dust Spots {{count}}",
+        "dustRemoval_other": "Dust Spots {{count}}",
         "heal": "Herstel {{count}}",
         "heal_one": "Herstel {{count}}",
         "heal_other": "Herstel {{count}}",
@@ -610,7 +627,10 @@
         "restoreFace_other": "Restore Face {{count}}",
         "retouch": "Retouche {{count}}",
         "retouch_one": "Retouche {{count}}",
-        "retouch_other": "Retouche {{count}}"
+        "retouch_other": "Retouche {{count}}",
+        "wireRemoval": "Power Lines {{count}}",
+        "wireRemoval_one": "Power Lines {{count}}",
+        "wireRemoval_other": "Power Lines {{count}}"
       },
       "resetInpaintingTooltip": "Inpainting herstellen",
       "settings": {
@@ -1563,7 +1583,9 @@
       "brush": "Penseel",
       "clone": "Klonen",
       "color": "Kleur",
+      "deblur": "Deblur",
       "depth": "Diepte",
+      "dustRemoval": "Dust Spots",
       "face": "Gezicht",
       "flow": "Doorstroming",
       "foreground": "Voorgrond",
@@ -1580,7 +1602,8 @@
       "retouch": "Retoucheren",
       "sky": "Lucht",
       "subject": "Onderwerp",
-      "text": "Tekst"
+      "text": "Tekst",
+      "wireRemoval": "Power Lines"
     }
   },
   "menus": {

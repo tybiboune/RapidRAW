@@ -30,7 +30,7 @@ import EditorToolbar from './editor/EditorToolbar';
 import ImageCanvas, { ImageRegion, MaskOverlayImage } from './editor/ImageCanvas';
 import SpeedEditOverlay from './editor/overlays/SpeedEditOverlay';
 import InfluenceLabel from './editor/overlays/InfluenceLabel';
-import { Mask, SubMask } from '../../types/masks';
+import { Mask, SubMask, isRepairTool } from '../../types/masks';
 import { CompareView } from '../../types/settings';
 import { Panel } from '../../types/ui';
 import { TransformState } from '../../types/editor';
@@ -951,7 +951,7 @@ export default function Editor({ onBackToLibrary, onContextMenu, onImageSelect, 
         activeSubMask?.type === Mask.Heal ||
         activeSubMask?.type === Mask.Liquify ||
         activeSubMask?.type === Mask.Retouch ||
-        activeSubMask?.type === Mask.FaceRestore)
+        isRepairTool(activeSubMask?.type))
     );
   }, [isMasking, isAiEditing, activeSubMask?.type]);
 
@@ -973,7 +973,7 @@ export default function Editor({ onBackToLibrary, onContextMenu, onImageSelect, 
         activeSubMask?.type === Mask.Clone ||
         activeSubMask?.type === Mask.Liquify ||
         activeSubMask?.type === Mask.Retouch ||
-        activeSubMask?.type === Mask.FaceRestore ||
+        isRepairTool(activeSubMask?.type) ||
         activeSubMask?.type === Mask.Heal ||
         activeSubMask?.type === Mask.AiSubject ||
         activeSubMask?.type === Mask.QuickEraser ||

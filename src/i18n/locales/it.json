@@ -579,6 +579,13 @@
       },
       "createNewTitle": "Crea Nuova Modifica Generativa",
       "createNewTooltip": "Crea Nuova Modifica {{name}}",
+      "deblur": {
+        "mode": "Blur",
+        "modes": {
+          "defocus": "Out of focus",
+          "motion": "Camera shake"
+        }
+      },
       "denoising": "Riduzione rumore IA in corso...",
       "dropzoneText": "Rilascia qui per creare una nuova modifica",
       "editSettingsTitle": "Impostazioni Modifica",
@@ -599,12 +606,16 @@
       "manualCleanupTitle": "Pulizia manuale",
       "noImageSelected": "Nessuna immagine selezionata.",
       "params": {
+        "blurSize": "Blur Size",
         "feather": "Sfumatura",
         "fidelity": "Fidelity",
         "grow": "Espandi",
         "intensity": "Intensità",
         "pressure": "Pressione",
-        "strength": "Strength"
+        "sensitivity": "Sensitivity",
+        "spotSize": "Spot Size",
+        "strength": "Strength",
+        "wireWidth": "Wire Width"
       },
       "patches": {
         "aiEdit": "Modifica AI {{count}}",
@@ -615,6 +626,14 @@
         "clone_one": "Clona {{count}}",
         "clone_many": "Clona {{count}}",
         "clone_other": "Clona {{count}}",
+        "deblur": "Deblur {{count}}",
+        "deblur_one": "Deblur {{count}}",
+        "deblur_many": "Deblur {{count}}",
+        "deblur_other": "Deblur {{count}}",
+        "dustRemoval": "Dust Spots {{count}}",
+        "dustRemoval_one": "Dust Spots {{count}}",
+        "dustRemoval_many": "Dust Spots {{count}}",
+        "dustRemoval_other": "Dust Spots {{count}}",
         "heal": "Ripara {{count}}",
         "heal_one": "Ripara {{count}}",
         "heal_many": "Ripara {{count}}",
@@ -635,7 +654,11 @@
         "retouch": "Ritocco {{count}}",
         "retouch_one": "Ritocco {{count}}",
         "retouch_many": "Ritocco {{count}}",
-        "retouch_other": "Ritocco {{count}}"
+        "retouch_other": "Ritocco {{count}}",
+        "wireRemoval": "Power Lines {{count}}",
+        "wireRemoval_one": "Power Lines {{count}}",
+        "wireRemoval_many": "Power Lines {{count}}",
+        "wireRemoval_other": "Power Lines {{count}}"
       },
       "resetInpaintingTooltip": "Ripristina Inpainting",
       "settings": {
@@ -1597,7 +1620,9 @@
       "brush": "Pennello",
       "clone": "Clona",
       "color": "Colore",
+      "deblur": "Deblur",
       "depth": "Profondità",
+      "dustRemoval": "Dust Spots",
       "face": "Viso",
       "flow": "Flusso",
       "foreground": "Primo Piano",
@@ -1614,7 +1639,8 @@
       "retouch": "Ritocco",
       "sky": "Cielo",
       "subject": "Soggetto",
-      "text": "Testo"
+      "text": "Testo",
+      "wireRemoval": "Power Lines"
     }
   },
   "menus": {

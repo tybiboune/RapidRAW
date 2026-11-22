@@ -561,6 +561,13 @@
       },
       "createNewTitle": "建立新的生成式編輯",
       "createNewTooltip": "建立新的 {{name}} 編輯",
+      "deblur": {
+        "mode": "Blur",
+        "modes": {
+          "defocus": "Out of focus",
+          "motion": "Camera shake"
+        }
+      },
       "denoising": "正在進行 AI 降噪...",
       "dropzoneText": "拖放到此處以建立新編輯",
       "editSettingsTitle": "編輯設定",
@@ -581,12 +588,16 @@
       "manualCleanupTitle": "手動清理",
       "noImageSelected": "未選擇影像。",
       "params": {
+        "blurSize": "Blur Size",
         "feather": "羽化",
         "fidelity": "Fidelity",
         "grow": "擴張",
         "intensity": "強度",
         "pressure": "壓力",
-        "strength": "Strength"
+        "sensitivity": "Sensitivity",
+        "spotSize": "Spot Size",
+        "strength": "Strength",
+        "wireWidth": "Wire Width"
       },
       "patches": {
         "aiEdit": "AI 編輯 {{count}}",
@@ -595,6 +606,12 @@
         "clone": "仿製 {{count}}",
         "clone_one": "Clone {{count}}",
         "clone_other": "仿製 {{count}}",
+        "deblur": "Deblur {{count}}",
+        "deblur_one": "Deblur {{count}}",
+        "deblur_other": "Deblur {{count}}",
+        "dustRemoval": "Dust Spots {{count}}",
+        "dustRemoval_one": "Dust Spots {{count}}",
+        "dustRemoval_other": "Dust Spots {{count}}",
         "heal": "修復 {{count}}",
         "heal_one": "Heal {{count}}",
         "heal_other": "修復 {{count}}",
@@ -610,7 +627,10 @@
         "restoreFace_other": "Restore Face {{count}}",
         "retouch": "修飾 {{count}}",
         "retouch_one": "Retouch {{count}}",
-        "retouch_other": "修飾 {{count}}"
+        "retouch_other": "修飾 {{count}}",
+        "wireRemoval": "Power Lines {{count}}",
+        "wireRemoval_one": "Power Lines {{count}}",
+        "wireRemoval_other": "Power Lines {{count}}"
       },
       "resetInpaintingTooltip": "重置影像修復",
       "settings": {
@@ -1563,7 +1583,9 @@
       "brush": "畫筆",
       "clone": "仿製",
       "color": "顏色",
+      "deblur": "Deblur",
       "depth": "深度",
+      "dustRemoval": "Dust Spots",
       "face": "臉部",
       "flow": "流線",
       "foreground": "前景",
@@ -1580,7 +1602,8 @@
       "retouch": "修飾",
       "sky": "天空",
       "subject": "主體",
-      "text": "文字"
+      "text": "文字",
+      "wireRemoval": "Power Lines"
     }
   },
   "menus": {
