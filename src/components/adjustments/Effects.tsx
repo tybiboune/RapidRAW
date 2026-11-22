@@ -220,6 +220,7 @@ function EffectsPanel({
   const [isGeneratingDepth, setIsGeneratingDepth] = useState(false);
   const [isGeneratingFaceMap, setIsGeneratingFaceMap] = useState(false);
   const [isGeneratingWrinkleMap, setIsGeneratingWrinkleMap] = useState(false);
+  const [isGeneratingBlemishMap, setIsGeneratingBlemishMap] = useState(false);
   const selectedImagePath = useEditorStore((state) => state.selectedImage?.path ?? null);
   const [isGeneratingNormals, setIsGeneratingNormals] = useState(false);
   const [isGeneratingFogDepth, setIsGeneratingFogDepth] = useState(false);
@@ -281,6 +282,31 @@ function EffectsPanel({
     handleAdjustmentChange(Effect.SkinLinesAi, enabled);
     if (enabled && !adjustments.skinLinesAiMap) {
       handleGenerateWrinkleMap();
+    }
+  };
+
+  // The spots can be read from ABPN's blemish detector instead of from the shape of the brightness, the
+  // same way: its map is asked for the first time this is switched on and kept with the edit.
+  const handleGenerateBlemishMap = async () => {
+    setIsGeneratingBlemishMap(true);
+    try {
+      const b64: string = await invoke('generate_full_image_blemish_map', {
+        jsAdjustments: adjustments,
+        path: selectedImagePath,
+      });
+      setAdjustments((prev: Partial<Adjustments>) => ({ ...prev, skinSpotsAiMap: b64 }));
+    } catch (e) {
+      toast.error(`Failed to find the spots: ${e}`);
+      setAdjustments((prev: Partial<Adjustments>) => ({ ...prev, skinSpotsAi: false }));
+    } finally {
+      setIsGeneratingBlemishMap(false);
+    }
+  };
+
+  const handleSpotsAiToggle = (enabled: boolean) => {
+    handleAdjustmentChange(Effect.SkinSpotsAi, enabled);
+    if (enabled && !adjustments.skinSpotsAiMap) {
+      handleGenerateBlemishMap();
     }
   };
 
@@ -822,6 +848,17 @@ function EffectsPanel({
                         value={adjustments.skinSpots ?? 0}
                         onDragStateChange={onDragStateChange}
                       />
+
+                      {(adjustments.skinSpots ?? 0) > 0 &&
+                        (isGeneratingBlemishMap ? (
+                          <MapGenerationStatus label={t('adjustments.effects.skinFindingSpots')} />
+                        ) : (
+                          <Switch
+                            label={t('adjustments.effects.skinSpotsAi')}
+                            checked={!!adjustments.skinSpotsAi}
+                            onChange={handleSpotsAiToggle}
+                          />
+                        ))}
 
                       <Slider
                         resetKey="skinRedness"

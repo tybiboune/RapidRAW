@@ -921,7 +921,12 @@ const WRINKLE_STD: [f32; 3] = [0.229, 0.224, 0.225];
 const WRINKLE_SOFTNESS: f32 = 1.2;
 // below this the picture is shrunk properly before it is sampled, so a face many times the size of the
 // model's input is averaged rather than picked at
-const WRINKLE_PRESHRINK: f32 = 0.75;
+const PRESHRINK: f32 = 0.75;
+// ABPN's blemish detector (Alibaba's skin retouching): a square 1.5 times the face around it, scaled to
+// -1..1, in; how likely each pixel is to be part of a spot, a mole, a milium or an acne mark, out
+const BLEMISH_INPUT_SIZE: usize = 768;
+const BLEMISH_SPAN: f32 = 1.5;
+const BLEMISH_SOFTNESS: f32 = 1.0;
 
 // The square the FFHQ faces were cut to, which is what the wrinkle model learned on: built from the eyes
 // and the mouth exactly as that dataset's alignment builds it, so a face here is framed, sized and turned
@@ -950,13 +955,28 @@ fn ffhq_frame(face: &DetectedFace) -> FaceFrame {
     }
 }
 
-// The face cut out along its frame, ImageNet-normalised, channels first. A face much bigger than the
-// model's input is shrunk with a proper filter first and then sampled; sampled straight from the full
-// picture, the fine lines this is looking for would alias into noise.
-fn wrinkle_tensor(image: &RgbImage, frame: &FaceFrame) -> Array4<f32> {
-    let size = WRINKLE_INPUT_SIZE;
+// The square of the blemish detector: the face's own frame, upright, half as wide again as the face, which
+// is how the pipeline it comes from cuts a face out around its box.
+fn blemish_frame(face: &DetectedFace) -> FaceFrame {
+    FaceFrame {
+        center: face.center,
+        side: (face.size * BLEMISH_SPAN).max(1.0),
+        angle: face.angle,
+    }
+}
+
+// The face cut out along its frame at `size` pixels a side, channels first, each pixel's 0-255 RGB put
+// through `normalize`. A face much bigger than the model's input is shrunk with a proper filter first
+// and then sampled; sampled straight from the full picture, the fine lines and small spots these models
+// look for would alias into noise.
+fn face_tensor(
+    image: &RgbImage,
+    frame: &FaceFrame,
+    size: usize,
+    normalize: impl Fn([f32; 3]) -> [f32; 3] + Sync,
+) -> Array4<f32> {
     let factor = size as f32 / frame.side;
-    let shrunk = if factor < WRINKLE_PRESHRINK {
+    let shrunk = if factor < PRESHRINK {
         let corners: Vec<[f32; 2]> = [[0.0, 0.0], [1.0, 0.0], [0.0, 1.0], [1.0, 1.0]]
             .into_iter()
             .map(|[u, v]| frame.to_image(size, u * size as f32, v * size as f32))
@@ -1005,17 +1025,21 @@ fn wrinkle_tensor(image: &RgbImage, frame: &FaceFrame) -> Array4<f32> {
             let row = r.iter_mut().zip(g.iter_mut()).zip(b.iter_mut());
             for (x, ((r, g), b)) in row.enumerate() {
                 let [sx, sy] = frame.to_image(size, x as f32, y as f32);
-                let rgb = sample_rgb(source, sx, sy, true);
-                *r = (rgb[0] / 255.0 - WRINKLE_MEAN[0]) / WRINKLE_STD[0];
-                *g = (rgb[1] / 255.0 - WRINKLE_MEAN[1]) / WRINKLE_STD[1];
-                *b = (rgb[2] / 255.0 - WRINKLE_MEAN[2]) / WRINKLE_STD[2];
+                [*r, *g, *b] = normalize(sample_rgb(source, sx, sy, true));
             }
         });
     tensor
 }
 
-fn run_wrinkles(session: &Mutex<Session>, image: &RgbImage, frame: &FaceFrame) -> Result<Vec<f32>> {
-    let tensor = wrinkle_tensor(image, frame);
+// One face through a model that answers with one probability a pixel at its input's size, softened by
+// `softness` of the model's own pixels: the answers come back hard-edged, and a correction that follows a
+// hard edge leaves one.
+fn run_face_model(
+    session: &Mutex<Session>,
+    tensor: Array4<f32>,
+    size: usize,
+    softness: f32,
+) -> Result<Vec<f32>> {
     let probabilities: Vec<f32> = {
         let mut session = session.lock().unwrap();
         let outputs = session.run(ort::inputs![Tensor::from_array(tensor)?])?;
@@ -1025,42 +1049,50 @@ fn run_wrinkles(session: &Mutex<Session>, image: &RgbImage, frame: &FaceFrame) -
             .copied()
             .collect()
     };
-    if probabilities.len() != WRINKLE_INPUT_SIZE * WRINKLE_INPUT_SIZE {
+    if probabilities.len() != size * size {
         return Err(anyhow::anyhow!(
-            "Unexpected wrinkle model output of {} values",
+            "Unexpected face model output of {} values",
             probabilities.len()
         ));
     }
-    let grid = ImageBuffer::<Luma<f32>, Vec<f32>>::from_raw(
-        WRINKLE_INPUT_SIZE as u32,
-        WRINKLE_INPUT_SIZE as u32,
-        probabilities,
-    )
-    .unwrap();
-    Ok(imageops::blur(&grid, WRINKLE_SOFTNESS).into_raw())
+    let grid =
+        ImageBuffer::<Luma<f32>, Vec<f32>>::from_raw(size as u32, size as u32, probabilities)
+            .unwrap();
+    Ok(imageops::blur(&grid, softness).into_raw())
 }
 
-/// Where the lines are on every face in the picture, as one map over the whole frame: how likely each
-/// place is to be a wrinkle, 0 to 1, found by the FFHQ-Wrinkle model on each face in turn. The map is at
-/// most `long_side` pixels across, which is all the skin tool looks for faults at. It is not cut to the
-/// skin here; the skin tool reads it through its own face-skin weight, which already leaves out the eyes,
-/// brows and lips the model sometimes takes for lines.
-pub fn compose_wrinkle_map(
+fn run_wrinkles(session: &Mutex<Session>, image: &RgbImage, frame: &FaceFrame) -> Result<Vec<f32>> {
+    let tensor = face_tensor(image, frame, WRINKLE_INPUT_SIZE, |rgb| {
+        std::array::from_fn(|c| (rgb[c] / 255.0 - WRINKLE_MEAN[c]) / WRINKLE_STD[c])
+    });
+    run_face_model(session, tensor, WRINKLE_INPUT_SIZE, WRINKLE_SOFTNESS)
+}
+
+fn run_blemishes(session: &Mutex<Session>, image: &RgbImage, frame: &FaceFrame) -> Result<Vec<f32>> {
+    let tensor = face_tensor(image, frame, BLEMISH_INPUT_SIZE, |rgb| {
+        rgb.map(|v| v / 127.5 - 1.0)
+    });
+    run_face_model(session, tensor, BLEMISH_INPUT_SIZE, BLEMISH_SOFTNESS)
+}
+
+// One map over the whole frame from a model run on each face in turn: `find` gives the frame it cut the
+// face out along, the size of the model's square and its answer there, and every pixel of the face's
+// region on the map takes the largest answer any face gave it. The map is at most `long_side` pixels
+// across, which is all the skin tool looks for faults at.
+fn compose_face_map(
     image: &DynamicImage,
     analysis: &FaceAnalysis,
-    session: &Mutex<Session>,
     long_side: u32,
+    find: impl Fn(&RgbImage, &DetectedFace) -> Result<(FaceFrame, usize, Vec<f32>)>,
 ) -> Result<GrayImage> {
     let (width, height) = image.dimensions();
     let scale = (long_side as f32 / width.max(height) as f32).min(1.0);
     let w = ((width as f32 * scale).round() as usize).max(1);
     let h = ((height as f32 * scale).round() as usize).max(1);
     let rgb = image.to_rgb8();
-    let size = WRINKLE_INPUT_SIZE;
     let mut map = vec![0.0f32; w * h];
     for face in &analysis.faces {
-        let frame = ffhq_frame(face);
-        let probabilities = run_wrinkles(session, &rgb, &frame)?;
+        let (frame, size, probabilities) = find(&rgb, face)?;
         // the face's region, in pixels of the map
         let (x0, y0, x1, y1) = face_region(face, width, height);
         let to_map = |v: u32, limit: usize| ((v as f32 * scale) as usize).min(limit);
@@ -1092,6 +1124,39 @@ pub fn compose_wrinkle_map(
             });
     }
     Ok(to_gray(&map, w, h))
+}
+
+/// Where the lines are on every face in the picture, as one map over the whole frame: how likely each
+/// place is to be a wrinkle, 0 to 1, found by the FFHQ-Wrinkle model on each face in turn. It is not cut
+/// to the skin here; the skin tool reads it through its own face-skin weight, which already leaves out
+/// the eyes, brows and lips the model sometimes takes for lines.
+pub fn compose_wrinkle_map(
+    image: &DynamicImage,
+    analysis: &FaceAnalysis,
+    session: &Mutex<Session>,
+    long_side: u32,
+) -> Result<GrayImage> {
+    compose_face_map(image, analysis, long_side, |rgb, face| {
+        let frame = ffhq_frame(face);
+        let found = run_wrinkles(session, rgb, &frame)?;
+        Ok((frame, WRINKLE_INPUT_SIZE, found))
+    })
+}
+
+/// Where the blemishes are on every face in the picture - spots, moles, milia, acne marks - as one map
+/// over the whole frame, how likely each place is to be one, 0 to 1, found by ABPN's blemish detector on
+/// each face in turn. Like the lines, it is read through the skin tool's own face-skin weight.
+pub fn compose_blemish_map(
+    image: &DynamicImage,
+    analysis: &FaceAnalysis,
+    session: &Mutex<Session>,
+    long_side: u32,
+) -> Result<GrayImage> {
+    compose_face_map(image, analysis, long_side, |rgb, face| {
+        let frame = blemish_frame(face);
+        let found = run_blemishes(session, rgb, &frame)?;
+        Ok((frame, BLEMISH_INPUT_SIZE, found))
+    })
 }
 
 pub fn compose_face_mask(

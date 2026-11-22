@@ -9,7 +9,7 @@ use ort::session::{Output, Session};
 use ort::tensor::{Shape, SymbolicDimensions, TensorElementType};
 use ort::value::{Tensor, ValueType};
 use sha2::{Digest, Sha256};
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
@@ -144,6 +144,12 @@ const NORMAL_SHA256: &str = "24eacb5dc7a2c54c7bc98f7de085ffbed79ad006ea5b664c2c2
 // weights are CC BY-NC-SA and nothing hosts the export, so it is not downloaded: the file is expected
 // to be put in the models folder by hand.
 pub const WRINKLE_FILENAME: &str = "ffhq_wrinkle_unet.onnx";
+
+// ABPN's blemish detector (Alibaba's skin retouching, Apache-2.0), exported to ONNX with the sigmoid
+// folded in by scripts/export_blemish_onnx.py: a 768x768 crop of 1.5 times the face, scaled to -1..1,
+// in; how likely each pixel is to be part of a blemish, 0 to 1, out. ModelScope publishes it as PyTorch
+// weights only, so like the wrinkle model it is put in the models folder by hand.
+pub const BLEMISH_FILENAME: &str = "abpn_blemish_detection.onnx";
 
 type SharedSession = Arc<Mutex<Session>>;
 
@@ -1215,42 +1221,67 @@ pub async fn get_or_init_normal_model(
     Ok(normal_model)
 }
 
-pub async fn get_or_init_wrinkle_model(
+/// A model the owner puts in the models folder by hand, because nothing hosts it in a form RapidRAW can
+/// download (see the export scripts in `scripts/`).
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+pub enum ManualModel {
+    Wrinkles,
+    Blemishes,
+}
+
+impl ManualModel {
+    pub fn filename(self) -> &'static str {
+        match self {
+            Self::Wrinkles => WRINKLE_FILENAME,
+            Self::Blemishes => BLEMISH_FILENAME,
+        }
+    }
+
+    fn what(self) -> &'static str {
+        match self {
+            Self::Wrinkles => "wrinkle",
+            Self::Blemishes => "blemish",
+        }
+    }
+}
+
+/// The session for a model put in the models folder by hand, built the first time it is asked for and
+/// kept for the rest of the run. Without the file it says where the file goes.
+pub async fn get_or_init_manual_model(
     app_handle: &tauri::AppHandle,
     ai_state_mutex: &Mutex<Option<AiState>>,
     ai_init_lock: &TokioMutex<()>,
+    model: ManualModel,
 ) -> Result<Arc<Mutex<Session>>> {
-    if let Some(wrinkle_model) =
-        cached_ai_state(ai_state_mutex, |state| state.wrinkle_model.clone())
-    {
-        return Ok(wrinkle_model);
+    let cached =
+        || cached_ai_state(ai_state_mutex, |state| state.manual_models.get(&model).cloned());
+    if let Some(session) = cached() {
+        return Ok(session);
     }
 
     let _guard = ai_init_lock.lock().await;
 
-    if let Some(wrinkle_model) =
-        cached_ai_state(ai_state_mutex, |state| state.wrinkle_model.clone())
-    {
-        return Ok(wrinkle_model);
+    if let Some(session) = cached() {
+        return Ok(session);
     }
 
-    let model_path = get_models_dir(app_handle)?.join(WRINKLE_FILENAME);
+    let model_path = get_models_dir(app_handle)?.join(model.filename());
     if !model_path.exists() {
         return Err(anyhow::anyhow!(
-            "The wrinkle model is not installed: put {} in {}",
-            WRINKLE_FILENAME,
+            "The {} model is not installed: put {} in {}",
+            model.what(),
+            model.filename(),
             model_path.parent().unwrap_or(&model_path).display()
         ));
     }
 
-    let _ = ort::init().with_name("AI-Wrinkles").commit();
-    let session = build_session(
+    let _ = ort::init().with_name("AI").commit();
+    let session = Arc::new(Mutex::new(build_session(
         &model_path,
         SessionKind::OneShot,
         gpu_allowed_on_platform() && gpu_acceleration_enabled(app_handle),
         None,
-    )?;
-    let wrinkle_model = Arc::new(Mutex::new(session));
+    )?));
 
     crate::register_exit_handler();
 
@@ -1258,9 +1289,10 @@ pub async fn get_or_init_wrinkle_model(
         .lock()
         .unwrap()
         .get_or_insert_with(AiState::default)
-        .wrinkle_model = Some(wrinkle_model.clone());
+        .manual_models
+        .insert(model, session.clone());
 
-    Ok(wrinkle_model)
+    Ok(session)
 }
 
 const ESAM3_PROMPT_TOKENS: usize = 16;
@@ -1282,7 +1314,7 @@ pub struct AiState {
     pub clip_models: Option<Arc<ClipModels>>,
     pub lama_model: Option<Arc<Mutex<Session>>>,
     pub normal_model: Option<Arc<Mutex<Session>>>,
-    pub wrinkle_model: Option<Arc<Mutex<Session>>>,
+    pub manual_models: HashMap<ManualModel, Arc<Mutex<Session>>>,
     pub embeddings: Option<ImageEmbeddings>,
     pub esam3_features: Option<Arc<Esam3Features>>,
     pub face_analysis: Option<Arc<FaceAnalysis>>,
@@ -1305,7 +1337,7 @@ impl AiState {
         self.clip_models = None;
         self.lama_model = None;
         self.normal_model = None;
-        self.wrinkle_model = None;
+        self.manual_models.clear();
     }
 }
 

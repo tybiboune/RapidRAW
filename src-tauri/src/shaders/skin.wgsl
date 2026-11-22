@@ -44,6 +44,12 @@ struct Params {
     pigment: f32,
     tone: f32,
     thr_pigment: f32,
+    // 1 when the blemishes are read from the blemish detector's map rather than from the shape of the
+    // brightness, else 0
+    spots_ai: f32,
+    _pad0: u32,
+    _pad1: u32,
+    _pad2: u32,
 }
 
 @group(0) @binding(7) var<uniform> params: Params;
@@ -432,7 +438,8 @@ fn blob(t: texture_2d<f32>, p: vec2<i32>, h: i32, yardstick: f32, red_yardstick:
     return vec3<f32>(dark, red, light) * inside;
 }
 
-// t0, t1, t2: the split picture blurred to the three widths. t3: the yardstick, blurred.
+// t0, t1, t2: the split picture blurred to the three widths. t3: the yardstick, blurred. t4: the regions
+// of the face, with where the blemish detector found blemishes in the fourth channel.
 // Out: how sure this is a blemish, that times the width it was found at, nothing, and the skin weight.
 // A pale bump counts for a little more than half what a dark or red one does: it is more often a
 // highlight than something anyone wants gone.
@@ -457,6 +464,20 @@ fn sk_blob(@builtin(global_invocation_id) id: vec3<u32>) {
     var reach = f32(params.step_a);
     if (sb > best) { best = sb; reach = f32(params.step_b); }
     if (sc > best) { best = sc; reach = f32(params.step_c); }
+    // The detector's map, when it is there, says where the blemishes are in place of the shape of the
+    // brightness: it knows a mole from a pore and a spot from the shadow of a fold, which the shape alone
+    // does not. The detection slider moves where on its scale a pixel counts, the way the pipeline it
+    // comes from takes a half as certain and a third as nothing. How far out the clean skin is still comes
+    // from the widths, at the largest unless the shape found the blemish at a smaller one.
+    if (params.spots_ai > 0.0) {
+        let uv = (vec2<f32>(id.xy) + 0.5) / vec2<f32>(params.grid.dst);
+        let found = tap_sample(t4, tap_uv(uv, params.region_size)).w;
+        let low = clamp(0.33 * params.thr_spots, 0.05, 0.85);
+        let high = clamp(0.5 * params.thr_spots, low + 0.05, 0.95);
+        let ai = smooth_step(low, high, found) * inside_skin(t0, p);
+        if (best < 0.05) { reach = f32(params.step_c); }
+        best = mix(best, ai, params.spots_ai);
+    }
     textureStore(out_f32, p, vec4<f32>(best, reach * best, 0.0, skin));
 }
 

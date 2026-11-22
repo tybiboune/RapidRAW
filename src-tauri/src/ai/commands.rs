@@ -9,7 +9,9 @@ use serde::Serialize;
 use serde_json::{Value, json};
 
 use crate::ai::connector;
-use crate::ai::models::{AiMaskModel, AiModels, AiState, get_or_init_ai_models};
+use crate::ai::models::{
+    AiMaskModel, AiModels, AiState, ManualModel, get_or_init_ai_models, get_or_init_manual_model,
+};
 use crate::ai::processing::{
     AiDepthMaskParameters, AiFaceMaskParameters, AiForegroundMaskParameters, AiSkyMaskParameters,
     AiSubjectMaskParameters, AiTextMaskParameters, CachedDepthMap, ESAM3_FACE_SCORE_THRESHOLD,
@@ -1107,16 +1109,37 @@ pub async fn generate_full_image_wrinkle_map(
     state: tauri::State<'_, AppState>,
     app_handle: tauri::AppHandle,
 ) -> Result<String, String> {
+    skin_model_map(js_adjustments, path, &state, &app_handle, ManualModel::Wrinkles).await
+}
+
+/// Where the blemishes are on the faces of the loaded picture - spots, moles, milia, acne marks - found
+/// by ABPN's blemish detector, for the skin tool's spots to be read from instead of from the shape of the
+/// brightness alone. Made and used the same way as the wrinkle map.
+#[tauri::command]
+pub async fn generate_full_image_blemish_map(
+    js_adjustments: serde_json::Value,
+    path: String,
+    state: tauri::State<'_, AppState>,
+    app_handle: tauri::AppHandle,
+) -> Result<String, String> {
+    skin_model_map(js_adjustments, path, &state, &app_handle, ManualModel::Blemishes).await
+}
+
+// A skin map from one of the face models put in by hand, over the faces of the loaded picture, as a map
+// in the picture's own space.
+async fn skin_model_map(
+    js_adjustments: serde_json::Value,
+    path: String,
+    state: &AppState,
+    app_handle: &tauri::AppHandle,
+    model: ManualModel,
+) -> Result<String, String> {
     // the model is checked for first: without it there is no point finding the faces
-    let session = crate::ai::models::get_or_init_wrinkle_model(
-        &app_handle,
-        &state.ai_state,
-        &state.ai_init_lock,
-    )
-    .await
-    .map_err(|e| e.to_string())?;
+    let session = get_or_init_manual_model(app_handle, &state.ai_state, &state.ai_init_lock, model)
+        .await
+        .map_err(|e| e.to_string())?;
     let models = get_or_init_ai_models(
-        &app_handle,
+        app_handle,
         &state.ai_state,
         &state.ai_init_lock,
         AiMaskModel::Face,
@@ -1124,7 +1147,7 @@ pub async fn generate_full_image_wrinkle_map(
     .await
     .map_err(|e| e.to_string())?;
 
-    let loaded_image = get_loaded_image(&state)?;
+    let loaded_image = get_loaded_image(state)?;
     // owned, because it goes on to the blocking task below, which may outlive the loaded picture
     let source_image = crate::masks::generation::build_converted_source_image(
         &loaded_image.image,
@@ -1143,7 +1166,11 @@ pub async fn generate_full_image_wrinkle_map(
         return Err(NO_FACES_FOUND.to_string());
     }
     let map = tauri::async_runtime::spawn_blocking(move || {
-        crate::masks::face::compose_wrinkle_map(
+        let compose = match model {
+            ManualModel::Wrinkles => crate::masks::face::compose_wrinkle_map,
+            ManualModel::Blemishes => crate::masks::face::compose_blemish_map,
+        };
+        compose(
             &source_image,
             &analysis,
             &session,
@@ -1196,7 +1223,7 @@ pub async fn get_depth_preview(
     .ok_or_else(|| "Depth map unavailable".to_string())
 }
 
-fn get_loaded_image(state: &tauri::State<'_, AppState>) -> Result<LoadedImage, String> {
+fn get_loaded_image(state: &AppState) -> Result<LoadedImage, String> {
     state
         .original_image
         .lock()
