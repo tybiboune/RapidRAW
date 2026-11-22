@@ -166,8 +166,7 @@ const FACE_PARSER_SHA256: &str = "6d4e67af60ff78184745ebf74cc15163c0adc27d45cdeb
 
 // CodeFormer (S-Lab, non-commercial), from the ONNX export facefusion publishes: a 512x512 face aligned
 // on FFHQ's five points, RGB scaled to -1..1, and a fidelity weight, in; the face restored, out.
-const FACE_RESTORER_URL: &str =
-    "https://github.com/facefusion/facefusion-assets/releases/download/models-3.0.0/codeformer.onnx";
+const FACE_RESTORER_URL: &str = "https://github.com/facefusion/facefusion-assets/releases/download/models-3.0.0/codeformer.onnx";
 
 const FACE_RESTORER_FILENAME: &str = "codeformer.onnx";
 

@@ -175,7 +175,10 @@ fn run_codeformer(
 
 // How much of the restored square counts at a point of it: nothing at its edges, all of it inside.
 fn square_weight(u: f32, v: f32) -> f32 {
-    let edge = u.min(v).min(SIZE as f32 - 1.0 - u).min(SIZE as f32 - 1.0 - v);
+    let edge = u
+        .min(v)
+        .min(SIZE as f32 - 1.0 - u)
+        .min(SIZE as f32 - 1.0 - v);
     let t = ((edge - EDGE) / (FEATHER - EDGE)).clamp(0.0, 1.0);
     t * t * (3.0 - 2.0 * t)
 }
@@ -210,7 +213,10 @@ pub fn restore_faces(
         let reach = |axis: usize, lo: usize, hi: usize| {
             let min = corners.iter().map(|c| c[axis]).fold(f32::MAX, f32::min);
             let max = corners.iter().map(|c| c[axis]).fold(f32::MIN, f32::max);
-            (min.floor().max(lo as f32) as usize, max.ceil().min(hi as f32) as usize)
+            (
+                min.floor().max(lo as f32) as usize,
+                max.ceil().min(hi as f32) as usize,
+            )
         };
         let (x0, x1) = reach(0, min_x, max_x);
         let (y0, y1) = reach(1, min_y, max_y);
