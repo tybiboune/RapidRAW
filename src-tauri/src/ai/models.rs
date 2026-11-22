@@ -1280,8 +1280,11 @@ pub async fn get_or_init_manual_model(
     ai_init_lock: &TokioMutex<()>,
     model: ManualModel,
 ) -> Result<Arc<Mutex<Session>>> {
-    let cached =
-        || cached_ai_state(ai_state_mutex, |state| state.manual_models.get(&model).cloned());
+    let cached = || {
+        cached_ai_state(ai_state_mutex, |state| {
+            state.manual_models.get(&model).cloned()
+        })
+    };
     if let Some(session) = cached() {
         return Ok(session);
     }

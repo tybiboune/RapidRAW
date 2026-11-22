@@ -1144,7 +1144,11 @@ fn run_wrinkles(session: &Mutex<Session>, image: &RgbImage, frame: &FaceFrame) -
     run_face_model(session, tensor, WRINKLE_INPUT_SIZE, WRINKLE_SOFTNESS)
 }
 
-fn run_blemishes(session: &Mutex<Session>, image: &RgbImage, frame: &FaceFrame) -> Result<Vec<f32>> {
+fn run_blemishes(
+    session: &Mutex<Session>,
+    image: &RgbImage,
+    frame: &FaceFrame,
+) -> Result<Vec<f32>> {
     let tensor = face_tensor(image, frame, BLEMISH_INPUT_SIZE, |rgb| {
         rgb.map(|v| v / 127.5 - 1.0)
     });

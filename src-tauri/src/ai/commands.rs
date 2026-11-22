@@ -1193,7 +1193,14 @@ pub async fn generate_full_image_wrinkle_map(
     state: tauri::State<'_, AppState>,
     app_handle: tauri::AppHandle,
 ) -> Result<String, String> {
-    skin_model_map(js_adjustments, path, &state, &app_handle, ManualModel::Wrinkles).await
+    skin_model_map(
+        js_adjustments,
+        path,
+        &state,
+        &app_handle,
+        ManualModel::Wrinkles,
+    )
+    .await
 }
 
 /// Where the blemishes are on the faces of the loaded picture - spots, moles, milia, acne marks - found
@@ -1206,7 +1213,14 @@ pub async fn generate_full_image_blemish_map(
     state: tauri::State<'_, AppState>,
     app_handle: tauri::AppHandle,
 ) -> Result<String, String> {
-    skin_model_map(js_adjustments, path, &state, &app_handle, ManualModel::Blemishes).await
+    skin_model_map(
+        js_adjustments,
+        path,
+        &state,
+        &app_handle,
+        ManualModel::Blemishes,
+    )
+    .await
 }
 
 // A skin map from one of the face models put in by hand, over the faces of the loaded picture, as a map
