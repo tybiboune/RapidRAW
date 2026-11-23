@@ -877,6 +877,54 @@ mod tests {
         }
     }
 
+    // A lash line is dark and brown, and divided by so little brightness its brown reads as strong
+    // pigment. It is not a patch to lift: the line keeps its darkness, and the skin beside it - which
+    // the blur of the line reaches - must not be pushed bluer than the skin around it.
+    #[test]
+    fn pigment_leaves_a_lash_line_and_the_skin_beside_it() {
+        const LINE_Y: f32 = 200.0;
+        let context = gpu();
+        let mut img = Rgb32FImage::new(N, N);
+        for (x, y, px) in img.enumerate_pixels_mut() {
+            let g = noise(x, y) * 0.02;
+            let lash = (-((y as f32 - LINE_Y) / 5.0).powi(2)).exp();
+            let skin = [0.55 + g, 0.40 + g, 0.31 + g];
+            let dark = [0.12, 0.065, 0.035];
+            px.0 = std::array::from_fn(|i| skin[i] * (1.0 - lash) + dark[i] * lash);
+        }
+        let input: Vec<[f32; 3]> = img.pixels().map(|p| p.0).collect();
+        let out = render(&context, &img, adj(json!({ "skinPigment": 100 })));
+        assert!(out.iter().all(|p| p.iter().all(|v| v.is_finite())));
+
+        // blue against red and green, per unit of brightness: up means bluer
+        let blueness = |p: [f32; 3]| (p[2] - 0.5 * (p[0] + p[1])) / luma(p).max(1e-3);
+        let band = |px: &[[f32; 3]], dy: f32| {
+            let (mut s, mut n) = (0.0, 0.0);
+            for x in 60..N - 60 {
+                for y in [LINE_Y - dy, LINE_Y + dy] {
+                    s += blueness(px[(y as u32 * N + x) as usize]);
+                    n += 1.0;
+                }
+            }
+            s / n
+        };
+        let far = band(&input[..], 80.0);
+        for dy in [4.0, 6.0, 9.0, 13.0] {
+            let (was, now) = (band(&input[..], dy), band(&out[..], dy));
+            eprintln!(
+                "{dy:>4} px from the lashes: blueness {was:+.4} -> {now:+.4} (skin {far:+.4})"
+            );
+            assert!(
+                now - was < 0.03 && now < far + 0.03,
+                "the skin {dy} px from a lash line was turned blue"
+            );
+        }
+        let line = |px: &[[f32; 3]]| luma(mean(px, (N as f32 / 2.0, LINE_Y), 1.5));
+        let (line_in, line_out) = (line(&input[..]), line(&out[..]));
+        eprintln!("lash line luma {line_in:.4} -> {line_out:.4}");
+        assert!(line_out < line_in + 0.05, "the lash line was lightened");
+    }
+
     #[test]
     fn skin_runs_on_the_gpu_and_corrects_each_fault() {
         let context = gpu();

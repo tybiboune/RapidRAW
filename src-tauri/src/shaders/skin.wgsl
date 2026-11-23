@@ -663,14 +663,26 @@ fn sk_apply(@builtin(global_invocation_id) id: vec3<u32>) {
             let darker = max(l_wide - l_fine, 0.0);
             // brown is down the blue axis and up the red one: melanin takes the blue out first
             let browner = max(blue_wide - blue_fine, 0.0) + max(red_fine - red_wide, 0.0) * 0.5;
+            // Pigment is a shade or two darker than the skin around it. A lash line, a brow, the edge of
+            // a nostril is far darker, and its brown, divided by so little brightness, reads as strong
+            // pigment: lifted, a lash line came out a pale blue-grey ring around the eye.
+            let deep = smooth_step(0.25, 0.4, darker / lw);
             let k = smooth_step(2.0 * params.thr_pigment, 8.0 * params.thr_pigment, browner)
-                * smooth_step(0.0, 0.02, darker) * params.pigment;
-            let before = level;
-            level += darker * k * 0.9;
-            // the colour grows with the brightness it was lifted by, then loses the brown
-            let grow = level / max(before, 0.05);
-            ycc.y = ycc.y * grow + (blue_wide - blue_fine) * level * k * 0.9;
-            ycc.z = ycc.z * grow + (red_wide - red_fine) * level * k * 0.6;
+                * smooth_step(0.0, 0.02, darker) * (1.0 - deep) * params.pigment;
+            let before = max(level, 0.05);
+            // up towards the skin around, never past it
+            level = min(level + darker * k * 0.9, max(level, l_wide));
+            // The colour for its brightness moves towards the skin around by the brown taken out, and
+            // stops there: a pixel beside a dark patch, which the fine blur reaches, already has the
+            // skin's colour, and pushed on by the patch's brown it went blue.
+            let blue_here = ycc.y / before;
+            let red_here = ycc.z / before;
+            let blue_to = blue_here + (blue_wide - blue_fine) * k * 0.9;
+            let red_to = red_here + (red_wide - red_fine) * k * 0.6;
+            let blue_now = clamp(blue_to, min(blue_here, blue_wide), max(blue_here, blue_wide));
+            let red_now = clamp(red_to, min(red_here, red_wide), max(red_here, red_wide));
+            ycc.y = blue_now * max(level, 0.05);
+            ycc.z = red_now * max(level, 0.05);
             touched = max(touched, k);
         }
         // An even complexion: the blotches of colour across the face - a cheek warmer than the forehead,
