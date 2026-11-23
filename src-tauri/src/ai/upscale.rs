@@ -146,6 +146,209 @@ fn key(path: &str, denoise: Option<DenoiseMethod>, plan: Plan) -> String {
     entry_key(&source_string(path), &format!("{model}{kind}+{input}"))
 }
 
+/// What the picture is made of before it is upscaled, beyond its development and denoise: the negative
+/// conversion, the skin renewal and the brushed repairs. None when none of them changes anything.
+fn content_tag(adjustments: &serde_json::Value) -> Option<u64> {
+    use std::hash::{Hash, Hasher};
+    if !crate::decode::image_loader::has_content_steps(adjustments) {
+        return None;
+    }
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    if let Some(all) = adjustments.as_object() {
+        for (name, value) in all {
+            // the negative's settings, and where the repairs' masks fall on the turned or cropped picture
+            let geometry = matches!(
+                name.as_str(),
+                "orientationSteps" | "flipHorizontal" | "flipVertical" | "rotation" | "crop"
+            ) || name.starts_with("transform");
+            if name.starts_with("negative") || geometry {
+                name.hash(&mut hasher);
+                value.to_string().hash(&mut hasher);
+            }
+        }
+    }
+    crate::effects::renewal::hash_inputs(adjustments, &mut hasher);
+    // only the repairs that show and have a result: one still being made, or hidden, changes nothing,
+    // and its flags must not set the upscaler going again
+    for patch in adjustments["aiPatches"].as_array().into_iter().flatten() {
+        let visible = patch["visible"].as_bool().unwrap_or(true);
+        let data = &patch["patchData"];
+        if visible && data["color"].as_str().is_some_and(|c| !c.is_empty()) {
+            patch["id"].to_string().hash(&mut hasher);
+            data.to_string().hash(&mut hasher);
+            patch["subMasks"].to_string().hash(&mut hasher);
+            patch["invert"].to_string().hash(&mut hasher);
+        }
+    }
+    Some(hasher.finish())
+}
+
+/// The key of a result made from the picture with its content steps, `tag` being their hash.
+fn content_key(path: &str, denoise: Option<DenoiseMethod>, plan: Plan, tag: Option<u64>) -> String {
+    match tag {
+        None => key(path, denoise, plan),
+        Some(tag) => format!("{}-c{tag:016x}", key(path, denoise, plan)),
+    }
+}
+
+/// Paths whose upscale with repairs is being made: their keys depend on the repairs, so the path is kept.
+static CONTENT_PENDING: Mutex<Vec<String>> = Mutex::new(Vec::new());
+
+const REFRESH_BLOCK: u32 = 128;
+const REFRESH_MARGIN: u32 = 24;
+
+/// Whether any pixel of the block at (x0, y0) differs between the two pictures.
+fn block_differs(a: &Rgb32FImage, b: &Rgb32FImage, x0: u32, y0: u32) -> bool {
+    let (w, h) = a.dimensions();
+    let (x1, y1) = ((x0 + REFRESH_BLOCK).min(w), (y0 + REFRESH_BLOCK).min(h));
+    let row = w as usize * 3;
+    (y0..y1).any(|y| {
+        let span = y as usize * row + x0 as usize * 3..y as usize * row + x1 as usize * 3;
+        a.as_raw()[span.clone()]
+            .iter()
+            .zip(&b.as_raw()[span])
+            .any(|(p, q)| (p - q).abs() > 1e-6)
+    })
+}
+
+/// The upscale of `after`, made from `out` (the upscale of `before`) by running the network again only
+/// where the two pictures differ, block by block, with a little of the picture around for context. A
+/// brush stroke costs its own area, not the whole picture.
+fn refresh_changed(
+    mut out: Rgb32FImage,
+    before: &Rgb32FImage,
+    after: &Rgb32FImage,
+    upscale: &Upscale,
+    scale: u32,
+    on_progress: &(dyn Fn(f32) + Sync),
+) -> Result<Rgb32FImage, String> {
+    let (w, h) = after.dimensions();
+    let (bw, bh) = (w.div_ceil(REFRESH_BLOCK), h.div_ceil(REFRESH_BLOCK));
+    let differs: Vec<bool> = (0..bw * bh)
+        .into_par_iter()
+        .map(|i| {
+            block_differs(
+                before,
+                after,
+                (i % bw) * REFRESH_BLOCK,
+                (i / bw) * REFRESH_BLOCK,
+            )
+        })
+        .collect();
+    // a block beside a changed one is done again too: the network sees across the border
+    let changed = |bx: u32, by: u32| {
+        (by.saturating_sub(1)..=(by + 1).min(bh - 1)).any(|y| {
+            (bx.saturating_sub(1)..=(bx + 1).min(bw - 1)).any(|x| differs[(y * bw + x) as usize])
+        })
+    };
+    let mut spans = Vec::new();
+    for by in 0..bh {
+        let mut bx = 0;
+        while bx < bw {
+            if changed(bx, by) {
+                let start = bx;
+                while bx < bw && changed(bx, by) {
+                    bx += 1;
+                }
+                spans.push((by, start, bx));
+            } else {
+                bx += 1;
+            }
+        }
+    }
+    let count = spans.len().max(1) as f32;
+    let out_row = out.width() as usize * 3;
+    for (i, &(by, start, end)) in spans.iter().enumerate() {
+        let (x0, y0) = (start * REFRESH_BLOCK, by * REFRESH_BLOCK);
+        let (x1, y1) = (
+            (end * REFRESH_BLOCK).min(w),
+            ((by + 1) * REFRESH_BLOCK).min(h),
+        );
+        let (cx0, cy0) = (
+            x0.saturating_sub(REFRESH_MARGIN),
+            y0.saturating_sub(REFRESH_MARGIN),
+        );
+        let (cx1, cy1) = ((x1 + REFRESH_MARGIN).min(w), (y1 + REFRESH_MARGIN).min(h));
+        let crop = imageops::crop_imm(after, cx0, cy0, cx1 - cx0, cy1 - cy0).to_image();
+        let done = i as f32;
+        let up = upscale(&crop, &|p: f32| on_progress((done + p) / count))?;
+        let up_row = up.width() as usize * 3;
+        let dst: &mut [f32] = &mut out;
+        for oy in y0 * scale..y1 * scale {
+            let sy = (oy - cy0 * scale) as usize;
+            let from = &up.as_raw()[sy * up_row + ((x0 - cx0) * scale) as usize * 3..]
+                [..((x1 - x0) * scale) as usize * 3];
+            let at = oy as usize * out_row + (x0 * scale) as usize * 3;
+            dst[at..at + from.len()].copy_from_slice(from);
+        }
+    }
+    on_progress(1.0);
+    Ok(out)
+}
+
+/// The upscale of the picture with its content steps (negative, renewal, repairs) done first. The plain
+/// upscale is kept as well, so that the next repair only redoes its own area.
+#[allow(clippy::too_many_arguments)]
+fn run_with_content(
+    base: &DynamicImage,
+    path: &str,
+    input: Option<DenoiseMethod>,
+    plan: Plan,
+    tag: Option<u64>,
+    adjustments: &serde_json::Value,
+    session: &Session,
+    on_progress: &(dyn Fn(f32) + Sync),
+) -> Result<Rgb32FImage, String> {
+    let plain_input = input_for(base, path, input)?;
+    let Some(_) = tag else {
+        return run(&plain_input, session, plan, on_progress);
+    };
+    CONTENT_PENDING.lock().unwrap().push(path.to_string());
+    let result = (|| {
+        let content_input = crate::decode::image_loader::apply_content_steps(
+            Cow::Owned(DynamicImage::ImageRgb32F(plain_input.clone())),
+            base.dimensions(),
+            path,
+            adjustments,
+        )
+        .map_err(|e| e.to_string())?
+        .into_owned()
+        .into_rgb32f();
+        let source = source_string(path);
+        let size = upscaled_size(plan, base.dimensions());
+        let plain_key = key(path, input, plan);
+        let plain = match CACHE
+            .load(&plain_key, &source)
+            .filter(|entry| (entry.width, entry.height) == size)
+        {
+            Some(entry) => entry.to_rgb32f(),
+            None => {
+                let made = run(&plain_input, session, plan, &|p| on_progress(p * 0.5))?;
+                CACHE.store(
+                    crate::ai::base_cache::Job {
+                        key: plain_key,
+                        source,
+                        fingerprint: crate::ai::base_cache::base_fingerprints(base)[0],
+                    },
+                    made.clone(),
+                );
+                made
+            }
+        };
+        let scale = size.0 / base.width().max(1);
+        refresh_changed(
+            plain,
+            &plain_input,
+            &content_input,
+            &|piece, progress| run(piece, session, plan, progress),
+            scale,
+            &|p| on_progress(0.5 + p * 0.5),
+        )
+    })();
+    CONTENT_PENDING.lock().unwrap().retain(|p| p != path);
+    result
+}
+
 fn upscaled_size(plan: Plan, (w, h): (u32, u32)) -> (u32, u32) {
     if plan.keep_size {
         (w, h)
@@ -415,61 +618,82 @@ fn inputs(adjustments: &serde_json::Value) -> Vec<Option<DenoiseMethod>> {
     }
 }
 
+/// The picture through the upscaler (enlarged, or Superfocus), and whether the steps that belong before
+/// it (negative conversion, skin renewal, brushed repairs) are already in it. While the result with this
+/// set of repairs is being made, the one without them is given and the repairs go on top as before.
 pub fn apply_ai_upscale<'a>(
     base: &DynamicImage,
     image: Cow<'a, DynamicImage>,
     path: &str,
     adjustments: &serde_json::Value,
-) -> Cow<'a, DynamicImage> {
+) -> (Cow<'a, DynamicImage>, bool) {
     if !is_enabled(adjustments) {
-        return image;
+        return (image, false);
     }
     let (w, h) = base.dimensions();
     if image.dimensions() != (w, h) {
-        return image;
+        return (image, false);
     }
     let source = source_string(path);
     let plan = plan(adjustments, (w, h));
     let size = upscaled_size(plan, (w, h));
-    let load = |input| {
-        CACHE
-            .load(&key(path, input, plan), &source)
-            .filter(|entry| (entry.width, entry.height) == size)
-    };
-
     let strength = crate::ai::denoise::blend_strength(adjustments);
-    let upscaled = match denoise_input(adjustments).filter(|_| strength.0 > 0.0) {
-        None => load(None).map(|entry| entry.to_rgb32f()),
-        Some(method) => load(Some(method)).and_then(|denoised| {
-            if strength.0 >= 1.0 && strength.1 <= 0.0 {
-                return Some(denoised.to_rgb32f());
-            }
-            let mut out = load(None)?.to_rgb32f();
-            crate::ai::denoise::blend_into(&mut out, &denoised.data, strength);
-            Some(out)
-        }),
+    let pick = |tag: Option<u64>| {
+        let load = |input| {
+            CACHE
+                .load(&content_key(path, input, plan, tag), &source)
+                .filter(|entry| (entry.width, entry.height) == size)
+        };
+        match denoise_input(adjustments).filter(|_| strength.0 > 0.0) {
+            None => load(None).map(|entry| entry.to_rgb32f()),
+            Some(method) => load(Some(method)).and_then(|denoised| {
+                if strength.0 >= 1.0 && strength.1 <= 0.0 {
+                    return Some(denoised.to_rgb32f());
+                }
+                let mut out = load(None)?.to_rgb32f();
+                crate::ai::denoise::blend_into(&mut out, &denoised.data, strength);
+                Some(out)
+            }),
+        }
+    };
+    let tag = content_tag(adjustments);
+    let (upscaled, content_done) = match tag.and_then(|tag| pick(Some(tag))) {
+        Some(out) => (Some(out), tag.is_some()),
+        None => (pick(None), false),
     };
     let Some(mut out) = upscaled else {
-        return image;
+        return (image, false);
+    };
+    // what the result is compared with or blended with is the picture it was made from
+    let source_image = if content_done {
+        match crate::decode::image_loader::apply_content_steps(image, (w, h), path, adjustments) {
+            Ok(made) => made,
+            Err(e) => {
+                log::warn!("The repairs could not be laid on the picture: {e}");
+                return (Cow::Owned(DynamicImage::ImageRgb32F(out)), true);
+            }
+        }
+    } else {
+        image
     };
     if plan.keep_size {
         let amount = superfocus_amount(adjustments);
         if amount < 1.0 {
-            let before = image.to_rgb32f();
+            let before = source_image.to_rgb32f();
             out.par_iter_mut()
                 .zip(before.as_raw().par_iter())
                 .for_each(|(v, &b)| *v = b + (*v - b) * amount);
         }
-        return Cow::Owned(DynamicImage::ImageRgb32F(out));
+        return (Cow::Owned(DynamicImage::ImageRgb32F(out)), content_done);
     }
     let amount = detail_amount(adjustments);
     if amount > 0.0 {
-        match image.as_rgb32f() {
+        match source_image.as_rgb32f() {
             Some(source) => enhance_detail(&mut out, source, amount),
-            None => enhance_detail(&mut out, &image.to_rgb32f(), amount),
+            None => enhance_detail(&mut out, &source_image.to_rgb32f(), amount),
         }
     }
-    Cow::Owned(DynamicImage::ImageRgb32F(out))
+    (Cow::Owned(DynamicImage::ImageRgb32F(out)), content_done)
 }
 
 fn input_for(
@@ -613,11 +837,12 @@ pub fn ensure_generated(
     }
     let path = loaded_image.path.clone();
     let plan = plan(adjustments, loaded_image.image.dimensions());
+    let tag = content_tag(adjustments);
     for input in inputs(adjustments) {
         if waiting_for_denoise(&path, input) {
             continue;
         }
-        let key = key(&path, input, plan);
+        let key = content_key(&path, input, plan, tag);
         if CACHE.is_pending(&key) {
             return;
         }
@@ -625,6 +850,7 @@ pub fn ensure_generated(
             continue;
         };
         let path = path.clone();
+        let adjustments = adjustments.clone();
         CACHE.spawn(
             app_handle,
             loaded_image,
@@ -632,7 +858,16 @@ pub fn ensure_generated(
             false,
             load_session(app_handle.clone(), plan.factor),
             move |session, base, progress| {
-                run(&input_for(base, &path, input)?, &session, plan, progress)
+                run_with_content(
+                    base,
+                    &path,
+                    input,
+                    plan,
+                    tag,
+                    &adjustments,
+                    &session,
+                    progress,
+                )
             },
         );
         return;
@@ -658,14 +893,18 @@ pub fn has_cached_entry(path: &str, adjustments: &serde_json::Value) -> bool {
             keep_size: false,
         }]
     };
+    let tag = content_tag(adjustments);
     plans.into_iter().any(|plan| {
         inputs(adjustments)
             .into_iter()
-            .all(|input| CACHE.has_entry(&key(path, input, plan), &source))
+            .all(|input| CACHE.has_entry(&content_key(path, input, plan, tag), &source))
     })
 }
 
 pub fn is_generating(path: &str) -> bool {
+    if CONTENT_PENDING.lock().unwrap().iter().any(|p| p == path) {
+        return true;
+    }
     std::iter::once(None)
         .chain(DenoiseMethod::ALL.into_iter().map(Some))
         .any(|input| {
@@ -684,6 +923,7 @@ pub fn generate_for_base(
     adjustments: &serde_json::Value,
 ) -> Result<bool, String> {
     let plan = plan(adjustments, base.dimensions());
+    let tag = content_tag(adjustments);
     for input in inputs(adjustments) {
         if waiting_for_denoise(path, input) {
             return if crate::ai::denoise::is_generating(path) {
@@ -696,9 +936,20 @@ pub fn generate_for_base(
             app_handle,
             path,
             base,
-            key(path, input, plan),
+            content_key(path, input, plan, tag),
             load_session(app_handle.clone(), plan.factor),
-            |session, base, progress| run(&input_for(base, path, input)?, &session, plan, progress),
+            |session, base, progress| {
+                run_with_content(
+                    base,
+                    path,
+                    input,
+                    plan,
+                    tag,
+                    adjustments,
+                    &session,
+                    progress,
+                )
+            },
         )?;
         if !generated {
             return Ok(false);
@@ -753,6 +1004,46 @@ mod tests {
                 assert!(((a - b) - (c - d)).abs() < 0.04, "seam at row {edge}");
             }
         }
+    }
+
+    // A repair changes a small area: redoing only the blocks it touches must give what upscaling the
+    // whole repaired picture gives, with an "upscaler" that looks at each pixel's neighbours.
+    #[test]
+    fn a_repair_redoes_only_its_own_area() {
+        let before = picture(500, 330);
+        let mut after = before.clone();
+        for y in 140..170 {
+            for x in 300..340 {
+                after.put_pixel(x, y, image::Rgb([0.9, 0.1, 0.2]));
+            }
+        }
+        // each output pixel from a 3x3 neighbourhood, so the border of a piece would show if done wrong
+        let enlarge = |piece: &Rgb32FImage, _: &(dyn Fn(f32) + Sync)| {
+            let blurred = imageops::blur(piece, 1.0);
+            Ok(imageops::resize(
+                &blurred,
+                piece.width() * 2,
+                piece.height() * 2,
+                FilterType::Nearest,
+            ))
+        };
+        let whole_before = enlarge(&before, &|_| {}).unwrap();
+        let whole_after = enlarge(&after, &|_| {}).unwrap();
+        let calls = std::sync::atomic::AtomicUsize::new(0);
+        let counted = |piece: &Rgb32FImage, p: &(dyn Fn(f32) + Sync)| {
+            calls.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            enlarge(piece, p)
+        };
+        let out = refresh_changed(whole_before, &before, &after, &counted, 2, &|_| {}).unwrap();
+        let worst = out
+            .as_raw()
+            .iter()
+            .zip(whole_after.as_raw())
+            .map(|(a, b)| (a - b).abs())
+            .fold(0.0, f32::max);
+        assert!(worst < 0.02, "the repaired upscale differs by {worst}");
+        // one row of blocks around the repair, not the picture
+        assert!(calls.load(std::sync::atomic::Ordering::Relaxed) <= 3);
     }
 
     #[test]

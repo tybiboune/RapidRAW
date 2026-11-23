@@ -100,15 +100,29 @@ pub fn prepare_base_image_cow<'a>(
     path: &str,
     adjustments: &Value,
 ) -> Result<Cow<'a, DynamicImage>> {
-    let has_patches = adjustments
-        .get("aiPatches")
-        .and_then(|v| v.as_array())
-        .is_some_and(|a| !a.is_empty());
-
+    // The order is fixed, whenever each tool was switched on: the developed picture, its denoise, then
+    // what the picture is made of (negative conversion, skin renewal, brushed repairs), and the upscaler
+    // or Superfocus after all of those, as a retoucher repairs first and resizes and sharpens last.
     let denoised = crate::ai::denoise::apply_ai_denoise(base_image, path, adjustments);
-    let upscaled = crate::ai::upscale::apply_ai_upscale(base_image, denoised, path, adjustments);
+    let (upscaled, content_done) =
+        crate::ai::upscale::apply_ai_upscale(base_image, denoised, path, adjustments);
+    if content_done {
+        return Ok(upscaled);
+    }
+    // no upscaler, or its result with these repairs is still being made: they go on as they are
+    apply_content_steps(upscaled, base_image.dimensions(), path, adjustments)
+}
+
+/// What the picture is made of before it is upscaled: the negative turned positive, the skin renewed,
+/// and the brushed repairs on top, in that order. `canon` is the developed picture's size.
+pub(crate) fn apply_content_steps<'a>(
+    image: Cow<'a, DynamicImage>,
+    canon: (u32, u32),
+    path: &str,
+    adjustments: &Value,
+) -> Result<Cow<'a, DynamicImage>> {
     let converted =
-        crate::adjustments::negative_conversion::apply_negative_conversion(upscaled, adjustments);
+        crate::adjustments::negative_conversion::apply_negative_conversion(image, adjustments);
     // the skin renewed, before the brushed repairs go on top of it
     let source_path = crate::library::sidecars::parse_virtual_path(path).0;
     let renewed = crate::effects::renewal::apply(
@@ -118,9 +132,35 @@ pub fn prepare_base_image_cow<'a>(
         adjustments,
     );
     match renewed {
-        Cow::Owned(prepared) if !has_patches => Ok(Cow::Owned(prepared)),
-        prepared => composite_patches_cow(prepared, base_image.dimensions(), path, adjustments),
+        Cow::Owned(prepared) if !has_patches(adjustments) => Ok(Cow::Owned(prepared)),
+        prepared => composite_patches_cow(prepared, canon, path, adjustments),
     }
+}
+
+fn has_patches(adjustments: &Value) -> bool {
+    adjustments
+        .get("aiPatches")
+        .and_then(|v| v.as_array())
+        .is_some_and(|a| !a.is_empty())
+}
+
+/// Whether any of the steps before the upscaler would change the picture. A repair still being made,
+/// or hidden, changes nothing yet.
+pub(crate) fn has_content_steps(adjustments: &Value) -> bool {
+    let shown_repair = adjustments
+        .get("aiPatches")
+        .and_then(|v| v.as_array())
+        .into_iter()
+        .flatten()
+        .any(|patch| {
+            patch["visible"].as_bool().unwrap_or(true)
+                && patch["patchData"]["color"]
+                    .as_str()
+                    .is_some_and(|c| !c.is_empty())
+        });
+    crate::adjustments::negative_conversion::is_enabled(adjustments)
+        || crate::effects::renewal::is_enabled(adjustments)
+        || shown_repair
 }
 
 pub fn load_base_image_from_bytes(
