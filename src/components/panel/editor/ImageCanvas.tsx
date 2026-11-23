@@ -1838,7 +1838,10 @@ const ImageCanvas = memo(
       isAiEditing && (activeSubMask?.type === Mask.Clone || activeSubMask?.type === Mask.Heal);
 
     const isLiquifyActive = isAiEditing && activeSubMask?.type === Mask.Liquify;
-    const isRetouchActive = isAiEditing && (activeSubMask?.type === Mask.Retouch || isRepairTool(activeSubMask?.type));
+    // redrawn while the pointer moves: Retouch is quick enough for that. The repairs (Restore Face,
+    // Deblur, Dust Spots, Power Lines) run a network or a search over the whole stroke, so they run once,
+    // when the stroke ends: run on the first pixels of a stroke, each was done twice.
+    const isRetouchActive = isAiEditing && activeSubMask?.type === Mask.Retouch;
 
     const isDirectPatchActive =
       (isMasking || isAiEditing) &&
