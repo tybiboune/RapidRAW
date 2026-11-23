@@ -188,6 +188,12 @@
       "sharpening": "선명도 향상",
       "sharpness": "선명도",
       "structure": "구조",
+      "superfocus": "슈퍼포커스",
+      "superfocusAmount": "강도",
+      "superfocusNote": "사진을 확대한 뒤 원래 크기로 되돌립니다. 픽셀 수는 같고 디테일은 더 섬세하며 윤곽은 더 선명해집니다.",
+      "superfocusRapidRes": "RapidRes ×2",
+      "superfocusRealPlksr": "RealPLKSR ×4",
+      "superfocusWorking": "디테일 다듬는 중",
       "superResolution": "RapidRes",
       "threshold": "임계값"
     },
@@ -1689,6 +1695,7 @@
         "relight": "리라이트",
         "sharpness": "선명도",
         "skin": "Skin",
+        "superfocus": "슈퍼포커스",
         "transformRotation": "변형 및 회전",
         "vignette": "비네트",
         "whiteBalance": "화이트 밸런스"

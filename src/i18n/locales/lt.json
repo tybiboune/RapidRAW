@@ -188,6 +188,12 @@
       "sharpening": "Ryškinimas",
       "sharpness": "Ryškumas",
       "structure": "Struktūra",
+      "superfocus": "Superfocus",
+      "superfocusAmount": "Stiprumas",
+      "superfocusNote": "Padidina nuotrauką ir grąžina ją į pradinį dydį: smulkesnės detalės ir ryškesni kraštai, tiek pat pikselių.",
+      "superfocusRapidRes": "RapidRes ×2",
+      "superfocusRealPlksr": "RealPLKSR ×4",
+      "superfocusWorking": "Tikslinamos detalės",
       "superResolution": "RapidRes",
       "threshold": "Slenkstis"
     },
@@ -1802,6 +1808,7 @@
         "relight": "Apšvietimo keitimas",
         "sharpness": "Ryškumas",
         "skin": "Skin",
+        "superfocus": "Superfocus",
         "transformRotation": "Transformacija ir pasukimas",
         "vignette": "Vinjetė",
         "whiteBalance": "Baltos spalvos balansas"

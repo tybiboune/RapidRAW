@@ -235,6 +235,7 @@ pub fn has_ai_results(adjustments: &Value) -> bool {
     ai_sub_masks(adjustments).next().is_some()
         || adjustments["aiDenoiseEnabled"].as_bool().unwrap_or(false)
         || adjustments["aiUpscaleEnabled"].as_bool().unwrap_or(false)
+        || adjustments["superfocusEnabled"].as_bool().unwrap_or(false)
         || EffectMapKind::ALL
             .iter()
             .flat_map(|map| map.uses())

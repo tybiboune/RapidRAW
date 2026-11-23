@@ -109,7 +109,18 @@ fn hash_ai_denoise(adjustments: &serde_json::Value, hasher: &mut DefaultHasher) 
     let upscale = crate::ai::upscale::is_enabled(adjustments);
     upscale.hash(hasher);
     if upscale {
-        hash_effect_keys(adjustments, &["aiUpscaleDetail", "aiUpscaleFactor"], hasher);
+        hash_effect_keys(
+            adjustments,
+            &[
+                "aiUpscaleEnabled",
+                "aiUpscaleDetail",
+                "aiUpscaleFactor",
+                "superfocusEnabled",
+                "superfocusUpscaler",
+                "superfocusAmount",
+            ],
+            hasher,
+        );
         crate::ai::upscale::cache_epoch().hash(hasher);
     }
     // the skin renewal changes the picture itself, so it belongs with what the picture is made from

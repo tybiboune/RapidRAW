@@ -188,6 +188,12 @@
       "sharpening": "シャープ",
       "sharpness": "シャープネス",
       "structure": "構造",
+      "superfocus": "スーパーフォーカス",
+      "superfocusAmount": "適用量",
+      "superfocusNote": "写真を拡大してから元のサイズに戻します。画素数はそのままで、より細かいディテールとシャープな輪郭になります。",
+      "superfocusRapidRes": "RapidRes ×2",
+      "superfocusRealPlksr": "RealPLKSR ×4",
+      "superfocusWorking": "ディテールを補正中",
       "superResolution": "RapidRes",
       "threshold": "しきい値"
     },
@@ -1689,6 +1695,7 @@
         "relight": "リライト",
         "sharpness": "シャープネス",
         "skin": "Skin",
+        "superfocus": "スーパーフォーカス",
         "transformRotation": "変形と回転",
         "vignette": "周辺光量補正",
         "whiteBalance": "ホワイトバランス"

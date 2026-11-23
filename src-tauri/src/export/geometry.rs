@@ -513,9 +513,6 @@ pub fn apply_export_geometry_and_watermark(
 }
 
 pub fn upscale_factor(adjustments: &Value) -> u32 {
-    if crate::ai::upscale::is_enabled(adjustments) {
-        crate::ai::upscale::requested_factor(adjustments)
-    } else {
-        1
-    }
+    // Superfocus goes through the upscaler and keeps the picture's size
+    crate::ai::upscale::output_factor(adjustments)
 }

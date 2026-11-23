@@ -188,6 +188,12 @@
       "sharpening": "Verscherping",
       "sharpness": "Scherpte",
       "structure": "Structuur",
+      "superfocus": "Superfocus",
+      "superfocusAmount": "Sterkte",
+      "superfocusNote": "Vergroot de foto en brengt hem terug naar zijn eigen formaat: fijnere details en scherpere randen, evenveel pixels.",
+      "superfocusRapidRes": "RapidRes ×2",
+      "superfocusRealPlksr": "RealPLKSR ×4",
+      "superfocusWorking": "Details verfijnen",
       "superResolution": "RapidRes",
       "threshold": "Drempelwaarde"
     },
@@ -1689,6 +1695,7 @@
         "relight": "Herbelichten",
         "sharpness": "Scherpte",
         "skin": "Skin",
+        "superfocus": "Superfocus",
         "transformRotation": "Transformeren & rotatie",
         "vignette": "Vignet",
         "whiteBalance": "Witbalans"

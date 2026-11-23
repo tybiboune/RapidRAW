@@ -2,6 +2,7 @@ use crate::ai::base_cache::{BaseCache, entry_key, source_string};
 use crate::ai::denoise::DenoiseMethod;
 use crate::app::state::{AppState, LoadedImage};
 use crate::render::adjustment_utils::is_effect_enabled;
+use image::imageops::{self, FilterType};
 use image::{DynamicImage, GenericImageView, Rgb32FImage};
 use rayon::prelude::*;
 use std::borrow::Cow;
@@ -15,6 +16,12 @@ const MODEL_TAG_4X: &str = "upscale4-realplksr-v1";
 /// The longest side an upscaled picture may have: the render works on GPU textures, which most cards cap
 /// at this many pixels. A picture that would come out larger is upscaled two times instead of four.
 const MAX_OUTPUT_SIDE: u32 = 16384;
+const SUPERFOCUS_TAG: &str = "-superfocus-v1";
+/// Superfocus upscales the picture this many rows at a time, with this much of the picture either side
+/// for the network to see, and brings each band straight back down: a 24 MP picture four times larger
+/// would be about 5 GB whole.
+const SUPERFOCUS_BAND: u32 = 256;
+const SUPERFOCUS_MARGIN: u32 = 16;
 const GAMMA: f32 = 2.2;
 const DETAIL_GAIN: f32 = 1.5;
 const DETAIL_NOISE_FLOOR: f32 = 2.0;
@@ -45,8 +52,62 @@ pub fn cache_epoch() -> u64 {
     CACHE.epoch()
 }
 
+/// Whether the picture goes through an upscaler at all: to be made larger, or for Superfocus.
 pub fn is_enabled(adjustments: &serde_json::Value) -> bool {
+    enlarges(adjustments) || superfocus(adjustments)
+}
+
+fn enlarges(adjustments: &serde_json::Value) -> bool {
     is_effect_enabled(adjustments, "superResolution", "aiUpscaleEnabled")
+}
+
+/// Superfocus: the picture is upscaled and brought straight back down to its own size, so the detail
+/// the network draws is kept and the size is not. A picture also asked to be made larger is made
+/// larger instead, which already carries that detail.
+fn superfocus(adjustments: &serde_json::Value) -> bool {
+    !enlarges(adjustments) && is_effect_enabled(adjustments, "superfocus", "superfocusEnabled")
+}
+
+fn superfocus_amount(adjustments: &serde_json::Value) -> f32 {
+    (adjustments["superfocusAmount"].as_f64().unwrap_or(100.0) as f32 / 100.0).clamp(0.0, 1.0)
+}
+
+/// How many times larger the picture comes out: one for Superfocus, which keeps its size.
+pub fn output_factor(adjustments: &serde_json::Value) -> u32 {
+    if enlarges(adjustments) {
+        requested_factor(adjustments)
+    } else {
+        1
+    }
+}
+
+/// What the upscaler is asked for: the factor it runs at, and whether the result is brought back down
+/// to the picture's own size (Superfocus).
+#[derive(Clone, Copy)]
+struct Plan {
+    factor: u32,
+    keep_size: bool,
+}
+
+fn plan(adjustments: &serde_json::Value, size: (u32, u32)) -> Plan {
+    if superfocus(adjustments) {
+        // brought back down band by band, so no larger picture is ever whole and the card's texture
+        // limit does not apply: the network asked for is the one that runs
+        let factor = if adjustments["superfocusUpscaler"].as_u64() == Some(4) {
+            4
+        } else {
+            2
+        };
+        Plan {
+            factor,
+            keep_size: true,
+        }
+    } else {
+        Plan {
+            factor: factor(adjustments, size),
+            keep_size: false,
+        }
+    }
 }
 
 fn denoise_input(adjustments: &serde_json::Value) -> Option<DenoiseMethod> {
@@ -73,10 +134,24 @@ pub fn factor(adjustments: &serde_json::Value, (w, h): (u32, u32)) -> u32 {
     }
 }
 
-fn key(path: &str, denoise: Option<DenoiseMethod>, factor: u32) -> String {
+fn key(path: &str, denoise: Option<DenoiseMethod>, plan: Plan) -> String {
     let input = denoise.map_or("none", DenoiseMethod::tag);
-    let model = if factor == 4 { MODEL_TAG_4X } else { MODEL_TAG };
-    entry_key(&source_string(path), &format!("{model}+{input}"))
+    let model = if plan.factor == 4 {
+        MODEL_TAG_4X
+    } else {
+        MODEL_TAG
+    };
+    // a Superfocus result is the picture at its own size, so it is kept apart from the enlarged one
+    let kind = if plan.keep_size { SUPERFOCUS_TAG } else { "" };
+    entry_key(&source_string(path), &format!("{model}{kind}+{input}"))
+}
+
+fn upscaled_size(plan: Plan, (w, h): (u32, u32)) -> (u32, u32) {
+    if plan.keep_size {
+        (w, h)
+    } else {
+        (w * plan.factor, h * plan.factor)
+    }
 }
 
 pub fn scale_between(base: &DynamicImage, prepared: &DynamicImage) -> f32 {
@@ -354,11 +429,12 @@ pub fn apply_ai_upscale<'a>(
         return image;
     }
     let source = source_string(path);
-    let factor = factor(adjustments, (w, h));
+    let plan = plan(adjustments, (w, h));
+    let size = upscaled_size(plan, (w, h));
     let load = |input| {
         CACHE
-            .load(&key(path, input, factor), &source)
-            .filter(|entry| (entry.width, entry.height) == (w * factor, h * factor))
+            .load(&key(path, input, plan), &source)
+            .filter(|entry| (entry.width, entry.height) == size)
     };
 
     let strength = crate::ai::denoise::blend_strength(adjustments);
@@ -376,6 +452,16 @@ pub fn apply_ai_upscale<'a>(
     let Some(mut out) = upscaled else {
         return image;
     };
+    if plan.keep_size {
+        let amount = superfocus_amount(adjustments);
+        if amount < 1.0 {
+            let before = image.to_rgb32f();
+            out.par_iter_mut()
+                .zip(before.as_raw().par_iter())
+                .for_each(|(v, &b)| *v = b + (*v - b) * amount);
+        }
+        return Cow::Owned(DynamicImage::ImageRgb32F(out));
+    }
     let amount = detail_amount(adjustments);
     if amount > 0.0 {
         match image.as_rgb32f() {
@@ -441,6 +527,67 @@ fn run_upscaler(
     Ok(output)
 }
 
+/// Superfocus: the picture upscaled by `factor` a band at a time, each band brought back down to its own
+/// size with a Lanczos filter in linear light, so what is left is the network's finer detail and edges
+/// at the picture's own size.
+fn run_superfocus(
+    input: &Rgb32FImage,
+    session: &Session,
+    factor: u32,
+    on_progress: &(dyn Fn(f32) + Sync),
+) -> Result<Rgb32FImage, String> {
+    superfocus_bands(input, on_progress, &|piece, progress| {
+        run_upscaler(piece, session, factor, progress)
+    })
+}
+
+type Upscale<'a> = dyn Fn(&Rgb32FImage, &(dyn Fn(f32) + Sync)) -> Result<Rgb32FImage, String> + 'a;
+
+fn superfocus_bands(
+    input: &Rgb32FImage,
+    on_progress: &(dyn Fn(f32) + Sync),
+    upscale: &Upscale,
+) -> Result<Rgb32FImage, String> {
+    let (w, h) = input.dimensions();
+    let mut out = Rgb32FImage::new(w, h);
+    let bands = h.div_ceil(SUPERFOCUS_BAND).max(1);
+    for band in 0..bands {
+        let (y0, y1) = (
+            band * SUPERFOCUS_BAND,
+            ((band + 1) * SUPERFOCUS_BAND).min(h),
+        );
+        // the network sees a little either side, so a band's edges are drawn as the middle is
+        let (top, bottom) = (
+            y0.saturating_sub(SUPERFOCUS_MARGIN),
+            (y1 + SUPERFOCUS_MARGIN).min(h),
+        );
+        let piece = imageops::crop_imm(input, 0, top, w, bottom - top).to_image();
+        let done = band as f32;
+        let up = upscale(&piece, &|p: f32| on_progress((done + p) / bands as f32))?;
+        let down = imageops::resize(&up, w, bottom - top, FilterType::Lanczos3);
+        drop(up);
+        let row = w as usize * 3;
+        let from = &down.as_raw()[(y0 - top) as usize * row..(y1 - top) as usize * row];
+        let dst: &mut [f32] = &mut out;
+        dst[y0 as usize * row..y1 as usize * row].copy_from_slice(from);
+    }
+    on_progress(1.0);
+    Ok(out)
+}
+
+fn run(
+    input: &Rgb32FImage,
+    session: &Session,
+    plan: Plan,
+    on_progress: &(dyn Fn(f32) + Sync),
+) -> Result<Rgb32FImage, String> {
+    if plan.keep_size {
+        run_superfocus(input, session, plan.factor, on_progress)
+    } else {
+        run_upscaler(input, session, plan.factor, on_progress)
+    }
+}
+
 async fn load_session(app_handle: tauri::AppHandle, factor: u32) -> Result<Session, String> {
     let state = app_handle.state::<AppState>();
     let (ai_state, lock) = (&state.ai_state, &state.ai_init_lock);
@@ -465,12 +612,12 @@ pub fn ensure_generated(
         return;
     }
     let path = loaded_image.path.clone();
-    let factor = factor(adjustments, loaded_image.image.dimensions());
+    let plan = plan(adjustments, loaded_image.image.dimensions());
     for input in inputs(adjustments) {
         if waiting_for_denoise(&path, input) {
             continue;
         }
-        let key = key(&path, input, factor);
+        let key = key(&path, input, plan);
         if CACHE.is_pending(&key) {
             return;
         }
@@ -483,9 +630,9 @@ pub fn ensure_generated(
             loaded_image,
             job,
             false,
-            load_session(app_handle.clone(), factor),
+            load_session(app_handle.clone(), plan.factor),
             move |session, base, progress| {
-                run_upscaler(&input_for(base, &path, input)?, &session, factor, progress)
+                run(&input_for(base, &path, input)?, &session, plan, progress)
             },
         );
         return;
@@ -493,18 +640,28 @@ pub fn ensure_generated(
 }
 
 // The size is not known here, so a picture asked to go four times is taken as done when either factor
-// is there: one too big for four is only ever made at two.
+// is there: one too big for four is only ever made at two. Superfocus always runs the network asked for.
 pub fn has_cached_entry(path: &str, adjustments: &serde_json::Value) -> bool {
     let source = source_string(path);
-    let factors: &[u32] = if requested_factor(adjustments) == 4 {
-        &[4, 2]
+    let plans: Vec<Plan> = if superfocus(adjustments) {
+        vec![plan(adjustments, (0, 0))]
+    } else if requested_factor(adjustments) == 4 {
+        [4, 2]
+            .map(|factor| Plan {
+                factor,
+                keep_size: false,
+            })
+            .to_vec()
     } else {
-        &[2]
+        vec![Plan {
+            factor: 2,
+            keep_size: false,
+        }]
     };
-    factors.iter().any(|&factor| {
+    plans.into_iter().any(|plan| {
         inputs(adjustments)
             .into_iter()
-            .all(|input| CACHE.has_entry(&key(path, input, factor), &source))
+            .all(|input| CACHE.has_entry(&key(path, input, plan), &source))
     })
 }
 
@@ -512,9 +669,11 @@ pub fn is_generating(path: &str) -> bool {
     std::iter::once(None)
         .chain(DenoiseMethod::ALL.into_iter().map(Some))
         .any(|input| {
-            [2, 4]
-                .iter()
-                .any(|&f| CACHE.is_pending(&key(path, input, f)))
+            [2, 4].iter().any(|&factor| {
+                [false, true].iter().any(|&keep_size| {
+                    CACHE.is_pending(&key(path, input, Plan { factor, keep_size }))
+                })
+            })
         })
 }
 
@@ -524,7 +683,7 @@ pub fn generate_for_base(
     base: &DynamicImage,
     adjustments: &serde_json::Value,
 ) -> Result<bool, String> {
-    let factor = factor(adjustments, base.dimensions());
+    let plan = plan(adjustments, base.dimensions());
     for input in inputs(adjustments) {
         if waiting_for_denoise(path, input) {
             return if crate::ai::denoise::is_generating(path) {
@@ -537,11 +696,9 @@ pub fn generate_for_base(
             app_handle,
             path,
             base,
-            key(path, input, factor),
-            load_session(app_handle.clone(), factor),
-            |session, base, progress| {
-                run_upscaler(&input_for(base, path, input)?, &session, factor, progress)
-            },
+            key(path, input, plan),
+            load_session(app_handle.clone(), plan.factor),
+            |session, base, progress| run(&input_for(base, path, input)?, &session, plan, progress),
         )?;
         if !generated {
             return Ok(false);
@@ -553,4 +710,75 @@ pub fn generate_for_base(
 #[tauri::command]
 pub fn clear_ai_upscale_cache() -> Result<(), String> {
     CACHE.clear()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    fn picture(w: u32, h: u32) -> Rgb32FImage {
+        Rgb32FImage::from_fn(w, h, |x, y| {
+            let v = 0.5 + 0.3 * ((x as f32 * 0.37).sin() * (y as f32 * 0.23).cos());
+            image::Rgb([v, v * 0.8, v * 0.6])
+        })
+    }
+
+    // An "upscaler" that only enlarges, standing in for the network: brought back down, the picture
+    // has to come out as it went in, with nothing to see where one band meets the next.
+    #[test]
+    fn superfocus_bands_meet_without_a_seam() {
+        let input = picture(97, 3 * SUPERFOCUS_BAND + 41);
+        let enlarge = |piece: &Rgb32FImage, _: &(dyn Fn(f32) + Sync)| {
+            Ok(imageops::resize(
+                piece,
+                piece.width() * 4,
+                piece.height() * 4,
+                FilterType::Triangle,
+            ))
+        };
+        let out = superfocus_bands(&input, &|_| {}, &enlarge).unwrap();
+        assert_eq!(out.dimensions(), input.dimensions());
+        let worst = out
+            .as_raw()
+            .iter()
+            .zip(input.as_raw())
+            .map(|(a, b)| (a - b).abs())
+            .fold(0.0, f32::max);
+        assert!(worst < 0.04, "the picture changed by {worst}");
+        for edge in (1..4).map(|b| b * SUPERFOCUS_BAND) {
+            for x in 0..input.width() {
+                let (a, b) = (out.get_pixel(x, edge - 1)[0], out.get_pixel(x, edge)[0]);
+                let (c, d) = (input.get_pixel(x, edge - 1)[0], input.get_pixel(x, edge)[0]);
+                assert!(((a - b) - (c - d)).abs() < 0.04, "seam at row {edge}");
+            }
+        }
+    }
+
+    #[test]
+    fn superfocus_keeps_the_size_and_runs_the_chosen_network() {
+        let on = json!({ "superfocusEnabled": true, "superfocusUpscaler": 4 });
+        assert!(is_enabled(&on));
+        assert_eq!(output_factor(&on), 1);
+        let p = plan(&on, (6048, 4032));
+        // four times even where a four-times enlargement would not fit on the card
+        assert!(p.keep_size && p.factor == 4);
+        assert_eq!(upscaled_size(p, (6048, 4032)), (6048, 4032));
+
+        let builtin = json!({ "superfocusEnabled": true, "superfocusUpscaler": 2 });
+        assert_eq!(plan(&builtin, (100, 100)).factor, 2);
+
+        // asked to be made larger as well, the picture is made larger: that already has the detail
+        let both =
+            json!({ "superfocusEnabled": true, "aiUpscaleEnabled": true, "aiUpscaleFactor": 2 });
+        assert_eq!(output_factor(&both), 2);
+        assert!(!plan(&both, (100, 100)).keep_size);
+
+        // its results are kept apart from the enlarged ones
+        let enlarged = Plan {
+            factor: 4,
+            keep_size: false,
+        };
+        assert_ne!(key("a.nef", None, p), key("a.nef", None, enlarged));
+    }
 }

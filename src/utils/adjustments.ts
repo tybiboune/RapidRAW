@@ -91,6 +91,9 @@ export enum DetailsAdjustment {
   AiUpscaleDetail = 'aiUpscaleDetail',
   AiUpscaleEnabled = 'aiUpscaleEnabled',
   AiUpscaleFactor = 'aiUpscaleFactor',
+  SuperfocusEnabled = 'superfocusEnabled',
+  SuperfocusUpscaler = 'superfocusUpscaler',
+  SuperfocusAmount = 'superfocusAmount',
   Clarity = 'clarity',
   Dehaze = 'dehaze',
   Structure = 'structure',
@@ -324,6 +327,9 @@ export interface Adjustments {
   aiUpscaleDetail: number;
   aiUpscaleEnabled: boolean;
   aiUpscaleFactor: number;
+  superfocusEnabled: boolean;
+  superfocusUpscaler: number;
+  superfocusAmount: number;
   aspectRatio: number | null;
   baselineExposure: boolean;
   blacks: number;
@@ -1046,6 +1052,14 @@ export const ADJUSTMENT_GROUPS: Record<string, AdjustmentGroup[]> = {
       keys: [DetailsAdjustment.AiUpscaleEnabled, DetailsAdjustment.AiUpscaleDetail, DetailsAdjustment.AiUpscaleFactor],
     },
     {
+      label: 'modals.copyPaste.groups.superfocus',
+      keys: [
+        DetailsAdjustment.SuperfocusEnabled,
+        DetailsAdjustment.SuperfocusUpscaler,
+        DetailsAdjustment.SuperfocusAmount,
+      ],
+    },
+    {
       label: 'modals.copyPaste.groups.chromaticAberration',
       keys: [DetailsAdjustment.ChromaticAberrationRedCyan, DetailsAdjustment.ChromaticAberrationBlueYellow],
     },
@@ -1281,6 +1295,9 @@ export const ADJUSTMENT_SECTIONS: Sections = {
     DetailsAdjustment.AiDenoiseDetail,
     DetailsAdjustment.AiUpscaleEnabled,
     DetailsAdjustment.AiUpscaleDetail,
+    DetailsAdjustment.SuperfocusEnabled,
+    DetailsAdjustment.SuperfocusUpscaler,
+    DetailsAdjustment.SuperfocusAmount,
     DetailsAdjustment.ChromaticAberrationRedCyan,
     DetailsAdjustment.ChromaticAberrationBlueYellow,
     DetailsAdjustment.NegativeConversionEnabled,
@@ -1462,6 +1479,7 @@ export const ADJUSTMENT_SECTION_TOOLS: Record<string, Array<AdjustmentSectionToo
     { id: 'presence', label: 'adjustments.details.presence' },
     { id: 'noiseReduction', label: 'adjustments.details.noiseReduction' },
     { id: 'superResolution', label: 'adjustments.details.superResolution' },
+    { id: 'superfocus', label: 'adjustments.details.superfocus' },
     { id: 'chromaticAberration', label: 'adjustments.details.chromaticAberration' },
     { id: 'negativeConversion', label: 'adjustments.details.negativeConversion' },
   ],

@@ -188,6 +188,12 @@
       "sharpening": "Doostření",
       "sharpness": "Ostrost",
       "structure": "Struktura",
+      "superfocus": "Superfocus",
+      "superfocusAmount": "Síla",
+      "superfocusNote": "Zvětší fotografii a vrátí ji na původní velikost: jemnější detaily a ostřejší hrany při stejném počtu pixelů.",
+      "superfocusRapidRes": "RapidRes ×2",
+      "superfocusRealPlksr": "RealPLKSR ×4",
+      "superfocusWorking": "Zjemňování detailů",
       "superResolution": "RapidRes",
       "threshold": "Práh"
     },
@@ -1763,6 +1769,7 @@
         "relight": "Přesvětlení",
         "sharpness": "Ostrost",
         "skin": "Skin",
+        "superfocus": "Superfocus",
         "transformRotation": "Transformace a rotace",
         "vignette": "Viněta",
         "whiteBalance": "Vyvážení bílé"

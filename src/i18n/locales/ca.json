@@ -188,6 +188,12 @@
       "sharpening": "Enfocament",
       "sharpness": "Nitidesa",
       "structure": "Estructura",
+      "superfocus": "Superfocus",
+      "superfocusAmount": "Intensitat",
+      "superfocusNote": "Amplia la foto i la torna a la seva mida: detalls més fins i contorns més nítids, amb els mateixos píxels.",
+      "superfocusRapidRes": "RapidRes ×2",
+      "superfocusRealPlksr": "RealPLKSR ×4",
+      "superfocusWorking": "Afinant detalls",
       "superResolution": "RapidRes",
       "threshold": "Llindar"
     },
@@ -1726,6 +1732,7 @@
         "relight": "Reil·luminació",
         "sharpness": "Nitidesa",
         "skin": "Skin",
+        "superfocus": "Superfocus",
         "transformRotation": "Transformació i Rotació",
         "vignette": "Vinyetatge",
         "whiteBalance": "Balanç de blancs"

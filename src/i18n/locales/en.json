@@ -188,6 +188,12 @@
       "sharpening": "Sharpening",
       "sharpness": "Sharpness",
       "structure": "Structure",
+      "superfocus": "Superfocus",
+      "superfocusAmount": "Amount",
+      "superfocusNote": "Upscales the photo, then brings it back to its own size: finer detail and crisper edges, same pixel count.",
+      "superfocusRapidRes": "RapidRes ×2",
+      "superfocusRealPlksr": "RealPLKSR ×4",
+      "superfocusWorking": "Refining detail",
       "superResolution": "RapidRes",
       "threshold": "Threshold"
     },
@@ -1689,6 +1695,7 @@
         "relight": "Relight",
         "sharpness": "Sharpness",
         "skin": "Skin",
+        "superfocus": "Superfocus",
         "transformRotation": "Transform & Rotation",
         "vignette": "Vignette",
         "whiteBalance": "White Balance"

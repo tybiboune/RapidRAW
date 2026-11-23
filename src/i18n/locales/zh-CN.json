@@ -188,6 +188,12 @@
       "sharpening": "锐化",
       "sharpness": "锐度",
       "structure": "结构",
+      "superfocus": "超级对焦",
+      "superfocusAmount": "强度",
+      "superfocusNote": "先放大照片再缩回原尺寸：像素数不变，细节更精细，边缘更清晰。",
+      "superfocusRapidRes": "RapidRes ×2",
+      "superfocusRealPlksr": "RealPLKSR ×4",
+      "superfocusWorking": "正在细化细节",
       "superResolution": "RapidRes",
       "threshold": "阈值"
     },
@@ -1689,6 +1695,7 @@
         "relight": "重新打光",
         "sharpness": "锐度",
         "skin": "Skin",
+        "superfocus": "超级对焦",
         "transformRotation": "变换与旋转",
         "vignette": "暗角",
         "whiteBalance": "白平衡"

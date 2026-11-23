@@ -188,6 +188,12 @@
       "sharpening": "Різкість",
       "sharpness": "Різкість",
       "structure": "Структура",
+      "superfocus": "Суперфокус",
+      "superfocusAmount": "Сила",
+      "superfocusNote": "Збільшує фото й повертає його до початкового розміру: тонші деталі та чіткіші краї за тієї ж кількості пікселів.",
+      "superfocusRapidRes": "RapidRes ×2",
+      "superfocusRealPlksr": "RealPLKSR ×4",
+      "superfocusWorking": "Уточнення деталей",
       "superResolution": "RapidRes",
       "threshold": "Поріг"
     },
@@ -1763,6 +1769,7 @@
         "relight": "Переосвітлення",
         "sharpness": "Різкість",
         "skin": "Skin",
+        "superfocus": "Суперфокус",
         "transformRotation": "Трансформація і поворот",
         "vignette": "Віньєтка",
         "whiteBalance": "Баланс білого"

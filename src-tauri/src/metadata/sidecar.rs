@@ -104,6 +104,7 @@ pub fn is_image_edited(
     if [
         ("noiseReduction", "aiDenoiseEnabled"),
         ("superResolution", "aiUpscaleEnabled"),
+        ("superfocus", "superfocusEnabled"),
         ("negativeConversion", "negativeConversionEnabled"),
         ("lensBlur", "lensBlurEnabled"),
         ("relight", "relightEnabled"),

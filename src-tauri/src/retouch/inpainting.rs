@@ -34,6 +34,7 @@ fn adjustments_without_patch(patch_id: &str, current_adjustments: &Value) -> Val
     }
     if let Some(obj) = adjustments.as_object_mut() {
         obj.insert("aiUpscaleEnabled".to_string(), Value::Bool(false));
+        obj.insert("superfocusEnabled".to_string(), Value::Bool(false));
     }
     adjustments
 }

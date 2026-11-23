@@ -188,6 +188,12 @@
       "sharpening": "Accentuation",
       "sharpness": "Netteté",
       "structure": "Structure",
+      "superfocus": "Superfocus",
+      "superfocusAmount": "Intensité",
+      "superfocusNote": "Agrandit la photo puis la ramène à sa taille : détails plus fins et contours plus nets, même nombre de pixels.",
+      "superfocusRapidRes": "RapidRes ×2",
+      "superfocusRealPlksr": "RealPLKSR ×4",
+      "superfocusWorking": "Affinage des détails",
       "superResolution": "RapidRes",
       "threshold": "Seuil"
     },
@@ -1727,6 +1733,7 @@
         "relight": "Rééclairage",
         "sharpness": "Netteté",
         "skin": "Skin",
+        "superfocus": "Superfocus",
         "transformRotation": "Transformation & Rotation",
         "vignette": "Vignettage",
         "whiteBalance": "Balance des blancs"

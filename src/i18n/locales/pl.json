@@ -188,6 +188,12 @@
       "sharpening": "Wyostrzanie",
       "sharpness": "Ostrość",
       "structure": "Struktura",
+      "superfocus": "Superfocus",
+      "superfocusAmount": "Siła",
+      "superfocusNote": "Powiększa zdjęcie i przywraca jego rozmiar: drobniejsze szczegóły i ostrzejsze krawędzie przy tej samej liczbie pikseli.",
+      "superfocusRapidRes": "RapidRes ×2",
+      "superfocusRealPlksr": "RealPLKSR ×4",
+      "superfocusWorking": "Dopracowywanie szczegółów",
       "superResolution": "RapidRes",
       "threshold": "Próg"
     },
@@ -1763,6 +1769,7 @@
         "relight": "Ponowne oświetlenie",
         "sharpness": "Ostrość",
         "skin": "Skin",
+        "superfocus": "Superfocus",
         "transformRotation": "Przekształcanie i Obrót",
         "vignette": "Winieta",
         "whiteBalance": "Balans bieli"
