@@ -47,14 +47,14 @@ a small face in a large picture and a large one are treated alike (every size is
 | Decision | How it is made automatically |
 |---|---|
 | **Median radius** | Five radii are tried (2 %, 3 %, 4.5 %, 7 % and 10 % of `F`). For each, two numbers are measured on the skin: *unevenness* (what is left of the skin's middle-sized variation) and *structure kept* (how much of the skin's real edges, from the strongest 15 % of gradients, survive). The radius chosen is the smallest that has taken out most of what the biggest takes out, among those that keep at least 60 % of the structure. This is "evened out, but the nose not blended" as a rule. In the portrait used to build it, 3 % of `F` (35 px on a 1167 px face). |
-| **Edge-keeping median** | Photoshop's median at 120 px is slow. The median is taken on a copy one eighth the size and brought back up along the edges of the full-size picture with a guided filter, which is what keeps edges "contained". |
+| **The median itself** | Photoshop's Median, done the same way: on each of red, green and blue, every pixel takes the middle value of the pixels within the radius (a round neighbourhood, the edge pixels repeated past the picture's border). It runs on the full-size picture with a sliding histogram (Huang's method), so a large radius costs a few times a small one rather than its square. The five candidate radii are compared on a copy whose face is at most about 1200 px wide; the chosen one is run at full size. |
 | **Pore grain** (the blur of 1.8) | The grain size is *measured*: the width at which the autocorrelation of the cleanest skin's finest detail falls to half is the grain of that face. The blur is 0.85 times that width, between 0.8 and 4 px. |
-| **Texture strength** (the 30 %) | The strength is the measured root-mean-square of that finest detail in the cleanest skin, so the new texture is as rough as the face's own good skin: not plastic, not rougher than it was. A slider (0.5 = as measured) moves it. |
-| **High-pass radius** | The same radius as the texture blur, as the tutorial's own rule says; and the detail is **soft-clipped** at 2.5 times its normal size, so that a blemish's or a hair's strong detail is not brought back as "texture". This is what the eye does when it stops before halos. |
+| **Texture strength** (the 30 %) | The noise layer's strength is the measured root-mean-square of that finest detail in the cleanest skin, so the new grain is as rough as the face's own good skin. It is laid on in **Overlay**, as in the video. The *Texture* slider (50 = as measured) moves it. |
+| **High-pass radius and blend** | The tutorial's rule, exactly: the High Pass radius *is* the grain's blur. The High Pass is taken on each channel and laid on in **Linear Light at 72 %**, which adds the original's fine detail at about 1.44 times. One addition to the video: the detail is **soft-clipped** at 2.5 times its usual size in clean skin, so that a hair's or a blemish's rim is not brought back as "texture". |
 | **Highlights and shadows (Blend If)** | Taken from the skin's own tones: the effect fades out between the 93rd and 99.5th percentile of the skin's brightness, and between the 0.2nd and 4th at the dark end, with smooth ramps (the Alt-split of the sliders). The brightness judged is that of the *evened-out* skin, not of each pixel: a dark blemish on mid-tone skin is a blemish to take out, while a shadow is dark all around it and stays. (Judged per pixel, the darkest blemishes were protected as "shadows": a test caught it.) |
 | **Where to paint** | A **need map**: for each place, how far it is from its own evened-out self, three ways (brightness 45 %, colour 40 %, pore roughness 15 %), each in units of what is usual for this skin, then mapped between its 25th and 92nd percentile. Clean skin gets a floor of 40 % so that it is evened a little, blotchy skin gets all of it. This replaces "paint where there are irregularities" and the flow. |
 | **What to avoid** | An **edge guard**: gradients of the lightly blurred skin, scaled to its 99th percentile (only the strongest edges: nostrils, lip line, eye outline, a beard's edge), take the effect away near those edges, and the skin mask's own border is feathered. The percentile is high on purpose: a blemish has strong edges of its own, and it is the thing to take out, not to keep. This replaces "it does not do well around the edges". |
-| **How much in the end** | One slider, **Renew** (the group opacity), 70 by default. Because the base, the texture and the mask are measured separately, it only blends: nothing is worked out again when it moves. |
+| **How much in the end** | One slider, **Renew** (the group opacity), from 0 to 100; *Auto renew* sets it to 70. Because the base, the texture and the mask are measured separately, it only blends: nothing is worked out again when it moves. |
 | **Which values suit this picture** | All sizes are shares of the face's width, and the skin's brightness is scaled to mid-grey before anything is done, so the same code serves any resolution, exposure and face size. |
 
 ### One button
@@ -67,14 +67,15 @@ and *Texture* are only for taste.
 
 * `src-tauri/src/effects/renewal.rs`: the measurements and the renewed layer, kept as a *change* to add to the picture
   (one for the face's box), so the amount can move without any of it being done again.
-* It runs on the developed picture before the GPU pipeline (as the AI denoise does), after any AI denoise and
-  upscale, and its inputs are part of the preview and export cache keys.
+* It runs on the developed picture before the GPU pipeline, after any AI denoise and negative conversion and before
+  the brushed repairs, the upscaler and Superfocus; its inputs are part of the preview and export cache keys.
 * The face skin mask is the one the Skin tool already makes (`skinFaceMap`).
 
 ## 5. Limits
 
 * One face's skin mask is renewed; groups are treated as one box (the same measures for all).
-* The texture is monochromatic grain with a measured size and strength, as the tutorial's is. A texture taken from the
-  face's own cleanest patches would be a closer match and is the next step.
+* The texture is monochromatic grain with a measured size and strength, as the tutorial's is: the video uses no
+  ready-made skin texture, only Add Noise blurred to pore size. A texture taken from the face's own cleanest patches
+  would be a closer match and is a possible next step.
 * It is for retouching skin in the sense of the tutorial, not dodging and burning: the shape and shading of the face are
   kept.

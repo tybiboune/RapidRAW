@@ -11,7 +11,10 @@
 // Here the face is already found, so the mask is known, and everything else is measured:
 //   - the blur radius is the smallest that has evened the skin out, as long as its real structure (the nose,
 //     the lip line, the beard's edge) is still there;
-//   - the fine texture has the grain size and strength measured in the cleanest skin of this very face;
+//   - the median is Photoshop's: the middle value of each channel over a round neighbourhood, at full size;
+//   - the fine texture has the grain size and strength measured in the cleanest skin of this very face, and is
+//     laid on in Overlay; the High Pass has the grain's radius and goes on in Linear Light at 72 %, as in the
+//     tutorial;
 //   - the original's detail is soft-clipped, so a blemish or a hair is not carried across as "texture";
 //   - the highlights and the shadows left alone are taken from the skin's own tones;
 //   - the mask is a score of how uneven each place is next to its own evened-out self, kept off edges.
@@ -217,24 +220,22 @@ fn smoothstep(a: f32, b: f32, x: f32) -> f32 {
     t * t * (3.0 - 2.0 * t)
 }
 
-/// A running mean over a window of `radius` either side, edges repeated.
-fn box_h(src: &[f32], w: usize, h: usize, radius: usize) -> Vec<f32> {
-    let mut out = vec![0.0f32; w * h];
-    let inv = 1.0 / (2 * radius + 1) as f64;
-    out.par_chunks_mut(w)
-        .zip(src.par_chunks(w))
-        .for_each(|(o, line)| {
-            let at = |i: isize| line[i.clamp(0, w as isize - 1) as usize] as f64;
-            let mut sum = 0.0f64;
-            for i in -(radius as isize)..=(radius as isize) {
-                sum += at(i);
-            }
-            for (x, v) in o.iter_mut().enumerate() {
-                *v = (sum * inv) as f32;
-                sum += at(x as isize + radius as isize + 1) - at(x as isize - radius as isize);
-            }
-        });
-    out
+/// The "OG texture" layer's opacity in the tutorial ("72 to 74 %").
+const DETAIL_OPACITY: f32 = 0.72;
+
+/// Photoshop's Overlay of `top` on `bottom`, both 0..1.
+fn overlay(bottom: f32, top: f32) -> f32 {
+    let top = top.clamp(0.0, 1.0);
+    if bottom < 0.5 {
+        2.0 * bottom * top
+    } else {
+        1.0 - 2.0 * (1.0 - bottom) * (1.0 - top)
+    }
+}
+
+/// Photoshop's Linear Light of `top` on `bottom`: the top's distance from mid-grey, doubled, added.
+fn linear_light(bottom: f32, top: f32) -> f32 {
+    (bottom + 2.0 * top - 1.0).clamp(0.0, 1.0)
 }
 
 fn transpose(src: &[f32], w: usize, h: usize) -> Vec<f32> {
@@ -245,20 +246,6 @@ fn transpose(src: &[f32], w: usize, h: usize) -> Vec<f32> {
         }
     });
     out
-}
-
-fn box_blur(p: &Plane, radius: usize) -> Plane {
-    if radius == 0 {
-        return p.clone();
-    }
-    let a = box_h(&p.v, p.w, p.h, radius);
-    let t = transpose(&a, p.w, p.h);
-    let b = box_h(&t, p.h, p.w, radius);
-    Plane {
-        w: p.w,
-        h: p.h,
-        v: transpose(&b, p.h, p.w),
-    }
 }
 
 fn kernel_blur(p: &Plane, sigma: f32) -> Plane {
@@ -348,69 +335,76 @@ fn gauss(p: &Plane, sigma: f32) -> Plane {
     upsample(&blurred, p.w, p.h)
 }
 
-/// A median over a square of `radius`, on a small picture.
-fn median_small(p: &Plane, radius: usize) -> Plane {
-    let mut v = vec![0.0f32; p.w * p.h];
-    v.par_chunks_mut(p.w).enumerate().for_each(|(y, row)| {
-        let mut window = Vec::with_capacity((2 * radius + 1).pow(2));
+/// Levels of the median's histogram over 0..1. The median is read inside its level, so it is finer than that.
+const MEDIAN_BINS: usize = 1024;
+
+/// Photoshop's Filter > Noise > Median: for every pixel, the middle value of the pixels within `radius` of it
+/// (a round neighbourhood), the edge pixels repeated beyond the picture. Run on one channel at a time, as
+/// Photoshop does on each of red, green and blue.
+///
+/// Huang's sliding histogram: one step along a row takes the circle's left edge out and puts its new right edge
+/// in, so the cost grows with the radius and not with its square.
+fn median(p: &Plane, radius: f32) -> Plane {
+    let (w, h) = (p.w, p.h);
+    let radius = radius.max(1.0);
+    let r = radius.floor() as isize;
+    // the circle's half-width on each of its rows
+    let half: Vec<isize> = (-r..=r)
+        .map(|dy| (radius * radius - (dy * dy) as f32).max(0.0).sqrt().floor() as isize)
+        .collect();
+    let count: u32 = half.iter().map(|&hw| (2 * hw + 1) as u32).sum();
+    // the median is the value with `mid` values under it
+    let mid = count / 2;
+    let levels: Vec<u16> = p
+        .v
+        .par_iter()
+        .map(|&v| ((v.clamp(0.0, 1.0) * MEDIAN_BINS as f32) as usize).min(MEDIAN_BINS - 1) as u16)
+        .collect();
+    let mut out = vec![0.0f32; w * h];
+    out.par_chunks_mut(w).enumerate().for_each(|(y, row)| {
+        let lines: Vec<&[u16]> = (-r..=r)
+            .map(|dy| {
+                let yy = (y as isize + dy).clamp(0, h as isize - 1) as usize;
+                &levels[yy * w..(yy + 1) * w]
+            })
+            .collect();
+        let at = |line: &[u16], x: isize| line[x.clamp(0, w as isize - 1) as usize] as usize;
+        let mut hist = vec![0u32; MEDIAN_BINS];
+        for (line, &hw) in lines.iter().zip(&half) {
+            for x in -hw..=hw {
+                hist[at(line, x)] += 1;
+            }
+        }
+        // m: the median's level; below: how many values lie under it
+        let (mut m, mut below) = (0usize, 0u32);
         for (x, o) in row.iter_mut().enumerate() {
-            window.clear();
-            for yy in y.saturating_sub(radius)..=(y + radius).min(p.h - 1) {
-                for xx in x.saturating_sub(radius)..=(x + radius).min(p.w - 1) {
-                    window.push(p.v[yy * p.w + xx]);
+            while below > mid {
+                m -= 1;
+                below -= hist[m];
+            }
+            while below + hist[m] <= mid {
+                below += hist[m];
+                m += 1;
+            }
+            *o = (m as f32 + ((mid - below) as f32 + 0.5) / hist[m] as f32) / MEDIAN_BINS as f32;
+            if x + 1 < w {
+                let x = x as isize;
+                for (line, &hw) in lines.iter().zip(&half) {
+                    let gone = at(line, x - hw);
+                    hist[gone] -= 1;
+                    if gone < m {
+                        below -= 1;
+                    }
+                    let new = at(line, x + 1 + hw);
+                    hist[new] += 1;
+                    if new < m {
+                        below += 1;
+                    }
                 }
             }
-            let mid = window.len() / 2;
-            *o = *window.select_nth_unstable_by(mid, |a, b| a.total_cmp(b)).1;
         }
     });
-    Plane { w: p.w, h: p.h, v }
-}
-
-/// Smooths `src` along the edges of `guide` (He, Sun and Tang's guided filter).
-fn guided(guide: &Plane, src: &Plane, radius: usize, eps: f32) -> Plane {
-    let mean_g = box_blur(guide, radius);
-    let mean_s = box_blur(src, radius);
-    let mean_gs = box_blur(&guide.zip(src, |g, s| g * s), radius);
-    let mean_gg = box_blur(&guide.zip(guide, |g, g2| g * g2), radius);
-    let a = Plane {
-        w: guide.w,
-        h: guide.h,
-        v: (0..guide.v.len())
-            .into_par_iter()
-            .map(|i| {
-                let var = mean_gg.v[i] - mean_g.v[i] * mean_g.v[i];
-                (mean_gs.v[i] - mean_g.v[i] * mean_s.v[i]) / (var + eps)
-            })
-            .collect(),
-    };
-    let b = Plane {
-        w: guide.w,
-        h: guide.h,
-        v: (0..guide.v.len())
-            .into_par_iter()
-            .map(|i| mean_s.v[i] - a.v[i] * mean_g.v[i])
-            .collect(),
-    };
-    let (ma, mb) = (box_blur(&a, radius), box_blur(&b, radius));
-    Plane {
-        w: guide.w,
-        h: guide.h,
-        v: (0..guide.v.len())
-            .into_par_iter()
-            .map(|i| ma.v[i] * guide.v[i] + mb.v[i])
-            .collect(),
-    }
-}
-
-/// Photoshop's big median, made cheap: the median is taken on a copy one `step`th the size and brought back
-/// up along the edges of the full-size luma.
-fn big_median(p: &Plane, radius: f32, guide: &Plane) -> Plane {
-    let step = 8usize.min((radius / 3.0).floor().max(1.0) as usize);
-    let small = downsample(p, step);
-    let med = median_small(&small, ((radius / step as f32).round() as usize).max(1));
-    let up = upsample(&med, p.w, p.h);
-    guided(guide, &up, step.max(4), 2e-4)
+    Plane { w, h, v: out }
 }
 
 fn mean_where(p: &Plane, weight: &Plane) -> f32 {
@@ -581,19 +575,31 @@ fn build(image: &Rgb32FImage, mask: &GrayImage, is_raw: bool, texture: f32) -> O
         return None;
     }
     let grad0 = gradient(&gauss(&y, 0.006 * face));
-    let g85 = quantile(&grad0, &interior, 0.85);
-    let structure = grad0.zip(&interior, |g, i| if g > g85 { i } else { 0.0 });
-    let structure_grad = mean_where(&grad0, &structure).max(1e-9);
 
-    // the base: the smallest radius that has evened out the skin, with its structure still in it
+    // the base: the smallest radius that has evened out the skin, with its structure still in it. The radii are
+    // tried on a copy whose face is at most about 1200 px wide: what is measured is the same, at a fraction of
+    // the cost; the chosen one is then run on the full-size picture.
+    let step = ((face / 1200.0).ceil() as usize).max(1);
+    let (ys, inner_s) = if step > 1 {
+        (
+            downsample(&y, step),
+            downsample(&interior, step).map(|v| if v > 0.5 { 1.0 } else { 0.0 }),
+        )
+    } else {
+        (y.clone(), interior.clone())
+    };
+    let face_s = face / step as f32;
+    let grad_s = gradient(&gauss(&ys, 0.006 * face_s));
+    let g85_s = quantile(&grad_s, &inner_s, 0.85);
+    let structure_s = grad_s.zip(&inner_s, |g, i| if g > g85_s { i } else { 0.0 });
+    let structure_grad_s = mean_where(&grad_s, &structure_s).max(1e-9);
     let mut tried: Vec<(f32, f32, f32)> = Vec::new(); // radius, unevenness, structure kept
     for share in [0.02f32, 0.03, 0.045, 0.07, 0.10] {
-        let radius = share * face;
-        let base_y = big_median(&y, radius, &y);
-        let mid = base_y.zip(&gauss(&base_y, 0.15 * face), |a, b| (a - b).abs());
-        let unevenness = mean_where(&mid, &interior);
+        let base_s = median(&ys, share * face_s);
+        let mid = base_s.zip(&gauss(&base_s, 0.15 * face_s), |a, b| (a - b).abs());
+        let unevenness = mean_where(&mid, &inner_s);
         let kept =
-            mean_where(&gradient(&gauss(&base_y, 0.006 * face)), &structure) / structure_grad;
+            mean_where(&gradient(&gauss(&base_s, 0.006 * face_s)), &structure_s) / structure_grad_s;
         tried.push((share, unevenness, kept));
     }
     let usable: Vec<&(f32, f32, f32)> = tried.iter().filter(|t| t.2 >= 0.6).collect();
@@ -609,7 +615,7 @@ fn build(image: &Rgb32FImage, mask: &GrayImage, is_raw: bool, texture: f32) -> O
         .unwrap_or_else(|| usable.last().unwrap());
     let radius = chosen.0 * face;
 
-    let base: [Plane; 3] = std::array::from_fn(|c| big_median(&chan[c], radius, &y));
+    let base: [Plane; 3] = std::array::from_fn(|c| median(&chan[c], radius));
     let base_y = luma(&base);
 
     // where the skin is uneven, next to its own evened-out self
@@ -670,9 +676,10 @@ fn build(image: &Rgb32FImage, mask: &GrayImage, is_raw: bool, texture: f32) -> O
     );
     let tone = base_y.map(|v| (1.0 - smoothstep(hi0, hi1, v)) * smoothstep(sh0, sh1, v));
 
-    // the fine texture: its strength and grain size measured in the cleanest skin of this face
-    let sig_hp = (0.0016 * face).max(0.7);
-    let detail = y.zip(&gauss(&y, sig_hp), |a, b| a - b);
+    // the fine texture: its strength and grain size measured in the cleanest skin of this face, on a fine
+    // high pass made only to measure them
+    let sig_probe = (0.0016 * face).max(0.7);
+    let detail = y.zip(&gauss(&y, sig_probe), |a, b| a - b);
     let clean = Plane {
         w,
         h,
@@ -713,6 +720,8 @@ fn build(image: &Rgb32FImage, mask: &GrayImage, is_raw: bool, texture: f32) -> O
             s / power < 0.5
         })
         .unwrap_or(8);
+    // the grain's blur, and, by the tutorial's rule, the High Pass radius too: "the exact number you chose for
+    // the Gaussian blur"
     let sig_tex = (half_lag as f32 * 0.85).clamp(0.8, 4.0);
     let noise = gauss(&white_noise(w, h), sig_tex);
     let (nm, nv) = {
@@ -726,10 +735,20 @@ fn build(image: &Rgb32FImage, mask: &GrayImage, is_raw: bool, texture: f32) -> O
             / n;
         (mean as f32, (var.sqrt() as f32).max(1e-9))
     };
+    // the noise layer's deviation from its 50 % grey: as rough, on mid-grey skin, as the face's cleanest skin
     let tex_amp = s_clean * texture / nv;
 
-    // the renewed skin: the base, a fresh texture, and the original's finest detail, soft-clipped
-    let clip = 2.5 * s_clean;
+    // "OG texture": a High Pass of each channel at the grain's radius, in Linear Light at the tutorial's 72 %.
+    // Its strongest detail is soft-clipped, so a hair or a blemish's rim is not laid back as texture.
+    let high_pass: [Plane; 3] =
+        std::array::from_fn(|c| chan[c].zip(&gauss(&chan[c], sig_tex), |a, b| a - b));
+    let s_detail = mean_where(&luma(&high_pass).map(|d| d * d), &clean)
+        .sqrt()
+        .max(1e-5);
+    let clip = 2.5 * s_detail;
+
+    // the renewed skin, layer by layer as in Photoshop: the median base; the noise layer in Overlay; the High
+    // Pass in Linear Light
     let mut delta = vec![0.0f32; w * h * 3];
     let mut weight = vec![0.0f32; w * h];
     delta
@@ -737,25 +756,28 @@ fn build(image: &Rgb32FImage, mask: &GrayImage, is_raw: bool, texture: f32) -> O
         .zip(weight.par_iter_mut())
         .enumerate()
         .for_each(|(i, (d, wt))| {
-            let fine =
-                0.55 * (noise.v[i] - nm) * tex_amp + 0.55 * clip * (detail.v[i] / clip).tanh();
+            let grain = (noise.v[i] - nm) * tex_amp;
             for c in 0..3 {
-                let renewed = from_gamma(base[c].v[i] + fine);
+                let b = base[c].v[i].clamp(0.0, 1.0);
+                let over = overlay(b, 0.5 + grain);
+                let hp = clip * (high_pass[c].v[i] / clip).tanh();
+                let renewed = over + DETAIL_OPACITY * (linear_light(over, 0.5 + hp) - over);
                 // a clipped pixel is changed from where the gamma-coded copy had it
-                d[c] = renewed - from_gamma(chan[c].v[i]);
+                d[c] = from_gamma(renewed) - from_gamma(chan[c].v[i]);
             }
             *wt = need.v[i] * guard.v[i] * border.v[i] * tone.v[i];
         });
 
     let report = format!(
-        "face {:.0} px, median radius {:.0} px ({:.1}% of the face, {} candidates), pore grain {:.1} px, texture {:.4}, \
-         highlights from {:.2}, shadows to {:.2}",
+        "face {:.0} px, median radius {:.0} px ({:.1}% of the face, {} candidates), pore grain and high pass \
+         {:.1} px, texture {:.4}, detail {:.4}, highlights from {:.2}, shadows to {:.2}",
         face,
         radius,
         chosen.0 * 100.0,
         tried.len(),
         sig_tex,
         s_clean,
+        s_detail,
         hi0,
         sh1
     );
@@ -891,6 +913,118 @@ mod tests {
         weights
             .save(format!("{}.weight.png", var("RRAW_OUT")))
             .unwrap();
+    }
+
+    /// Renews a raw file (RRAW_RAW) over an oval mask (RRAW_OVAL: "cx,cy,rx,ry" in pixels) and writes the face's
+    /// box before and after to RRAW_OUT + ".before.png" and RRAW_OUT + ".after.png".
+    #[test]
+    #[ignore]
+    fn renewal_on_a_raw() {
+        let var = |k: &str| std::env::var(k).unwrap_or_else(|_| panic!("{k}"));
+        let path = var("RRAW_RAW");
+        let bytes = std::fs::read(&path).unwrap();
+        let settings = crate::app::settings::AppSettings::default();
+        let img = crate::decode::image_loader::load_base_image_from_bytes(
+            &bytes, &path, false, &settings, None,
+        )
+        .expect("the raw develops")
+        .to_rgb32f();
+        let oval: Vec<f32> = var("RRAW_OVAL")
+            .split(',')
+            .map(|v| v.parse().unwrap())
+            .collect();
+        let (cx, cy, rx, ry) = (oval[0], oval[1], oval[2], oval[3]);
+        let mask = GrayImage::from_fn(img.width(), img.height(), |x, y| {
+            let d = ((x as f32 - cx) / rx).powi(2) + ((y as f32 - cy) / ry).powi(2);
+            Luma([if d < 1.0 { 255 } else { 0 }])
+        });
+        let started = std::time::Instant::now();
+        let layer = build(&img, &mask, true, 1.0).expect("a layer");
+        println!(
+            "built in {:.1}s: {}",
+            started.elapsed().as_secs_f32(),
+            layer.report
+        );
+        let amount: f32 = std::env::var("RRAW_AMOUNT")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(1.0);
+        // shown with the skin at mid-grey, as an editor would show it
+        let mut lumas: Vec<f32> = mask
+            .enumerate_pixels()
+            .filter(|(_, _, m)| m.0[0] > 127)
+            .step_by(97)
+            .map(|(x, y, _)| {
+                let p = img.get_pixel(x, y).0;
+                0.2126 * p[0] + 0.7152 * p[1] + 0.0722 * p[2]
+            })
+            .collect();
+        let mid = lumas.len() / 2;
+        let gain = 0.2 / *lumas.select_nth_unstable_by(mid, |a, b| a.total_cmp(b)).1;
+        let view = |v: f32| ((v * gain).clamp(0.0, 1.0).powf(1.0 / 2.2) * 255.0 + 0.5) as u8;
+        let (w, h) = (layer.w as u32, layer.h as u32);
+        let mut before = image::RgbImage::new(w, h);
+        let mut after = image::RgbImage::new(w, h);
+        for y in 0..h {
+            for x in 0..w {
+                let i = (y * w + x) as usize;
+                let px = img.get_pixel(layer.x0 as u32 + x, layer.y0 as u32 + y).0;
+                let wt = (layer.weight[i] * amount).clamp(0.0, 1.0);
+                for c in 0..3 {
+                    before.get_pixel_mut(x, y).0[c] = view(px[c]);
+                    after.get_pixel_mut(x, y).0[c] = view(px[c] + wt * layer.delta[i * 3 + c]);
+                }
+            }
+        }
+        before
+            .save(format!("{}.before.png", var("RRAW_OUT")))
+            .unwrap();
+        after
+            .save(format!("{}.after.png", var("RRAW_OUT")))
+            .unwrap();
+    }
+
+    #[test]
+    fn the_median_is_the_middle_of_the_round_neighbourhood() {
+        let (w, h) = (61usize, 47usize);
+        let noise = white_noise(w, h);
+        let p = Plane {
+            w,
+            h,
+            v: noise
+                .v
+                .iter()
+                .enumerate()
+                .map(|(i, n)| (0.5 + 0.15 * n + if i % w > 30 { 0.2 } else { 0.0 }).clamp(0.0, 1.0))
+                .collect(),
+        };
+        for radius in [1.0f32, 3.0, 7.5, 12.0] {
+            let fast = median(&p, radius);
+            let r = radius.floor() as isize;
+            for y in 0..h as isize {
+                for x in 0..w as isize {
+                    let mut window = Vec::new();
+                    for dy in -r..=r {
+                        let hw =
+                            (radius * radius - (dy * dy) as f32).max(0.0).sqrt().floor() as isize;
+                        for dx in -hw..=hw {
+                            let (xx, yy) = (
+                                (x + dx).clamp(0, w as isize - 1),
+                                (y + dy).clamp(0, h as isize - 1),
+                            );
+                            window.push(p.v[yy as usize * w + xx as usize]);
+                        }
+                    }
+                    let mid = window.len() / 2;
+                    let exact = *window.select_nth_unstable_by(mid, |a, b| a.total_cmp(b)).1;
+                    let got = fast.v[y as usize * w + x as usize];
+                    assert!(
+                        (got - exact).abs() <= 1.0 / MEDIAN_BINS as f32,
+                        "radius {radius} at {x},{y}: {got} against {exact}"
+                    );
+                }
+            }
+        }
     }
 
     #[test]
