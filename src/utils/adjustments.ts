@@ -90,6 +90,10 @@ export enum DetailsAdjustment {
   AiDenoiseMethod = 'aiDenoiseMethod',
   AiUpscaleDetail = 'aiUpscaleDetail',
   AiUpscaleEnabled = 'aiUpscaleEnabled',
+  AiUpscaleFactor = 'aiUpscaleFactor',
+  SuperfocusEnabled = 'superfocusEnabled',
+  SuperfocusUpscaler = 'superfocusUpscaler',
+  SuperfocusAmount = 'superfocusAmount',
   Clarity = 'clarity',
   Dehaze = 'dehaze',
   Structure = 'structure',
@@ -128,13 +132,23 @@ export enum Effect {
   VignetteRoundness = 'vignetteRoundness',
   SkinEnabled = 'skinEnabled',
   SkinFaceMap = 'skinFaceMap',
+  SkinFaceMethod = 'skinFaceMethod',
   SkinSpots = 'skinSpots',
   SkinRedness = 'skinRedness',
   SkinRednessWay = 'skinRednessWay',
   SkinShine = 'skinShine',
+  SkinPigment = 'skinPigment',
+  SkinPigmentSensitivity = 'skinPigmentSensitivity',
+  SkinRenewal = 'skinRenewal',
+  SkinRenewalTexture = 'skinRenewalTexture',
+  SkinTone = 'skinTone',
   SkinKeepTexture = 'skinKeepTexture',
   SkinLines = 'skinLines',
   SkinLinesMap = 'skinLinesMap',
+  SkinLinesAi = 'skinLinesAi',
+  SkinLinesAiMap = 'skinLinesAiMap',
+  SkinSpotsAi = 'skinSpotsAi',
+  SkinSpotsAiMap = 'skinSpotsAiMap',
   SkinUnderEye = 'skinUnderEye',
   SkinUnderEyeMap = 'skinUnderEyeMap',
   SkinSensitivity = 'skinSensitivity',
@@ -312,6 +326,10 @@ export interface Adjustments {
   aiPatches: Array<AiPatch>;
   aiUpscaleDetail: number;
   aiUpscaleEnabled: boolean;
+  aiUpscaleFactor: number;
+  superfocusEnabled: boolean;
+  superfocusUpscaler: number;
+  superfocusAmount: number;
   aspectRatio: number | null;
   baselineExposure: boolean;
   blacks: number;
@@ -347,13 +365,23 @@ export interface Adjustments {
   hue: number;
   skinEnabled: boolean;
   skinFaceMap: string | null;
+  skinFaceMethod: string;
   skinSpots: number;
   skinRedness: number;
   skinRednessWay: number;
   skinShine: number;
+  skinPigment: number;
+  skinPigmentSensitivity: number;
+  skinRenewal: number;
+  skinRenewalTexture: number;
+  skinTone: number;
   skinKeepTexture: number;
   skinLines: number;
   skinLinesMap: string | null;
+  skinLinesAi: boolean;
+  skinLinesAiMap: string | null;
+  skinSpotsAi: boolean;
+  skinSpotsAiMap: string | null;
   skinUnderEye: number;
   skinUnderEyeMap: string | null;
   skinSensitivity: number;
@@ -846,13 +874,23 @@ export const normalizeLoadedAdjustments = (loadedAdjustments: Adjustments): any 
     halationAmount: loadedAdjustments.halationAmount ?? INITIAL_ADJUSTMENTS.halationAmount,
     skinEnabled: loadedAdjustments.skinEnabled ?? INITIAL_ADJUSTMENTS.skinEnabled,
     skinFaceMap: loadedAdjustments.skinFaceMap ?? INITIAL_ADJUSTMENTS.skinFaceMap,
+    skinFaceMethod: loadedAdjustments.skinFaceMethod ?? INITIAL_ADJUSTMENTS.skinFaceMethod,
     skinSpots: loadedAdjustments.skinSpots ?? INITIAL_ADJUSTMENTS.skinSpots,
     skinRedness: loadedAdjustments.skinRedness ?? INITIAL_ADJUSTMENTS.skinRedness,
     skinRednessWay: loadedAdjustments.skinRednessWay ?? INITIAL_ADJUSTMENTS.skinRednessWay,
     skinShine: loadedAdjustments.skinShine ?? INITIAL_ADJUSTMENTS.skinShine,
+    skinPigment: loadedAdjustments.skinPigment ?? INITIAL_ADJUSTMENTS.skinPigment,
+    skinPigmentSensitivity: loadedAdjustments.skinPigmentSensitivity ?? INITIAL_ADJUSTMENTS.skinPigmentSensitivity,
+    skinRenewal: loadedAdjustments.skinRenewal ?? INITIAL_ADJUSTMENTS.skinRenewal,
+    skinRenewalTexture: loadedAdjustments.skinRenewalTexture ?? INITIAL_ADJUSTMENTS.skinRenewalTexture,
+    skinTone: loadedAdjustments.skinTone ?? INITIAL_ADJUSTMENTS.skinTone,
     skinKeepTexture: loadedAdjustments.skinKeepTexture ?? INITIAL_ADJUSTMENTS.skinKeepTexture,
     skinLines: loadedAdjustments.skinLines ?? INITIAL_ADJUSTMENTS.skinLines,
     skinLinesMap: loadedAdjustments.skinLinesMap ?? INITIAL_ADJUSTMENTS.skinLinesMap,
+    skinLinesAi: loadedAdjustments.skinLinesAi ?? INITIAL_ADJUSTMENTS.skinLinesAi,
+    skinLinesAiMap: loadedAdjustments.skinLinesAiMap ?? INITIAL_ADJUSTMENTS.skinLinesAiMap,
+    skinSpotsAi: loadedAdjustments.skinSpotsAi ?? INITIAL_ADJUSTMENTS.skinSpotsAi,
+    skinSpotsAiMap: loadedAdjustments.skinSpotsAiMap ?? INITIAL_ADJUSTMENTS.skinSpotsAiMap,
     skinUnderEye: loadedAdjustments.skinUnderEye ?? INITIAL_ADJUSTMENTS.skinUnderEye,
     skinUnderEyeMap: loadedAdjustments.skinUnderEyeMap ?? INITIAL_ADJUSTMENTS.skinUnderEyeMap,
     skinSensitivity: loadedAdjustments.skinSensitivity ?? INITIAL_ADJUSTMENTS.skinSensitivity,
@@ -1011,7 +1049,15 @@ export const ADJUSTMENT_GROUPS: Record<string, AdjustmentGroup[]> = {
     },
     {
       label: 'modals.copyPaste.groups.aiUpscale',
-      keys: [DetailsAdjustment.AiUpscaleEnabled, DetailsAdjustment.AiUpscaleDetail],
+      keys: [DetailsAdjustment.AiUpscaleEnabled, DetailsAdjustment.AiUpscaleDetail, DetailsAdjustment.AiUpscaleFactor],
+    },
+    {
+      label: 'modals.copyPaste.groups.superfocus',
+      keys: [
+        DetailsAdjustment.SuperfocusEnabled,
+        DetailsAdjustment.SuperfocusUpscaler,
+        DetailsAdjustment.SuperfocusAmount,
+      ],
     },
     {
       label: 'modals.copyPaste.groups.chromaticAberration',
@@ -1065,7 +1111,11 @@ export const ADJUSTMENT_GROUPS: Record<string, AdjustmentGroup[]> = {
         Effect.SkinRedness,
         Effect.SkinRednessWay,
         Effect.SkinShine,
+        Effect.SkinPigment,
+        Effect.SkinTone,
         Effect.SkinLines,
+        Effect.SkinLinesAi,
+        Effect.SkinSpotsAi,
         Effect.SkinUnderEye,
         Effect.SkinKeepTexture,
         Effect.SkinSensitivity,
@@ -1073,6 +1123,9 @@ export const ADJUSTMENT_GROUPS: Record<string, AdjustmentGroup[]> = {
         Effect.SkinLinesSensitivity,
         Effect.SkinRednessSensitivity,
         Effect.SkinUnderEyeSensitivity,
+        Effect.SkinPigmentSensitivity,
+        Effect.SkinRenewal,
+        Effect.SkinRenewalTexture,
       ],
     },
     {
@@ -1242,6 +1295,9 @@ export const ADJUSTMENT_SECTIONS: Sections = {
     DetailsAdjustment.AiDenoiseDetail,
     DetailsAdjustment.AiUpscaleEnabled,
     DetailsAdjustment.AiUpscaleDetail,
+    DetailsAdjustment.SuperfocusEnabled,
+    DetailsAdjustment.SuperfocusUpscaler,
+    DetailsAdjustment.SuperfocusAmount,
     DetailsAdjustment.ChromaticAberrationRedCyan,
     DetailsAdjustment.ChromaticAberrationBlueYellow,
     DetailsAdjustment.NegativeConversionEnabled,
@@ -1271,13 +1327,20 @@ export const ADJUSTMENT_SECTIONS: Sections = {
     Effect.VignetteCenterY,
     Effect.SkinEnabled,
     Effect.SkinFaceMap,
+    Effect.SkinFaceMethod,
     Effect.SkinSpots,
     Effect.SkinRedness,
     Effect.SkinRednessWay,
     Effect.SkinShine,
+    Effect.SkinPigment,
+    Effect.SkinTone,
     Effect.SkinKeepTexture,
     Effect.SkinLines,
     Effect.SkinLinesMap,
+    Effect.SkinLinesAi,
+    Effect.SkinLinesAiMap,
+    Effect.SkinSpotsAi,
+    Effect.SkinSpotsAiMap,
     Effect.SkinUnderEye,
     Effect.SkinUnderEyeMap,
     Effect.SkinSensitivity,
@@ -1285,6 +1348,9 @@ export const ADJUSTMENT_SECTIONS: Sections = {
     Effect.SkinLinesSensitivity,
     Effect.SkinRednessSensitivity,
     Effect.SkinUnderEyeSensitivity,
+    Effect.SkinPigmentSensitivity,
+    Effect.SkinRenewal,
+    Effect.SkinRenewalTexture,
     Effect.LensBlurEnabled,
     Effect.LensBlurAmount,
     Effect.lensBlurDiffusion,
@@ -1413,6 +1479,7 @@ export const ADJUSTMENT_SECTION_TOOLS: Record<string, Array<AdjustmentSectionToo
     { id: 'presence', label: 'adjustments.details.presence' },
     { id: 'noiseReduction', label: 'adjustments.details.noiseReduction' },
     { id: 'superResolution', label: 'adjustments.details.superResolution' },
+    { id: 'superfocus', label: 'adjustments.details.superfocus' },
     { id: 'chromaticAberration', label: 'adjustments.details.chromaticAberration' },
     { id: 'negativeConversion', label: 'adjustments.details.negativeConversion' },
   ],

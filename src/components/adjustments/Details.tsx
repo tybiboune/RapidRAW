@@ -226,9 +226,15 @@ function DetailsPanel({
                           }
                           options={[
                             { label: t('adjustments.details.denoiseNind'), value: DenoiseMethod.Ai },
-                            { label: t('adjustments.details.denoiseRawForgeLight'), value: DenoiseMethod.RawForgeLight },
+                            {
+                              label: t('adjustments.details.denoiseRawForgeLight'),
+                              value: DenoiseMethod.RawForgeLight,
+                            },
                             { label: t('adjustments.details.denoiseRawForge'), value: DenoiseMethod.RawForge },
-                            { label: t('adjustments.details.denoiseRawForgeHeavy'), value: DenoiseMethod.RawForgeHeavy },
+                            {
+                              label: t('adjustments.details.denoiseRawForgeHeavy'),
+                              value: DenoiseMethod.RawForgeHeavy,
+                            },
                           ]}
                         />
                         {denoiseMethod !== DenoiseMethod.Ai && (
@@ -283,7 +289,12 @@ function DetailsPanel({
             enabled={!!adjustments.aiUpscaleEnabled}
             label={t('adjustments.details.aiUpscale')}
             onToggle={(enabled: boolean) =>
-              setAdjustments((prev: Partial<Adjustments>) => ({ ...prev, aiUpscaleEnabled: enabled }))
+              setAdjustments((prev: Partial<Adjustments>) => ({
+                ...prev,
+                aiUpscaleEnabled: enabled,
+                // an enlarged picture already carries the upscaler's detail
+                ...(enabled ? { superfocusEnabled: false } : {}),
+              }))
             }
           >
             {aiUpscaleProgress !== undefined ? (
@@ -299,20 +310,122 @@ function DetailsPanel({
                 </Text>
               </div>
             ) : (
-              <Slider
-                resetKey="aiUpscaleDetail"
-                label={t('adjustments.details.aiUpscaleDetail')}
-                max={100}
-                min={0}
-                defaultValue={30}
-                onChange={(e: SliderChangeEvent) =>
-                  handleAdjustmentChange(DetailsAdjustment.AiUpscaleDetail, String(e.target.value))
-                }
-                step={1}
-                value={adjustments.aiUpscaleDetail ?? 30}
-                onDragStateChange={onDragStateChange}
-                fillOrigin="min"
-              />
+              <>
+                <div className="space-y-1">
+                  <div className="flex gap-1">
+                    {[2, 4].map((factor) => (
+                      <button
+                        key={factor}
+                        type="button"
+                        onClick={() => handleAdjustmentChange(DetailsAdjustment.AiUpscaleFactor, String(factor))}
+                        className={`flex-1 rounded-md px-2 py-1 text-xs transition-colors ${
+                          (adjustments.aiUpscaleFactor ?? 2) === factor
+                            ? 'bg-card-active text-primary'
+                            : 'bg-surface text-text-secondary hover:bg-card-active/60'
+                        }`}
+                      >
+                        {`×${factor}`}
+                      </button>
+                    ))}
+                  </div>
+                  {(adjustments.aiUpscaleFactor ?? 2) === 4 && (
+                    <Text variant={TextVariants.small} className="text-text-secondary">
+                      {t('adjustments.details.aiUpscaleFactorNote')}
+                    </Text>
+                  )}
+                </div>
+                <Slider
+                  resetKey="aiUpscaleDetail"
+                  label={t('adjustments.details.aiUpscaleDetail')}
+                  max={100}
+                  min={0}
+                  defaultValue={30}
+                  onChange={(e: SliderChangeEvent) =>
+                    handleAdjustmentChange(DetailsAdjustment.AiUpscaleDetail, String(e.target.value))
+                  }
+                  step={1}
+                  value={adjustments.aiUpscaleDetail ?? 30}
+                  onDragStateChange={onDragStateChange}
+                  fillOrigin="min"
+                />
+              </>
+            )}
+          </SpatialEffect>
+        </AdjustmentSubSection>
+      )}
+
+      {!isForMask && !isAiFree && !hiddenTools.includes('superfocus') && (
+        <AdjustmentSubSection
+          id="superfocus"
+          order={toolOrder.indexOf('superfocus')}
+          title={t('adjustments.details.superfocus')}
+        >
+          <SpatialEffect
+            enabled={!!adjustments.superfocusEnabled}
+            label={t('adjustments.details.superfocus')}
+            onToggle={(enabled: boolean) =>
+              setAdjustments((prev: Partial<Adjustments>) => ({
+                ...prev,
+                superfocusEnabled: enabled,
+                ...(enabled ? { aiUpscaleEnabled: false } : {}),
+              }))
+            }
+          >
+            {aiUpscaleProgress !== undefined ? (
+              <div className="flex flex-col items-center justify-center gap-1 p-4 text-text-secondary text-center">
+                <div className="flex items-center gap-2">
+                  <Loader2 size={16} className="animate-spin shrink-0" />
+                  <Text variant={TextVariants.label}>
+                    {aiModelDownloadStatus
+                      ? t('editor.masks.settings.aiModelDownloading')
+                      : t('adjustments.details.superfocusWorking')}
+                  </Text>
+                </div>
+                <Text variant={TextVariants.small} className="text-accent">
+                  {aiModelDownloadStatus || `${Math.round(aiUpscaleProgress * 100)}%`}
+                </Text>
+              </div>
+            ) : (
+              <>
+                <div className="space-y-1">
+                  <div className="flex gap-1">
+                    {[
+                      { factor: 2, label: t('adjustments.details.superfocusRapidRes') },
+                      { factor: 4, label: t('adjustments.details.superfocusRealPlksr') },
+                    ].map(({ factor, label }) => (
+                      <button
+                        key={factor}
+                        type="button"
+                        onClick={() => handleAdjustmentChange(DetailsAdjustment.SuperfocusUpscaler, String(factor))}
+                        className={`flex-1 rounded-md px-2 py-1 text-xs transition-colors ${
+                          (adjustments.superfocusUpscaler ?? 2) === factor
+                            ? 'bg-card-active text-primary'
+                            : 'bg-surface text-text-secondary hover:bg-card-active/60'
+                        }`}
+                      >
+                        {label}
+                      </button>
+                    ))}
+                  </div>
+                  <Text variant={TextVariants.small} className="text-text-secondary">
+                    {t('adjustments.details.superfocusNote')}
+                  </Text>
+                </div>
+                <Slider
+                  resetKey="superfocusAmount"
+                  label={t('adjustments.details.superfocusAmount')}
+                  max={100}
+                  min={0}
+                  defaultValue={100}
+                  onChange={(e: SliderChangeEvent) =>
+                    handleAdjustmentChange(DetailsAdjustment.SuperfocusAmount, String(e.target.value))
+                  }
+                  step={1}
+                  value={adjustments.superfocusAmount ?? 100}
+                  onDragStateChange={onDragStateChange}
+                  fillOrigin="min"
+                />
+              </>
             )}
           </SpatialEffect>
         </AdjustmentSubSection>

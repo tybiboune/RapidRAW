@@ -1,5 +1,5 @@
 use crate::ai::processing::{CachedDepthMap, Esam3Features, ImageEmbeddings};
-use crate::masks::face::FaceAnalysis;
+use crate::masks::face::{FaceAnalysis, FaceParsing};
 use anyhow::Result;
 use ndarray::{Array, IxDyn};
 use ort::editor::{Graph, Model, Node, ONNX_DOMAIN, Opset, Outlet};
@@ -9,7 +9,7 @@ use ort::session::{Output, Session};
 use ort::tensor::{Shape, SymbolicDimensions, TensorElementType};
 use ort::value::{Tensor, ValueType};
 use sha2::{Digest, Sha256};
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
@@ -120,6 +120,14 @@ const UPSCALE_SHA256: &str = "9d3a51deab2518cde257048180070b078840f2aa32326b8bf0
 
 const UPSCALE_SPATIAL_DIMS: [&str; 2] = ["h", "w"];
 
+// darktable's four-times upscaler (RealPLKSR, MIT): RGB 0..1 in a fixed 256x256 square in, 1024x1024
+// out. Slower than the two-times SPAN, and made for photographs.
+const UPSCALE4_URL: &str = "https://huggingface.co/darktable-org/upscale-realplksr-onnx/resolve/main/onnx/model_x4.onnx?download=true";
+
+const UPSCALE4_FILENAME: &str = "realplksr_x4_darktable.onnx";
+
+const UPSCALE4_SHA256: &str = "8ce692652494e2e5c31e1f7c7ab61eb084e9a450cde727a374f5d6746cfe054b";
+
 const LAMA_URL: &str =
     "https://huggingface.co/CyberTimon/RapidRAW-Models/resolve/main/lama_fp16.onnx?download=true";
 
@@ -138,6 +146,45 @@ const NORMAL_URL: &str = "https://huggingface.co/CyberTimon/RapidRAW-Models/reso
 const NORMAL_FILENAME: &str = "moge-2-vits-normal-onnx.onnx";
 
 const NORMAL_SHA256: &str = "24eacb5dc7a2c54c7bc98f7de085ffbed79ad006ea5b664c2c2cdc02ff3a52f0";
+
+// The FFHQ-Wrinkle U-Net (ResNet50 encoder), exported to ONNX with the sigmoid folded in: a 512x512
+// face crop, ImageNet-normalised, in; how likely each pixel is to be a wrinkle, 0 to 1, out. Its
+// weights are CC BY-NC-SA and nothing hosts the export, so it is not downloaded: the file is expected
+// to be put in the models folder by hand.
+pub const WRINKLE_FILENAME: &str = "ffhq_wrinkle_unet.onnx";
+
+// The face parser: SegFormer-B5 trained on CelebAMask-HQ (jonathandinu/face-parsing), which tells every
+// pixel of a face which of nineteen parts it is - skin, nose, eyes, brows, ears, lips, mouth, hair, neck,
+// glasses and the rest. A 512x512 FFHQ-aligned face crop, ImageNet-normalised, in; one score a class at
+// a quarter of the size, out. For non-commercial use, like the dataset it learned on.
+const FACE_PARSER_URL: &str =
+    "https://huggingface.co/jonathandinu/face-parsing/resolve/main/onnx/model.onnx?download=true";
+
+const FACE_PARSER_FILENAME: &str = "face_parsing_segformer_b5.onnx";
+
+const FACE_PARSER_SHA256: &str = "6d4e67af60ff78184745ebf74cc15163c0adc27d45cdeba31e3a03d1096fb8c3";
+
+// CodeFormer (S-Lab, non-commercial), from the ONNX export facefusion publishes: a 512x512 face aligned
+// on FFHQ's five points, RGB scaled to -1..1, and a fidelity weight, in; the face restored, out.
+const FACE_RESTORER_URL: &str = "https://github.com/facefusion/facefusion-assets/releases/download/models-3.0.0/codeformer.onnx";
+
+const FACE_RESTORER_FILENAME: &str = "codeformer.onnx";
+
+const FACE_RESTORER_SHA256: &str =
+    "21710e7ab61c82683576c428e9c1b6fe1ed419586b7b39e394c3449c294b550f";
+
+// ABPN's blemish detector (Alibaba's skin retouching, Apache-2.0), exported to ONNX with the sigmoid
+// folded in by scripts/export_blemish_onnx.py: a 768x768 crop of 1.5 times the face, scaled to -1..1,
+// in; how likely each pixel is to be part of a blemish, 0 to 1, out. ModelScope publishes it as PyTorch
+// weights only, so like the wrinkle model it is put in the models folder by hand.
+pub const BLEMISH_FILENAME: &str = "abpn_blemish_detection.onnx";
+
+// The two deblurring networks, exported from their authors' weights by scripts/export_deblur_onnx.py
+// (both MIT): NAFNet trained on GoPro camera shake, and Restormer trained on single-image defocus. RGB
+// 0..1 in, deblurred out, any size that is a multiple of 16. Nothing hosts them as ONNX, so they are put
+// in the models folder by hand.
+pub const DEBLUR_MOTION_FILENAME: &str = "deblur_motion_nafnet.onnx";
+pub const DEBLUR_DEFOCUS_FILENAME: &str = "deblur_defocus_restormer.onnx";
 
 type SharedSession = Arc<Mutex<Session>>;
 
@@ -235,6 +282,20 @@ const FACE_SEGMENTER_ASSET: ModelAsset = ModelAsset {
     name: "Face Segmentation Model",
 };
 
+const FACE_PARSER_ASSET: ModelAsset = ModelAsset {
+    filename: FACE_PARSER_FILENAME,
+    url: FACE_PARSER_URL,
+    sha256: Some(FACE_PARSER_SHA256),
+    name: "Face Parsing Model",
+};
+
+const FACE_RESTORER_ASSET: ModelAsset = ModelAsset {
+    filename: FACE_RESTORER_FILENAME,
+    url: FACE_RESTORER_URL,
+    sha256: Some(FACE_RESTORER_SHA256),
+    name: "Face Restoration Model",
+};
+
 const DEPTH_ASSET: ModelAsset = ModelAsset {
     filename: DEPTH_FILENAME,
     url: DEPTH_URL,
@@ -310,6 +371,13 @@ const UPSCALE_ASSET: ModelAsset = ModelAsset {
     name: "Super Resolution Model",
 };
 
+const UPSCALE4_ASSET: ModelAsset = ModelAsset {
+    filename: UPSCALE4_FILENAME,
+    url: UPSCALE4_URL,
+    sha256: Some(UPSCALE4_SHA256),
+    name: "Super Resolution Model (x4)",
+};
+
 const LAMA_ASSET: ModelAsset = ModelAsset {
     filename: LAMA_FILENAME,
     url: LAMA_URL,
@@ -332,6 +400,10 @@ pub enum AiMaskModel {
     Text,
     Face,
     Depth,
+    // the face parser, which the face masks and the skin tool read when they are asked to
+    FaceParsing,
+    // CodeFormer, for the Restore Face tool
+    FaceRestore,
 }
 
 impl AiMaskModel {
@@ -359,6 +431,8 @@ impl AiMaskModel {
                 FACE_SEGMENTER_ASSET,
             ],
             AiMaskModel::Depth => &[DEPTH_ASSET],
+            AiMaskModel::FaceParsing => &[FACE_PARSER_ASSET],
+            AiMaskModel::FaceRestore => &[FACE_RESTORER_ASSET],
         }
     }
 }
@@ -378,6 +452,8 @@ pub struct AiModels {
     clip_tokenizer: Mutex<Option<Arc<Tokenizer>>>,
     face_landmarks: Mutex<Option<SharedSession>>,
     face_segmenter: Mutex<Option<SharedSession>>,
+    face_parser: Mutex<Option<SharedSession>>,
+    face_restorer: Mutex<Option<SharedSession>>,
     depth_anything: Mutex<Option<SharedSession>>,
 }
 
@@ -398,6 +474,8 @@ impl AiModels {
             clip_tokenizer: Mutex::new(None),
             face_landmarks: Mutex::new(None),
             face_segmenter: Mutex::new(None),
+            face_parser: Mutex::new(None),
+            face_restorer: Mutex::new(None),
             depth_anything: Mutex::new(None),
         }
     }
@@ -502,6 +580,16 @@ impl AiModels {
 
     pub fn face_segmenter(&self) -> Result<SharedSession> {
         self.session(&self.face_segmenter, FACE_SEGMENTER_FILENAME, false)
+    }
+
+    pub fn face_parser(&self) -> Result<SharedSession> {
+        self.session(&self.face_parser, FACE_PARSER_FILENAME, true)
+    }
+
+    // on the processor: a face or two a picture is quick enough there, and its codebook lookup is not
+    // something every GPU provider takes
+    pub fn face_restorer(&self) -> Result<SharedSession> {
+        self.session(&self.face_restorer, FACE_RESTORER_FILENAME, false)
     }
 
     pub fn esam3_sky_prompt(&self) -> Result<Arc<Esam3Prompt>> {
@@ -717,6 +805,7 @@ fn build_session_with_dims(
         && GPU_STATUS.load(Ordering::Acquire) < GPU_FAILED
         && let Some(gpu_provider) = gpu_execution_provider()
     {
+        make_room_for(model_path);
         match create_session(model_path, kind, Some(gpu_provider), gpu_patch, fixed_dims) {
             Ok(session) => {
                 let _ = GPU_STATUS.compare_exchange(
@@ -738,14 +827,139 @@ fn build_session_with_dims(
 }
 
 pub fn gpu_acceleration_enabled(app_handle: &tauri::AppHandle) -> bool {
+    let _ = APP.set(app_handle.clone());
     GPU_STATUS.load(Ordering::Acquire) < GPU_FAILED
         && crate::app::settings::load_settings(app_handle.clone())
             .map(|settings| settings.ai_gpu_acceleration)
             .unwrap_or(true)
 }
 
+/// The GPU ran out of video memory for a model. That is worth freeing memory and trying again in smaller
+/// pieces for, not a reason to give the GPU up for every model.
+#[derive(Debug)]
+pub struct GpuOutOfMemory(pub String);
+
+impl std::fmt::Display for GpuOutOfMemory {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "the GPU is out of video memory: {}", self.0)
+    }
+}
+
+impl std::error::Error for GpuOutOfMemory {}
+
+/// The GPU could not take the work as it was given, and smaller pieces on a fresh session may go
+/// through: out of video memory (E_OUTOFMEMORY), or the device reset by Windows because one step ran
+/// past its time limit (DXGI_ERROR_DEVICE_REMOVED, DXGI_ERROR_DEVICE_HUNG), which a smaller tile makes
+/// shorter. DirectML gives the codes in whatever language Windows speaks.
+fn is_out_of_memory(message: &str) -> bool {
+    let message = message.to_ascii_lowercase();
+    [
+        "8007000e",
+        "e_outofmemory",
+        "out of memory",
+        "outofmemory",
+        "887a0005",
+        "887a0006",
+    ]
+    .iter()
+    .any(|sign| message.contains(sign))
+}
+
+/// The app, kept the first time a model asks whether it may use the GPU, so that memory can be freed
+/// from deep in a run that has none.
+static APP: std::sync::OnceLock<tauri::AppHandle> = std::sync::OnceLock::new();
+
+/// Drops every AI session the app keeps cached, so the video memory they hold is free for the model
+/// that needs it. A session in use is kept alive by whoever is using it. False when nothing was freed.
+pub fn make_room_on_gpu() -> bool {
+    let Some(app) = APP.get() else {
+        return false;
+    };
+    let state = app.state::<crate::app::state::AppState>();
+    // never wait on it: whoever holds it may be the one waiting for this
+    let Ok(mut ai_state) = state.ai_state.try_lock() else {
+        return false;
+    };
+    let Some(ai_state) = ai_state.as_mut() else {
+        return false;
+    };
+    ai_state.release_sessions();
+    log::info!("Freed the video memory of the AI models not in use");
+    true
+}
+
+/// How much video memory the high-performance GPU still lets this process have, by Windows' own budget.
+#[cfg(target_os = "windows")]
+pub fn gpu_memory_headroom() -> Option<u64> {
+    use windows::Win32::Graphics::Dxgi::{
+        CreateDXGIFactory2, DXGI_CREATE_FACTORY_FLAGS, DXGI_GPU_PREFERENCE_HIGH_PERFORMANCE,
+        DXGI_MEMORY_SEGMENT_GROUP_LOCAL, DXGI_QUERY_VIDEO_MEMORY_INFO, IDXGIAdapter3,
+        IDXGIFactory6,
+    };
+    unsafe {
+        let factory: IDXGIFactory6 = CreateDXGIFactory2(DXGI_CREATE_FACTORY_FLAGS(0)).ok()?;
+        let adapter: IDXGIAdapter3 = factory
+            .EnumAdapterByGpuPreference(0, DXGI_GPU_PREFERENCE_HIGH_PERFORMANCE)
+            .ok()?;
+        let mut info = DXGI_QUERY_VIDEO_MEMORY_INFO::default();
+        adapter
+            .QueryVideoMemoryInfo(0, DXGI_MEMORY_SEGMENT_GROUP_LOCAL, &mut info)
+            .ok()?;
+        Some(info.Budget.saturating_sub(info.CurrentUsage))
+    }
+}
+
+#[cfg(not(target_os = "windows"))]
+pub fn gpu_memory_headroom() -> Option<u64> {
+    None
+}
+
+/// Before a model is put on the GPU: when it would not fit beside what is there, the models not in use
+/// make way for it. What a network needs while it runs is a few times its weights, so that is the guess.
+fn make_room_for(model_path: &Path) {
+    let (Some(free), Ok(meta)) = (gpu_memory_headroom(), fs::metadata(model_path)) else {
+        return;
+    };
+    let wanted = meta.len().saturating_mul(4) + 768 * 1024 * 1024;
+    if free < wanted && make_room_on_gpu() {
+        log::info!(
+            "{} needs about {} MB of video memory and {} MB were free",
+            model_path.display(),
+            wanted / (1024 * 1024),
+            free / (1024 * 1024)
+        );
+    }
+}
+
+/// The last resort, once a model has run out of video memory with nothing else on the GPU and in its
+/// smallest pieces: every model goes to the CPU from now on.
+pub fn give_up_gpu(reason: &str) {
+    if GPU_STATUS
+        .compare_exchange(GPU_ACTIVE, GPU_FAILED, Ordering::AcqRel, Ordering::Acquire)
+        .is_ok()
+    {
+        log::warn!("GPU inference failed, using the CPU for AI models from now on: {reason}");
+    }
+}
+
+/// How many times in a row the GPU has run out of video memory. Each time the cached sessions make way
+/// and the work is tried again, smaller where it can be; the third time in a row, the CPU takes over.
+static OUT_OF_MEMORY_STREAK: AtomicU8 = AtomicU8::new(0);
+const OUT_OF_MEMORY_LIMIT: u8 = 3;
+
 pub fn gpu_inference<T>(result: ort::Result<T>) -> Result<T> {
+    if result.is_ok() {
+        OUT_OF_MEMORY_STREAK.store(0, Ordering::Release);
+    }
     result.map_err(|e| {
+        let message = e.to_string();
+        if GPU_STATUS.load(Ordering::Acquire) == GPU_ACTIVE && is_out_of_memory(&message) {
+            let streak = OUT_OF_MEMORY_STREAK.fetch_add(1, Ordering::AcqRel) + 1;
+            if streak >= OUT_OF_MEMORY_LIMIT {
+                give_up_gpu(&message);
+            }
+            return GpuOutOfMemory(message).into();
+        }
         if GPU_STATUS
             .compare_exchange(GPU_ACTIVE, GPU_FAILED, Ordering::AcqRel, Ordering::Acquire)
             .is_ok()
@@ -1089,6 +1303,45 @@ pub async fn get_or_init_upscale_model(
     Ok(upscale_model)
 }
 
+pub async fn get_or_init_upscale4_model(
+    app_handle: &tauri::AppHandle,
+    ai_state_mutex: &Mutex<Option<AiState>>,
+    ai_init_lock: &TokioMutex<()>,
+) -> Result<Arc<Mutex<Session>>> {
+    let cached = || cached_ai_state(ai_state_mutex, |state| state.upscale4_model.clone());
+    if let Some(session) = cached() {
+        return Ok(session);
+    }
+
+    let _guard = ai_init_lock.lock().await;
+
+    if let Some(session) = cached() {
+        return Ok(session);
+    }
+
+    let models_dir = get_models_dir(app_handle)?;
+    download_and_verify_model(app_handle, &models_dir, &UPSCALE4_ASSET).await?;
+
+    let _ = ort::init().with_name("AI-Upscale").commit();
+    // its square is fixed in the file, so there is nothing to pin
+    let session = Arc::new(Mutex::new(build_session(
+        &models_dir.join(UPSCALE4_FILENAME),
+        SessionKind::Persistent,
+        gpu_acceleration_enabled(app_handle),
+        None,
+    )?));
+
+    crate::register_exit_handler();
+
+    ai_state_mutex
+        .lock()
+        .unwrap()
+        .get_or_insert_with(AiState::default)
+        .upscale4_model = Some(session.clone());
+
+    Ok(session)
+}
+
 pub async fn get_or_init_clip_models(
     app_handle: &tauri::AppHandle,
     ai_state_mutex: &Mutex<Option<AiState>>,
@@ -1209,6 +1462,96 @@ pub async fn get_or_init_normal_model(
     Ok(normal_model)
 }
 
+/// A model the owner puts in the models folder by hand, because nothing hosts it in a form RapidRAW can
+/// download (see the export scripts in `scripts/`).
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+pub enum ManualModel {
+    Wrinkles,
+    Blemishes,
+    DeblurMotion,
+    DeblurDefocus,
+}
+
+impl ManualModel {
+    pub fn filename(self) -> &'static str {
+        match self {
+            Self::Wrinkles => WRINKLE_FILENAME,
+            Self::Blemishes => BLEMISH_FILENAME,
+            Self::DeblurMotion => DEBLUR_MOTION_FILENAME,
+            Self::DeblurDefocus => DEBLUR_DEFOCUS_FILENAME,
+        }
+    }
+
+    /// Whether the model is put on the GPU. Restormer is not: on DirectML it takes most of a 6 GB card
+    /// whatever the tile size, and its long steps run past Windows' GPU time limit, which resets the
+    /// card for every model and can make the screen flicker. On the processor it is slower and safe.
+    pub fn gpu_capable(self) -> bool {
+        self != Self::DeblurDefocus
+    }
+
+    fn what(self) -> &'static str {
+        match self {
+            Self::Wrinkles => "wrinkle",
+            Self::Blemishes => "blemish",
+            Self::DeblurMotion => "motion deblur",
+            Self::DeblurDefocus => "defocus deblur",
+        }
+    }
+}
+
+/// The session for a model put in the models folder by hand, built the first time it is asked for and
+/// kept for the rest of the run. Without the file it says where the file goes.
+pub async fn get_or_init_manual_model(
+    app_handle: &tauri::AppHandle,
+    ai_state_mutex: &Mutex<Option<AiState>>,
+    ai_init_lock: &TokioMutex<()>,
+    model: ManualModel,
+) -> Result<Arc<Mutex<Session>>> {
+    let cached = || {
+        cached_ai_state(ai_state_mutex, |state| {
+            state.manual_models.get(&model).cloned()
+        })
+    };
+    if let Some(session) = cached() {
+        return Ok(session);
+    }
+
+    let _guard = ai_init_lock.lock().await;
+
+    if let Some(session) = cached() {
+        return Ok(session);
+    }
+
+    let model_path = get_models_dir(app_handle)?.join(model.filename());
+    if !model_path.exists() {
+        return Err(anyhow::anyhow!(
+            "The {} model is not installed: put {} in {}",
+            model.what(),
+            model.filename(),
+            model_path.parent().unwrap_or(&model_path).display()
+        ));
+    }
+
+    let _ = ort::init().with_name("AI").commit();
+    let session = Arc::new(Mutex::new(build_session(
+        &model_path,
+        SessionKind::OneShot,
+        model.gpu_capable() && gpu_allowed_on_platform() && gpu_acceleration_enabled(app_handle),
+        None,
+    )?));
+
+    crate::register_exit_handler();
+
+    ai_state_mutex
+        .lock()
+        .unwrap()
+        .get_or_insert_with(AiState::default)
+        .manual_models
+        .insert(model, session.clone());
+
+    Ok(session)
+}
+
 const ESAM3_PROMPT_TOKENS: usize = 16;
 
 const ESAM3_EMBED_DIM: usize = 256;
@@ -1225,12 +1568,15 @@ pub struct AiState {
     /// The RawForge network in use, with the size it is.
     pub rawforge_model: Option<(RawForgeVariant, Arc<Mutex<Session>>)>,
     pub upscale_model: Option<Arc<Mutex<Session>>>,
+    pub upscale4_model: Option<Arc<Mutex<Session>>>,
     pub clip_models: Option<Arc<ClipModels>>,
     pub lama_model: Option<Arc<Mutex<Session>>>,
     pub normal_model: Option<Arc<Mutex<Session>>>,
+    pub manual_models: HashMap<ManualModel, Arc<Mutex<Session>>>,
     pub embeddings: Option<ImageEmbeddings>,
     pub esam3_features: Option<Arc<Esam3Features>>,
     pub face_analysis: Option<Arc<FaceAnalysis>>,
+    pub face_parsing: Option<Arc<FaceParsing>>,
     pub depth_map: Option<CachedDepthMap>,
 }
 
@@ -1240,6 +1586,7 @@ impl AiState {
     pub fn forget_face_results(&mut self) {
         self.esam3_features = None;
         self.face_analysis = None;
+        self.face_parsing = None;
     }
 
     pub fn release_sessions(&mut self) {
@@ -1247,9 +1594,11 @@ impl AiState {
         self.denoise_model = None;
         self.rawforge_model = None;
         self.upscale_model = None;
+        self.upscale4_model = None;
         self.clip_models = None;
         self.lama_model = None;
         self.normal_model = None;
+        self.manual_models.clear();
     }
 }
 

@@ -19,7 +19,7 @@ import {
   RelightLight,
   createRelightLight,
 } from '../../../utils/adjustments';
-import { Mask, SubMask, SubMaskMode, ToolType } from '../../../types/masks';
+import { Mask, SubMask, SubMaskMode, ToolType, isRepairTool } from '../../../types/masks';
 import { AppSettings } from '../../../types/settings';
 import { BrushSettings, SelectedImage, TransformState, type OverlayMode } from '../../../types/editor';
 import { Invokes } from '../../../types/invokes';
@@ -1011,7 +1011,8 @@ const MaskOverlay = memo(
       subMask.type === Mask.Clone ||
       subMask.type === Mask.Heal ||
       subMask.type === Mask.Liquify ||
-      subMask.type === Mask.Retouch
+      subMask.type === Mask.Retouch ||
+      isRepairTool(subMask.type)
     ) {
       const { lines = [] } = p;
 
@@ -1837,6 +1838,9 @@ const ImageCanvas = memo(
       isAiEditing && (activeSubMask?.type === Mask.Clone || activeSubMask?.type === Mask.Heal);
 
     const isLiquifyActive = isAiEditing && activeSubMask?.type === Mask.Liquify;
+    // redrawn while the pointer moves: Retouch is quick enough for that. The repairs (Restore Face,
+    // Deblur, Dust Spots, Power Lines) run a network or a search over the whole stroke, so they run once,
+    // when the stroke ends: run on the first pixels of a stroke, each was done twice.
     const isRetouchActive = isAiEditing && activeSubMask?.type === Mask.Retouch;
 
     const isDirectPatchActive =
@@ -1844,7 +1848,8 @@ const ImageCanvas = memo(
       (activeSubMask?.type === Mask.Clone ||
         activeSubMask?.type === Mask.Heal ||
         activeSubMask?.type === Mask.Liquify ||
-        activeSubMask?.type === Mask.Retouch);
+        activeSubMask?.type === Mask.Retouch ||
+        isRepairTool(activeSubMask?.type));
 
     const isBrushActive =
       (isMasking || isAiEditing) &&
@@ -2001,7 +2006,13 @@ const ImageCanvas = memo(
       const processContainers = (containers: any[], isAi: boolean) => {
         containers.forEach((container) => {
           container.subMasks.forEach((sm: SubMask) => {
-            if (sm.type !== Mask.Clone && sm.type !== Mask.Heal && sm.type !== Mask.Liquify && sm.type !== Mask.Retouch)
+            if (
+              sm.type !== Mask.Clone &&
+              sm.type !== Mask.Heal &&
+              sm.type !== Mask.Liquify &&
+              sm.type !== Mask.Retouch &&
+              !isRepairTool(sm.type)
+            )
               return;
             const lines: Array<DrawnLine> = sm.parameters?.lines || [];
             const center = getStrokeCenter(lines);
@@ -2013,7 +2024,7 @@ const ImageCanvas = memo(
             let cx = center.x;
             let cy = center.y;
 
-            if (sm.type === Mask.Liquify || sm.type === Mask.Retouch) {
+            if (sm.type === Mask.Liquify || sm.type === Mask.Retouch || isRepairTool(sm.type)) {
               cx = center.x + 16;
               cy = center.y - 16;
             } else if (sourceX !== undefined && sourceY !== undefined) {
@@ -3832,7 +3843,8 @@ const ImageCanvas = memo(
                                   renderSubMask.type === Mask.Clone ||
                                   renderSubMask.type === Mask.Heal ||
                                   renderSubMask.type === Mask.Liquify ||
-                                  renderSubMask.type === Mask.Retouch;
+                                  renderSubMask.type === Mask.Retouch ||
+                                  isRepairTool(renderSubMask.type);
 
                                 const isThisSubMaskActive = renderSubMask.id === activeId;
                                 const isActivelyDrawingThis = isThisSubMaskActive && isDrawing.current;
@@ -3845,7 +3857,9 @@ const ImageCanvas = memo(
                                     isHoveringThisMarker ||
                                     (isThisSubMaskActive && isMaskControlHovered) ||
                                     (isThisSubMaskActive &&
-                                      (renderSubMask.type === Mask.Liquify || renderSubMask.type === Mask.Retouch));
+                                      (renderSubMask.type === Mask.Liquify ||
+                                        renderSubMask.type === Mask.Retouch ||
+                                        isRepairTool(renderSubMask.type)));
                                 }
 
                                 return (

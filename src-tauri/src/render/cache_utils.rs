@@ -109,9 +109,22 @@ fn hash_ai_denoise(adjustments: &serde_json::Value, hasher: &mut DefaultHasher) 
     let upscale = crate::ai::upscale::is_enabled(adjustments);
     upscale.hash(hasher);
     if upscale {
-        hash_effect_keys(adjustments, &["aiUpscaleDetail"], hasher);
+        hash_effect_keys(
+            adjustments,
+            &[
+                "aiUpscaleEnabled",
+                "aiUpscaleDetail",
+                "aiUpscaleFactor",
+                "superfocusEnabled",
+                "superfocusUpscaler",
+                "superfocusAmount",
+            ],
+            hasher,
+        );
         crate::ai::upscale::cache_epoch().hash(hasher);
     }
+    // the skin renewal changes the picture itself, so it belongs with what the picture is made from
+    crate::effects::renewal::hash_inputs(adjustments, hasher);
 }
 
 fn hash_negative_conversion(adjustments: &serde_json::Value, hasher: &mut DefaultHasher) {
@@ -291,6 +304,13 @@ pub fn calculate_effects_hash(adjustments: &serde_json::Value) -> u64 {
                 "skinFaceMap",
                 "skinLinesMap",
                 "skinUnderEyeMap",
+                "skinLinesAi",
+                "skinLinesAiMap",
+                "skinSpotsAi",
+                "skinSpotsAiMap",
+                "skinPigment",
+                "skinPigmentSensitivity",
+                "skinTone",
                 "skinSensitivity",
                 "skinSpotsSensitivity",
                 "skinLinesSensitivity",
@@ -413,12 +433,23 @@ pub fn calculate_transform_hash(adjustments: &serde_json::Value) -> u64 {
             "skinLinesSensitivity",
             "skinRednessSensitivity",
             "skinUnderEyeSensitivity",
+            "skinLinesAi",
+            "skinSpotsAi",
+            "skinPigment",
+            "skinPigmentSensitivity",
+            "skinTone",
         ] {
             if let Some(val) = adjustments.get(key) {
                 val.to_string().hash(&mut hasher);
             }
         }
-        for key in ["skinFaceMap", "skinLinesMap", "skinUnderEyeMap"] {
+        for key in [
+            "skinFaceMap",
+            "skinLinesMap",
+            "skinUnderEyeMap",
+            "skinLinesAiMap",
+            "skinSpotsAiMap",
+        ] {
             if let Some(val) = adjustments.get(key) {
                 val.as_str().unwrap_or("").len().hash(&mut hasher);
             }

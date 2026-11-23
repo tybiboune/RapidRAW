@@ -17,6 +17,9 @@ import {
   MopSparkles,
   TextSearch,
   ScanFace,
+  Focus,
+  CircleDot,
+  Cable,
   Magnet,
 } from 'lucide-react';
 import { motion } from 'framer-motion';
@@ -46,6 +49,10 @@ export const MASK_ICON_MAP: Record<Mask, any> = {
   [Mask.Heal]: Bandage,
   [Mask.Liquify]: Spline,
   [Mask.Retouch]: MopSparkles,
+  [Mask.FaceRestore]: ScanFace,
+  [Mask.Deblur]: Focus,
+  [Mask.DustRemoval]: CircleDot,
+  [Mask.WireRemoval]: Cable,
 };
 
 export const MASK_AI_TYPES: Array<MaskType> = [
@@ -67,8 +74,15 @@ export const FACE_PARTS = [
   'teeth',
   'nose',
   'hair',
+  'ears',
+  'neck',
+  'glasses',
 ] as const;
 export type FacePart = (typeof FACE_PARTS)[number];
+
+// How the parts of a face are found: from the landmarks, from the AI face parser, or from both together.
+export const FACE_METHODS = ['landmarks', 'parsing', 'combined'] as const;
+export type FaceMethod = (typeof FACE_METHODS)[number];
 
 export const MASK_BASIC_TYPES: Array<MaskType> = [
   { disabled: false, icon: Brush, name: 'Brush', type: Mask.Brush },
@@ -113,6 +127,30 @@ export const AI_TOUCH_UP_TYPES: Array<MaskType> = [
     icon: MopSparkles,
     name: 'Retouch',
     type: Mask.Retouch,
+  },
+  {
+    disabled: false,
+    icon: ScanFace,
+    name: 'Restore Face',
+    type: Mask.FaceRestore,
+  },
+  {
+    disabled: false,
+    icon: Focus,
+    name: 'Deblur',
+    type: Mask.Deblur,
+  },
+  {
+    disabled: false,
+    icon: CircleDot,
+    name: 'Dust Spots',
+    type: Mask.DustRemoval,
+  },
+  {
+    disabled: false,
+    icon: Cable,
+    name: 'Power Lines',
+    type: Mask.WireRemoval,
   },
 ];
 

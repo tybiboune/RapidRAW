@@ -467,7 +467,7 @@ impl BaseCache {
         self.state().pending.contains(key)
     }
 
-    fn store(&self, job: Job, image: Rgb32FImage) {
+    pub fn store(&self, job: Job, image: Rgb32FImage) {
         let (width, height) = image.dimensions();
         let data: Vec<f16> = image.as_raw().par_iter().map(|&v| quantize(v)).collect();
         drop(image);

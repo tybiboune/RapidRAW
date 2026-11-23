@@ -18,7 +18,17 @@ export enum Mask {
   Heal = 'heal',
   Liquify = 'liquify',
   Retouch = 'retouch',
+  FaceRestore = 'face-restore',
+  Deblur = 'deblur',
+  DustRemoval = 'dust-removal',
+  WireRemoval = 'wire-removal',
 }
+
+// The brushed repairs whose patch the backend works out from the strokes: restoring faces, deblurring,
+// sensor dust and power lines. They are drawn and handled like Retouch.
+export const REPAIR_TOOL_TYPES: Array<string> = [Mask.FaceRestore, Mask.Deblur, Mask.DustRemoval, Mask.WireRemoval];
+
+export const isRepairTool = (type?: string | null): boolean => !!type && REPAIR_TOOL_TYPES.includes(type);
 
 export enum SubMaskMode {
   Additive = 'additive',

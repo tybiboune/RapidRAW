@@ -53,7 +53,7 @@ import {
   AI_SUB_MASK_COMPONENT_TYPES,
   NewMaskDropZone,
 } from './Masks';
-import { Mask, MaskType, SubMask, SubMaskMode, ToolType } from '../../../types/masks';
+import { Mask, MaskType, SubMask, SubMaskMode, ToolType, isRepairTool } from '../../../types/masks';
 import { formatMaskTypeName, getSubMaskName } from '../../../utils/maskNames';
 import { Adjustments, AiPatch, Coord } from '../../../utils/adjustments';
 import { OPTION_SEPARATOR } from '../../../types/ui';
@@ -68,7 +68,16 @@ import { useAiMasking } from '../../../hooks/useAiMasking';
 import { useCloudUsage } from '../../../hooks/useCloudUsage';
 import { useDelayedLoading } from '../../../hooks/useDelayedLoading';
 
-export const STANDALONE_MASK_TYPES: Mask[] = [Mask.Clone, Mask.Heal, Mask.Liquify, Mask.Retouch];
+export const STANDALONE_MASK_TYPES: Mask[] = [
+  Mask.Clone,
+  Mask.Heal,
+  Mask.Liquify,
+  Mask.Retouch,
+  Mask.FaceRestore,
+  Mask.Deblur,
+  Mask.DustRemoval,
+  Mask.WireRemoval,
+];
 
 export const isStandaloneMask = (type?: Mask): boolean => Boolean(type && STANDALONE_MASK_TYPES.includes(type));
 
@@ -105,6 +114,40 @@ const SUB_MASK_CONFIG: any = {
   [Mask.Retouch]: {
     showBrushTools: true,
     parameters: [{ key: 'intensity', min: 1, max: 100, step: 1, defaultValue: 40 }],
+  },
+  // CodeFormer over the faces under the brush: fidelity is how close to this face it stays, strength how
+  // much of the restored face is laid over the original
+  [Mask.FaceRestore]: {
+    showBrushTools: true,
+    hideToolSwitch: false,
+    parameters: [
+      { key: 'fidelity', min: 0, max: 100, step: 1, defaultValue: 50 },
+      { key: 'strength', min: 1, max: 100, step: 1, defaultValue: 80 },
+    ],
+  },
+  // a network over the brushed area: how wide the blur is, and how much of the change is kept
+  [Mask.Deblur]: {
+    showBrushTools: true,
+    parameters: [
+      { key: 'blurSize', min: 0, max: 100, step: 1, defaultValue: 0 },
+      { key: 'strength', min: 1, max: 100, step: 1, defaultValue: 80 },
+    ],
+  },
+  // round soft spots up to this many pixels across, and how faint a spot may be
+  [Mask.DustRemoval]: {
+    showBrushTools: true,
+    parameters: [
+      { key: 'spotSize', min: 4, max: 160, step: 1, defaultValue: 80 },
+      { key: 'sensitivity', min: 0, max: 100, step: 1, defaultValue: 50 },
+    ],
+  },
+  // long thin dark lines up to this many pixels wide, and how faint a line may be
+  [Mask.WireRemoval]: {
+    showBrushTools: true,
+    parameters: [
+      { key: 'wireWidth', min: 1, max: 40, step: 1, defaultValue: 6 },
+      { key: 'sensitivity', min: 0, max: 100, step: 1, defaultValue: 50 },
+    ],
   },
   [Mask.Linear]: { parameters: [] },
   [Mask.AiSubject]: {
@@ -702,6 +745,18 @@ export default function AIPanel() {
     } else if (type === Mask.Retouch) {
       const count = countPatchesOfType(adjustments.aiPatches, Mask.Retouch) + 1;
       name = t('editor.ai.patches.retouch', { count });
+    } else if (type === Mask.FaceRestore) {
+      const count = countPatchesOfType(adjustments.aiPatches, Mask.FaceRestore) + 1;
+      name = t('editor.ai.patches.restoreFace', { count });
+    } else if (type === Mask.Deblur) {
+      const count = countPatchesOfType(adjustments.aiPatches, Mask.Deblur) + 1;
+      name = t('editor.ai.patches.deblur', { count });
+    } else if (type === Mask.DustRemoval) {
+      const count = countPatchesOfType(adjustments.aiPatches, Mask.DustRemoval) + 1;
+      name = t('editor.ai.patches.dustRemoval', { count });
+    } else if (type === Mask.WireRemoval) {
+      const count = countPatchesOfType(adjustments.aiPatches, Mask.WireRemoval) + 1;
+      name = t('editor.ai.patches.wireRemoval', { count });
     } else {
       const count = (adjustments.aiPatches || []).length + 1;
       name = t('editor.ai.patches.aiEdit', { count });
@@ -2333,7 +2388,10 @@ function SettingsPanel({
                     })
                   }
                   onPointerUp={() => {
-                    const isDirectTool = activeSubMask.type === Mask.Liquify || activeSubMask.type === Mask.Retouch;
+                    const isDirectTool =
+                      activeSubMask.type === Mask.Liquify ||
+                      activeSubMask.type === Mask.Retouch ||
+                      isRepairTool(activeSubMask.type);
 
                     if (isDirectTool && activeSubMask.parameters?.lines?.length > 0) {
                       setTimeout(() => {
@@ -2344,6 +2402,32 @@ function SettingsPanel({
                   {...(param.key !== 'grow' && { fillOrigin: 'min' })}
                 />
               ))}
+
+              {isComponentMode && activeSubMask.type === Mask.Deblur && (
+                <div className="pt-2">
+                  <Text variant={TextVariants.label} className="mb-2 block">
+                    {t('editor.ai.deblur.mode')}
+                  </Text>
+                  <Dropdown
+                    options={[
+                      { label: t('editor.ai.deblur.modes.motion'), value: 'motion' },
+                      { label: t('editor.ai.deblur.modes.defocus'), value: 'defocus' },
+                    ]}
+                    value={activeSubMask.parameters.deblurMode || 'motion'}
+                    onChange={(val) => {
+                      updateSubMask(activeSubMask.id, {
+                        parameters: { ...activeSubMask.parameters, deblurMode: val },
+                      });
+
+                      setTimeout(() => {
+                        if (activeSubMask.parameters?.lines?.length > 0) {
+                          onManualCleanup(activeSubMask.id);
+                        }
+                      }, 0);
+                    }}
+                  />
+                </div>
+              )}
 
               {isComponentMode && activeSubMask.type === Mask.Liquify && (
                 <div className="pt-2">

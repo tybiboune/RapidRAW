@@ -81,6 +81,7 @@ const NON_DEFAULTABLE_KEYS: &[&str] = &[
     "relightNormalMap",
     "aiDenoiseEnabled",
     "aiUpscaleEnabled",
+    "superfocusEnabled",
     "lensBlurEnabled",
     "fogEnabled",
     "relightEnabled",

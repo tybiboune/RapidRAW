@@ -38,6 +38,18 @@ struct Params {
     thr_lines: f32,
     thr_redness: f32,
     thr_under_eye: f32,
+    // 1 when the lines are read from the wrinkle model's map rather than from the curvature, else 0
+    lines_ai: f32,
+    // the brown and dark patches of pigment, and how even the skin's colour is made
+    pigment: f32,
+    tone: f32,
+    thr_pigment: f32,
+    // 1 when the blemishes are read from the blemish detector's map rather than from the shape of the
+    // brightness, else 0
+    spots_ai: f32,
+    _pad0: u32,
+    _pad1: u32,
+    _pad2: u32,
 }
 
 @group(0) @binding(7) var<uniform> params: Params;
@@ -307,8 +319,9 @@ fn ridge(t: texture_2d<f32>, p: vec2<i32>, h: i32, yardstick: f32) -> vec4<f32> 
 }
 
 // t0, t1, t2: the split picture blurred to the three widths lines are looked for at. t3: the yardstick,
-// blurred. t4: the regions of the face, the folds in the first channel and the band under each eye in the
-// second. t5: the split picture blurred wide, the lie of the face.
+// blurred. t4: the regions of the face, the folds in the first channel, the band under each eye in the
+// second, and where the wrinkle model found lines in the third. t5: the split picture blurred wide, the
+// lie of the face.
 // Out: how sure this is a line, how much of it is under-eye shadow, the brightness of the skin on either
 // side of the line (what it is lifted towards), and the skin weight.
 @compute @workgroup_size(8, 8, 1)
@@ -356,7 +369,18 @@ fn sk_lines(@builtin(global_invocation_id) id: vec3<u32>) {
     // eyes, across the forehead - something everywhere else on the skin, little under the nose, where the
     // shadows are the shape of the face
     let folds = clamp(region.x, 0.0, 1.0);
-    let line = skin * best.x * folds * balanced;
+    var line = skin * best.x * folds * balanced;
+    // When the wrinkle model's map is there, how sure this is a line comes from it instead: it has seen
+    // thousands of faces and knows a crease from a pore or the edge of a shadow better than the curvature
+    // does. The curvature still says which way is across, and so where the skin on either side is, and a
+    // valley between two different stretches of skin is still left alone. Its probabilities are near
+    // all-or-nothing, so the detection slider moves where the map starts counting.
+    if (params.lines_ai > 0.0) {
+        let low = clamp(0.12 * params.thr_lines, 0.02, 0.6);
+        let high = clamp(0.5 * params.thr_lines, low + 0.05, 0.95);
+        let found = smooth_step(low, high, region.z);
+        line = mix(line, skin * found * balanced, params.lines_ai);
+    }
 
     // under the eye is darker than the cheek below it, inside the band where that happens
     let l_wide = textureLoad(t5, p, 0).x / max(textureLoad(t5, p, 0).w, 1e-4);
@@ -414,7 +438,8 @@ fn blob(t: texture_2d<f32>, p: vec2<i32>, h: i32, yardstick: f32, red_yardstick:
     return vec3<f32>(dark, red, light) * inside;
 }
 
-// t0, t1, t2: the split picture blurred to the three widths. t3: the yardstick, blurred.
+// t0, t1, t2: the split picture blurred to the three widths. t3: the yardstick, blurred. t4: the regions
+// of the face, with where the blemish detector found blemishes in the fourth channel.
 // Out: how sure this is a blemish, that times the width it was found at, nothing, and the skin weight.
 // A pale bump counts for a little more than half what a dark or red one does: it is more often a
 // highlight than something anyone wants gone.
@@ -439,6 +464,20 @@ fn sk_blob(@builtin(global_invocation_id) id: vec3<u32>) {
     var reach = f32(params.step_a);
     if (sb > best) { best = sb; reach = f32(params.step_b); }
     if (sc > best) { best = sc; reach = f32(params.step_c); }
+    // The detector's map, when it is there, says where the blemishes are in place of the shape of the
+    // brightness: it knows a mole from a pore and a spot from the shadow of a fold, which the shape alone
+    // does not. The detection slider moves where on its scale a pixel counts, the way the pipeline it
+    // comes from takes a half as certain and a third as nothing. How far out the clean skin is still comes
+    // from the widths, at the largest unless the shape found the blemish at a smaller one.
+    if (params.spots_ai > 0.0) {
+        let uv = (vec2<f32>(id.xy) + 0.5) / vec2<f32>(params.grid.dst);
+        let found = tap_sample(t4, tap_uv(uv, params.region_size)).w;
+        let low = clamp(0.33 * params.thr_spots, 0.05, 0.85);
+        let high = clamp(0.5 * params.thr_spots, low + 0.05, 0.95);
+        let ai = smooth_step(low, high, found) * inside_skin(t0, p);
+        if (best < 0.05) { reach = f32(params.step_c); }
+        best = mix(best, ai, params.spots_ai);
+    }
     textureStore(out_f32, p, vec4<f32>(best, reach * best, 0.0, skin));
 }
 
@@ -604,6 +643,61 @@ fn sk_apply(@builtin(global_invocation_id) id: vec3<u32>) {
         if (under > 0.0) { level += under * extra.y * params.under_eye * 0.8; }
         touched = max(touched, extra.y * params.under_eye);
     }
+    // Pigment and an uneven complexion are read from the colour a patch has for its brightness, not
+    // from the colour axes as they are: those shrink with the brightness, so in absolute terms every
+    // shadow on a face - the eye sockets, under the nose - would read as a patch of something, and
+    // evening them would paint the shadows the colour of the lit cheek.
+    if (params.pigment > 0.0 || params.tone > 0.0) {
+        let lf = max(l_fine, 0.05);
+        let lw = max(l_wide, 0.05);
+        let blue_fine = fine.y / max(fine.w, 1e-4) / lf;
+        let red_fine = fine.z / max(fine.w, 1e-4) / lf;
+        let blue_wide = wide.y / max(wide.w, 1e-4) / lw;
+        let red_wide = wide.z / max(wide.w, 1e-4) / lw;
+        // A patch of pigment - a sun spot, an age spot, a freckle, the mask of melasma - is browner than
+        // the skin around it for its brightness, and darker. A shadow is darker and no browner, so it is
+        // left alone. The patch is brought up to its surroundings by the difference of the two blurred
+        // copies alone, which leaves the grain running through it where it was: nothing is healed over,
+        // the patch only stops being darker and browner than the skin around it.
+        if (params.pigment > 0.0) {
+            let darker = max(l_wide - l_fine, 0.0);
+            // brown is down the blue axis and up the red one: melanin takes the blue out first
+            let browner = max(blue_wide - blue_fine, 0.0) + max(red_fine - red_wide, 0.0) * 0.5;
+            // Pigment is a shade or two darker than the skin around it. A lash line, a brow, the edge of
+            // a nostril is far darker, and its brown, divided by so little brightness, reads as strong
+            // pigment: lifted, a lash line came out a pale blue-grey ring around the eye.
+            let deep = smooth_step(0.25, 0.4, darker / lw);
+            let k = smooth_step(2.0 * params.thr_pigment, 8.0 * params.thr_pigment, browner)
+                * smooth_step(0.0, 0.02, darker) * (1.0 - deep) * params.pigment;
+            let before = max(level, 0.05);
+            // up towards the skin around, never past it
+            level = min(level + darker * k * 0.9, max(level, l_wide));
+            // The colour for its brightness moves towards the skin around by the brown taken out, and
+            // stops there: a pixel beside a dark patch, which the fine blur reaches, already has the
+            // skin's colour, and pushed on by the patch's brown it went blue.
+            let blue_here = ycc.y / before;
+            let red_here = ycc.z / before;
+            let blue_to = blue_here + (blue_wide - blue_fine) * k * 0.9;
+            let red_to = red_here + (red_wide - red_fine) * k * 0.6;
+            let blue_now = clamp(blue_to, min(blue_here, blue_wide), max(blue_here, blue_wide));
+            let red_now = clamp(red_to, min(red_here, red_wide), max(red_here, red_wide));
+            ycc.y = blue_now * max(level, 0.05);
+            ycc.z = red_now * max(level, 0.05);
+            touched = max(touched, k);
+        }
+        // An even complexion: the blotches of colour across the face - a cheek warmer than the forehead,
+        // a sallow patch, the mottling of tired skin - given the colour the skin around them has, for
+        // their own brightness. Only the blurred copies are compared, so the grain is left alone and the
+        // skin is evened, not smoothed. The brightness gets a touch of the same for blotchy skin, and no
+        // more: most of what the brightness does at this size is the shape of the face.
+        if (params.tone > 0.0) {
+            let k = params.tone;
+            ycc.y += (blue_wide - blue_fine) * level * k * 0.85;
+            ycc.z += (red_wide - red_fine) * level * k * 0.85;
+            level += (l_wide - l_fine) * k * 0.15;
+        }
+    }
+
     // and the skin's own grain goes back on top of whatever was done to it - only where something was, or
     // the grain would be added to skin nothing had touched and the picture would just get noisier
     if (params.keep_texture > 0.0) {

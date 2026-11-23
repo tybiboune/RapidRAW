@@ -319,6 +319,7 @@ const LEGACY_SECTION_TOOLS: &[(&str, &[&str])] = &[
             "presence",
             "noiseReduction",
             "superResolution",
+            "superfocus",
             "chromaticAberration",
             "negativeConversion",
         ],

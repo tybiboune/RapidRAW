@@ -1,4 +1,4 @@
-use crate::ai::models::gpu_inference;
+use crate::ai::models::{GpuOutOfMemory, gpu_inference, make_room_on_gpu};
 use anyhow::Result;
 use image::{DynamicImage, Rgb32FImage};
 use ndarray::Array4;
@@ -24,6 +24,15 @@ pub const UPSCALE_TILE_SIZE: usize = 544;
 
 const UPSCALE_TILE: TileParams = TileParams {
     cs: UPSCALE_TILE_SIZE,
+    margin: 16,
+    overlap: 16,
+};
+
+/// The four-times model takes a square of exactly this size.
+pub const UPSCALE4_TILE_SIZE: usize = 256;
+
+const UPSCALE4_TILE: TileParams = TileParams {
+    cs: UPSCALE4_TILE_SIZE,
     margin: 16,
     overlap: 16,
 };
@@ -104,6 +113,23 @@ fn run_plain(session: &Mutex<Session>, tile: Array4<f32>) -> Result<Array4<f32>>
         .map_err(|e| anyhow::anyhow!("Unexpected output shape: {}", e))
 }
 
+fn out_of_memory(result: &Result<Array4<f32>>) -> bool {
+    result
+        .as_ref()
+        .is_err_and(|e| e.downcast_ref::<GpuOutOfMemory>().is_some())
+}
+
+/// One tile through the network. When the GPU has run out of video memory, the cached sessions are
+/// dropped: DirectML cannot go on with a session that ran out, so the next attempt builds a fresh one,
+/// with the memory the others held free for it.
+fn infer_within_memory(infer: Infer, tile: Array4<f32>) -> Result<Array4<f32>> {
+    let result = infer(tile);
+    if out_of_memory(&result) {
+        make_room_on_gpu();
+    }
+    result
+}
+
 fn run_tiled(
     img: &Rgb32FImage,
     infer: Infer,
@@ -136,7 +162,7 @@ fn run_tiled(
         let origins_ref = &origins;
         scope.spawn(move || {
             for &(y0, x0) in origins_ref {
-                let tile = infer(extract_tile_mirror(img, x0, y0, params.cs));
+                let tile = infer_within_memory(infer, extract_tile_mirror(img, x0, y0, params.cs));
                 let failed = tile.is_err();
                 if sender.send(tile).is_err() || failed {
                     break;
@@ -223,7 +249,50 @@ pub fn run_ai_upscale(
     on_progress: &dyn Fn(f32),
 ) -> Result<Rgb32FImage> {
     let infer = |tile| run_plain(session, tile);
-    run_tiled(rgb_img, &infer, UPSCALE_TILE, scale, on_progress)
+    let tile = if scale == 4 {
+        UPSCALE4_TILE
+    } else {
+        UPSCALE_TILE
+    };
+    run_tiled(rgb_img, &infer, tile, scale, on_progress)
+}
+
+/// The deblurring networks look at a whole tile at once (NAFNet's channel attention pools over it), so
+/// a tile about the size they were tested at keeps them doing what they learned.
+const DEBLUR_TILE: TileParams = TileParams {
+    cs: 384,
+    margin: 32,
+    overlap: 32,
+};
+
+/// The tile sizes a deblurring network can be run at, largest first. Both take any multiple of 16.
+pub const DEBLUR_TILE_SIZES: [usize; 5] = [384, 320, 256, 192, 128];
+
+/// The tile sizes worth trying for a network that needs about `bytes_per_pixel` of video memory per
+/// pixel of a tile, when `free` is what the GPU has left: the largest that fits first, and at most three,
+/// each smaller than the last, for when one runs out after all.
+pub fn deblur_tiles_for(free: Option<u64>, bytes_per_pixel: u64) -> Vec<usize> {
+    let fits =
+        |cs: usize| free.is_none_or(|free| (cs * cs) as u64 * bytes_per_pixel * 5 / 4 < free);
+    let first = DEBLUR_TILE_SIZES
+        .iter()
+        .position(|&cs| fits(cs))
+        .unwrap_or(DEBLUR_TILE_SIZES.len() - 1);
+    DEBLUR_TILE_SIZES[first..].iter().copied().take(3).collect()
+}
+
+pub fn run_ai_deblur(
+    rgb_img: &Rgb32FImage,
+    session: &Mutex<Session>,
+    tile: usize,
+    on_progress: &dyn Fn(f32),
+) -> Result<Rgb32FImage> {
+    let infer = |tile| run_plain(session, tile);
+    let params = TileParams {
+        cs: tile,
+        ..DEBLUR_TILE
+    };
+    run_tiled(rgb_img, &infer, params, 1, on_progress)
 }
 
 pub const RAWFORGE_TILE_SIZE: usize = 256;
@@ -350,5 +419,36 @@ mod tests {
             .unwrap()
             .save(&out)
             .unwrap();
+    }
+
+    // A deblurring network is run at the largest tile the free video memory allows, with smaller ones to
+    // fall back on, and gives the picture back whole at any of them.
+    #[test]
+    fn deblur_tiles_follow_the_free_video_memory() {
+        // Restormer needs about 22 KB a pixel: with 3 GB free, 384 px does not fit and 320 px does
+        assert_eq!(
+            deblur_tiles_for(Some(3_000_000_000), 22_000),
+            vec![320, 256, 192]
+        );
+        assert_eq!(deblur_tiles_for(None, 22_000), vec![384, 320, 256]);
+        // nothing fits: the smallest is still tried
+        assert_eq!(deblur_tiles_for(Some(1), 22_000), vec![128]);
+
+        let img = Rgb32FImage::from_fn(700, 450, |x, y| {
+            let v = 0.5 + 0.4 * ((x as f32 * 0.05).sin() * (y as f32 * 0.07).cos());
+            image::Rgb([v, 1.0 - v, v * 0.5])
+        });
+        let same = |tile: Array4<f32>| -> Result<Array4<f32>> { Ok(tile) };
+        for cs in DEBLUR_TILE_SIZES {
+            let params = TileParams { cs, ..DEBLUR_TILE };
+            let out = run_tiled(&img, &same, params, 1, &|_| {}).unwrap();
+            let worst = out
+                .as_raw()
+                .iter()
+                .zip(img.as_raw())
+                .map(|(a, b)| (a - b).abs())
+                .fold(0.0, f32::max);
+            assert!(worst < 1e-4, "{cs} px tiles changed the picture by {worst}");
+        }
     }
 }

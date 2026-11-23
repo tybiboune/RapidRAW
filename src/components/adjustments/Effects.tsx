@@ -29,6 +29,7 @@ import { AppSettings } from '../../types/settings';
 import Text from '../ui/Text';
 import AdjustmentSubSection from './AdjustmentSubSection';
 import { TextVariants } from '../../types/typography';
+import { FACE_METHODS } from '../panel/right/Masks';
 import { DepthRangePicker } from './DepthRangePicker';
 import DepthScope from './depthScope/DepthScope';
 import { ScenePatch } from './depthScope/scene';
@@ -219,6 +220,8 @@ function EffectsPanel({
   const { t } = useTranslation();
   const [isGeneratingDepth, setIsGeneratingDepth] = useState(false);
   const [isGeneratingFaceMap, setIsGeneratingFaceMap] = useState(false);
+  const [isGeneratingWrinkleMap, setIsGeneratingWrinkleMap] = useState(false);
+  const [isGeneratingBlemishMap, setIsGeneratingBlemishMap] = useState(false);
   const selectedImagePath = useEditorStore((state) => state.selectedImage?.path ?? null);
   const [isGeneratingNormals, setIsGeneratingNormals] = useState(false);
   const [isGeneratingFogDepth, setIsGeneratingFogDepth] = useState(false);
@@ -233,7 +236,7 @@ function EffectsPanel({
 
   // The skin tools work inside the face the masking already finds, so the first thing switching them
   // on does is ask for that one map. Nothing is applied by it: every slider still starts at zero.
-  const handleGenerateFaceMap = async () => {
+  const handleGenerateFaceMap = async (method?: string) => {
     setIsGeneratingFaceMap(true);
     try {
       // the face skin, and the two maps that say where a face folds and where it shades under the eyes
@@ -242,6 +245,7 @@ function EffectsPanel({
         {
           jsAdjustments: adjustments,
           path: selectedImagePath,
+          method: method ?? adjustments.skinFaceMethod ?? 'landmarks',
         },
       );
       setAdjustments((prev: Partial<Adjustments>) => ({
@@ -256,6 +260,69 @@ function EffectsPanel({
     } finally {
       setIsGeneratingFaceMap(false);
     }
+  };
+
+  // The lines can be read from the FFHQ-Wrinkle model instead of from the curvature of the brightness.
+  // Its map is asked for once, the first time this is switched on for a picture, and kept with the edit.
+  const handleGenerateWrinkleMap = async () => {
+    setIsGeneratingWrinkleMap(true);
+    try {
+      const b64: string = await invoke('generate_full_image_wrinkle_map', {
+        jsAdjustments: adjustments,
+        path: selectedImagePath,
+      });
+      setAdjustments((prev: Partial<Adjustments>) => ({ ...prev, skinLinesAiMap: b64 }));
+    } catch (e) {
+      toast.error(`Failed to find the lines: ${e}`);
+      setAdjustments((prev: Partial<Adjustments>) => ({ ...prev, skinLinesAi: false }));
+    } finally {
+      setIsGeneratingWrinkleMap(false);
+    }
+  };
+
+  const handleLinesAiToggle = (enabled: boolean) => {
+    handleAdjustmentChange(Effect.SkinLinesAi, enabled);
+    if (enabled && !adjustments.skinLinesAiMap) {
+      handleGenerateWrinkleMap();
+    }
+  };
+
+  // The spots can be read from ABPN's blemish detector instead of from the shape of the brightness, the
+  // same way: its map is asked for the first time this is switched on and kept with the edit.
+  const handleGenerateBlemishMap = async () => {
+    setIsGeneratingBlemishMap(true);
+    try {
+      const b64: string = await invoke('generate_full_image_blemish_map', {
+        jsAdjustments: adjustments,
+        path: selectedImagePath,
+      });
+      setAdjustments((prev: Partial<Adjustments>) => ({ ...prev, skinSpotsAiMap: b64 }));
+    } catch (e) {
+      toast.error(`Failed to find the spots: ${e}`);
+      setAdjustments((prev: Partial<Adjustments>) => ({ ...prev, skinSpotsAi: false }));
+    } finally {
+      setIsGeneratingBlemishMap(false);
+    }
+  };
+
+  const handleSpotsAiToggle = (enabled: boolean) => {
+    handleAdjustmentChange(Effect.SkinSpotsAi, enabled);
+    if (enabled && !adjustments.skinSpotsAiMap) {
+      handleGenerateBlemishMap();
+    }
+  };
+
+  // The skin can be found by the landmarks, by the AI face parser, or by both: a change finds it again.
+  const handleSkinFaceMethodChange = (method: string) => {
+    if (method === (adjustments.skinFaceMethod ?? 'landmarks')) return;
+    // the method is a word: handleAdjustmentChange reads numbers and would turn it into NaN
+    setAdjustments((prev: Partial<Adjustments>) => ({ ...prev, [Effect.SkinFaceMethod]: method }));
+    handleGenerateFaceMap(method);
+  };
+
+  // The one-button renewal: it works out everything else from the picture, so all this does is ask for it.
+  const handleAutoRenew = () => {
+    setAdjustments((prev: Partial<Adjustments>) => ({ ...prev, skinRenewal: 70, skinRenewalTexture: 50 }));
   };
 
   const handleSkinToggle = (enabled: boolean) => {
@@ -785,6 +852,69 @@ function EffectsPanel({
                     <MapGenerationStatus label={t('adjustments.effects.skinFindingFace')} />
                   ) : (
                     <>
+                      <div className="space-y-1">
+                        <Text variant={TextVariants.small} className="text-text-secondary">
+                          {t('adjustments.effects.skinFaceMethod')}
+                        </Text>
+                        <div className="flex gap-1">
+                          {FACE_METHODS.map((method) => (
+                            <button
+                              key={method}
+                              type="button"
+                              onClick={() => handleSkinFaceMethodChange(method)}
+                              className={`flex-1 rounded-md px-2 py-1 text-xs transition-colors ${
+                                (adjustments.skinFaceMethod ?? 'landmarks') === method
+                                  ? 'bg-card-active text-primary'
+                                  : 'bg-surface text-text-secondary hover:bg-card-active/60'
+                              }`}
+                            >
+                              {t(`editor.masks.settings.faceMethods.${method}`)}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+
+                      <div className="space-y-2 rounded-md bg-surface p-2">
+                        <button
+                          type="button"
+                          onClick={handleAutoRenew}
+                          className="w-full rounded-md bg-card-active px-2 py-2 text-sm text-primary transition-colors hover:bg-card-active/80"
+                        >
+                          {t('adjustments.effects.skinRenewAuto')}
+                        </button>
+                        <Text variant={TextVariants.small} className="text-text-secondary">
+                          {t('adjustments.effects.skinRenewHint')}
+                        </Text>
+                        <Slider
+                          resetKey="skinRenewal"
+                          label={t('adjustments.effects.skinRenewal')}
+                          max={100}
+                          min={0}
+                          defaultValue={0}
+                          onChange={(e: SliderChangeEvent) =>
+                            handleAdjustmentChange(Effect.SkinRenewal, e.target.value)
+                          }
+                          step={1}
+                          value={adjustments.skinRenewal ?? 0}
+                          onDragStateChange={onDragStateChange}
+                        />
+                        {(adjustments.skinRenewal ?? 0) > 0 && (
+                          <Slider
+                            resetKey="skinRenewalTexture"
+                            label={t('adjustments.effects.skinRenewalTexture')}
+                            max={100}
+                            min={0}
+                            defaultValue={50}
+                            onChange={(e: SliderChangeEvent) =>
+                              handleAdjustmentChange(Effect.SkinRenewalTexture, e.target.value)
+                            }
+                            step={1}
+                            value={adjustments.skinRenewalTexture ?? 50}
+                            onDragStateChange={onDragStateChange}
+                          />
+                        )}
+                      </div>
+
                       <Slider
                         resetKey="skinSpots"
                         label={t('adjustments.effects.skinSpots')}
@@ -796,6 +926,17 @@ function EffectsPanel({
                         value={adjustments.skinSpots ?? 0}
                         onDragStateChange={onDragStateChange}
                       />
+
+                      {(adjustments.skinSpots ?? 0) > 0 &&
+                        (isGeneratingBlemishMap ? (
+                          <MapGenerationStatus label={t('adjustments.effects.skinFindingSpots')} />
+                        ) : (
+                          <Switch
+                            label={t('adjustments.effects.skinSpotsAi')}
+                            checked={!!adjustments.skinSpotsAi}
+                            onChange={handleSpotsAiToggle}
+                          />
+                        ))}
 
                       <Slider
                         resetKey="skinRedness"
@@ -834,6 +975,30 @@ function EffectsPanel({
                       )}
 
                       <Slider
+                        resetKey="skinPigment"
+                        label={t('adjustments.effects.skinPigment')}
+                        max={100}
+                        min={0}
+                        defaultValue={0}
+                        onChange={(e: SliderChangeEvent) => handleAdjustmentChange(Effect.SkinPigment, e.target.value)}
+                        step={1}
+                        value={adjustments.skinPigment ?? 0}
+                        onDragStateChange={onDragStateChange}
+                      />
+
+                      <Slider
+                        resetKey="skinTone"
+                        label={t('adjustments.effects.skinTone')}
+                        max={100}
+                        min={0}
+                        defaultValue={0}
+                        onChange={(e: SliderChangeEvent) => handleAdjustmentChange(Effect.SkinTone, e.target.value)}
+                        step={1}
+                        value={adjustments.skinTone ?? 0}
+                        onDragStateChange={onDragStateChange}
+                      />
+
+                      <Slider
                         resetKey="skinShine"
                         label={t('adjustments.effects.skinShine')}
                         max={100}
@@ -856,6 +1021,17 @@ function EffectsPanel({
                         value={adjustments.skinLines ?? 0}
                         onDragStateChange={onDragStateChange}
                       />
+
+                      {(adjustments.skinLines ?? 0) > 0 &&
+                        (isGeneratingWrinkleMap ? (
+                          <MapGenerationStatus label={t('adjustments.effects.skinFindingLines')} />
+                        ) : (
+                          <Switch
+                            label={t('adjustments.effects.skinLinesAi')}
+                            checked={!!adjustments.skinLinesAi}
+                            onChange={handleLinesAiToggle}
+                          />
+                        ))}
 
                       <Slider
                         resetKey="skinUnderEye"
@@ -956,6 +1132,20 @@ function EffectsPanel({
                         }
                         step={1}
                         value={adjustments.skinUnderEyeSensitivity ?? 50}
+                        onDragStateChange={onDragStateChange}
+                      />
+
+                      <Slider
+                        resetKey="skinPigmentSensitivity"
+                        label={t('adjustments.effects.skinDetectionPigment')}
+                        max={100}
+                        min={0}
+                        defaultValue={50}
+                        onChange={(e: SliderChangeEvent) =>
+                          handleAdjustmentChange(Effect.SkinPigmentSensitivity, e.target.value)
+                        }
+                        step={1}
+                        value={adjustments.skinPigmentSensitivity ?? 50}
                         onDragStateChange={onDragStateChange}
                       />
                     </>

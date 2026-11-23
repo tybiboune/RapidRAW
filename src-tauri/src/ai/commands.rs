@@ -9,7 +9,9 @@ use serde::Serialize;
 use serde_json::{Value, json};
 
 use crate::ai::connector;
-use crate::ai::models::{AiMaskModel, AiModels, AiState, get_or_init_ai_models};
+use crate::ai::models::{
+    AiMaskModel, AiModels, AiState, ManualModel, get_or_init_ai_models, get_or_init_manual_model,
+};
 use crate::ai::processing::{
     AiDepthMaskParameters, AiFaceMaskParameters, AiForegroundMaskParameters, AiSkyMaskParameters,
     AiSubjectMaskParameters, AiTextMaskParameters, CachedDepthMap, ESAM3_FACE_SCORE_THRESHOLD,
@@ -21,7 +23,9 @@ use crate::ai::processing::{
 use crate::app::settings::load_settings;
 use crate::app::state::{AiTaskGuard, AppState, LoadedImage};
 use crate::effects::maps::EffectMapKind;
-use crate::masks::face::{FaceAnalysis, FacePart, analyze_faces, compose_face_mask};
+use crate::masks::face::{
+    FaceAnalysis, FaceMethod, FaceParsing, FacePart, analyze_faces, compose_face_mask, parse_faces,
+};
 use crate::render::cache_utils::GEOMETRY_KEYS;
 use crate::render::geometry::{get_geometry_params_from_json, is_geometry_identity};
 use crate::render::preview::get_cached_full_warped_image;
@@ -29,7 +33,7 @@ use crate::render::preview::get_cached_full_warped_image;
 const NO_FOREGROUND_FOUND: &str = "No foreground found";
 const NO_SKY_FOUND: &str = "No sky found";
 const NO_MATCH_FOUND: &str = "No match found for";
-const NO_FACES_FOUND: &str = "No faces found";
+pub(crate) const NO_FACES_FOUND: &str = "No faces found";
 const NO_RESULT_ERRORS: [&str; 4] = [
     NO_FOREGROUND_FOUND,
     NO_SKY_FOUND,
@@ -290,7 +294,7 @@ pub fn generate_text_mask(
     })
 }
 
-fn cached_face_analysis(
+pub(crate) fn cached_face_analysis(
     ai_state: &Mutex<Option<AiState>>,
     models: &AiModels,
     cache_key: &str,
@@ -378,12 +382,45 @@ fn reset_face_models(ai_state: &Mutex<Option<AiState>>, models: &AiModels) {
     }
 }
 
+/// What the face parser made of the faces of an analysis, run once for it and kept with it. The parser's
+/// files have to be in place first (`AiMaskModel::FaceParsing`).
+pub(crate) fn cached_face_parsing(
+    ai_state: &Mutex<Option<AiState>>,
+    models: &AiModels,
+    analysis: &FaceAnalysis,
+    image: &DynamicImage,
+) -> Result<Arc<FaceParsing>, String> {
+    if let Some(cached) = ai_state
+        .lock()
+        .unwrap()
+        .as_ref()
+        .and_then(|s| s.face_parsing.clone())
+        .filter(|cached| cached.path_hash == analysis.path_hash)
+    {
+        return Ok(cached);
+    }
+    let session = models.face_parser().map_err(|e| e.to_string())?;
+    let parsing = Arc::new(parse_faces(image, analysis, &session).map_err(|e| e.to_string())?);
+    if let Some(state) = ai_state.lock().unwrap().as_mut() {
+        state.face_parsing = Some(parsing.clone());
+    }
+    Ok(parsing)
+}
+
+/// Whether a face mask with these parameters needs the face parser.
+pub fn face_mask_needs_parser(parts: &[String], method: Option<&str>) -> bool {
+    let parts: Vec<FacePart> = parts.iter().filter_map(|p| FacePart::from_id(p)).collect();
+    FaceMethod::from_id(method).needs_parsing(&parts)
+}
+
+#[allow(clippy::too_many_arguments)]
 pub fn generate_face_mask(
     ai_state: &Mutex<Option<AiState>>,
     models: &AiModels,
     cache_key: &str,
     warped_image: &DynamicImage,
     parts: &[String],
+    method: Option<String>,
     transform: MaskTransform,
     ai_source: Option<String>,
 ) -> Result<AiFaceMaskParameters, String> {
@@ -392,10 +429,28 @@ pub fn generate_face_mask(
         return Err(NO_FACES_FOUND.to_string());
     }
     let face_parts: Vec<FacePart> = parts.iter().filter_map(|p| FacePart::from_id(p)).collect();
-    let mask = compose_face_mask(warped_image, &analysis, &face_parts);
+    let face_method = FaceMethod::from_id(method.as_deref());
+    let parsing = if face_method.needs_parsing(&face_parts) {
+        Some(cached_face_parsing(
+            ai_state,
+            models,
+            &analysis,
+            warped_image,
+        )?)
+    } else {
+        None
+    };
+    let mask = compose_face_mask(
+        warped_image,
+        &analysis,
+        parsing.as_deref(),
+        &face_parts,
+        face_method,
+    );
 
     Ok(AiFaceMaskParameters {
         parts: parts.to_vec(),
+        method,
         mask_data_base64: Some(encode_to_base64_png(&mask)?),
         rotation: Some(transform.rotation),
         flip_horizontal: Some(transform.flip_horizontal),
@@ -766,6 +821,7 @@ pub async fn generate_ai_face_mask(
     js_adjustments: serde_json::Value,
     path: String,
     parts: Vec<String>,
+    method: Option<String>,
     rotation: f32,
     flip_horizontal: bool,
     flip_vertical: bool,
@@ -785,6 +841,16 @@ pub async fn generate_ai_face_mask(
     )
     .await
     .map_err(|e| e.to_string())?;
+    if face_mask_needs_parser(&parts, method.as_deref()) {
+        get_or_init_ai_models(
+            &app_handle,
+            &state.ai_state,
+            &state.ai_init_lock,
+            AiMaskModel::FaceParsing,
+        )
+        .await
+        .map_err(|e| e.to_string())?;
+    }
     check_cancelled(&guard)?;
 
     let warped_image = get_cached_full_warped_image(&state, &js_adjustments)?;
@@ -804,6 +870,7 @@ pub async fn generate_ai_face_mask(
             &ai_cache_key(&path, &js_adjustments),
             &warped_image,
             &parts,
+            method,
             transform,
             ai_source.clone(),
         )
@@ -1035,6 +1102,7 @@ pub async fn generate_full_image_depth_map(
 pub async fn generate_full_image_face_map(
     js_adjustments: serde_json::Value,
     path: String,
+    method: Option<String>,
     state: tauri::State<'_, AppState>,
     app_handle: tauri::AppHandle,
 ) -> Result<FaceMaps, String> {
@@ -1046,6 +1114,18 @@ pub async fn generate_full_image_face_map(
     )
     .await
     .map_err(|e| e.to_string())?;
+    // the skin the tool works on can be found by the face parser as well as, or instead of, the landmarks
+    let face_method = FaceMethod::from_id(method.as_deref());
+    if face_method.needs_parsing(&[FacePart::FaceSkin]) {
+        get_or_init_ai_models(
+            &app_handle,
+            &state.ai_state,
+            &state.ai_init_lock,
+            AiMaskModel::FaceParsing,
+        )
+        .await
+        .map_err(|e| e.to_string())?;
+    }
 
     let loaded_image = get_loaded_image(&state)?;
     // the picture as the effects see it, before any geometry: the map is put back through the warp
@@ -1065,7 +1145,23 @@ pub async fn generate_full_image_face_map(
     if analysis.faces.is_empty() {
         return Err(NO_FACES_FOUND.to_string());
     }
-    let mask = compose_face_mask(&source_image, &analysis, &[FacePart::FaceSkin]);
+    let parsing = if face_method.needs_parsing(&[FacePart::FaceSkin]) {
+        Some(cached_face_parsing(
+            &state.ai_state,
+            &models,
+            &analysis,
+            &source_image,
+        )?)
+    } else {
+        None
+    };
+    let mask = compose_face_mask(
+        &source_image,
+        &analysis,
+        parsing.as_deref(),
+        &[FacePart::FaceSkin],
+        face_method,
+    );
     let regions = crate::masks::face::compose_skin_regions(
         source_image.width(),
         source_image.height(),
@@ -1094,6 +1190,113 @@ pub struct FaceMaps {
     face_map: String,
     lines_map: String,
     under_eye_map: String,
+}
+
+/// Where the lines are on the faces of the loaded picture, found by the FFHQ-Wrinkle model rather than
+/// by the curvature of the brightness, for the skin tool's lines to be read from instead. It works on the
+/// same faces the face map was made from, and like the other skin maps it is in the picture's own space
+/// and put back through the warp when it is used.
+#[tauri::command]
+pub async fn generate_full_image_wrinkle_map(
+    js_adjustments: serde_json::Value,
+    path: String,
+    state: tauri::State<'_, AppState>,
+    app_handle: tauri::AppHandle,
+) -> Result<String, String> {
+    skin_model_map(
+        js_adjustments,
+        path,
+        &state,
+        &app_handle,
+        ManualModel::Wrinkles,
+    )
+    .await
+}
+
+/// Where the blemishes are on the faces of the loaded picture - spots, moles, milia, acne marks - found
+/// by ABPN's blemish detector, for the skin tool's spots to be read from instead of from the shape of the
+/// brightness alone. Made and used the same way as the wrinkle map.
+#[tauri::command]
+pub async fn generate_full_image_blemish_map(
+    js_adjustments: serde_json::Value,
+    path: String,
+    state: tauri::State<'_, AppState>,
+    app_handle: tauri::AppHandle,
+) -> Result<String, String> {
+    skin_model_map(
+        js_adjustments,
+        path,
+        &state,
+        &app_handle,
+        ManualModel::Blemishes,
+    )
+    .await
+}
+
+// A skin map from one of the face models put in by hand, over the faces of the loaded picture, as a map
+// in the picture's own space.
+async fn skin_model_map(
+    js_adjustments: serde_json::Value,
+    path: String,
+    state: &AppState,
+    app_handle: &tauri::AppHandle,
+    model: ManualModel,
+) -> Result<String, String> {
+    // the model is checked for first: without it there is no point finding the faces
+    let session = get_or_init_manual_model(app_handle, &state.ai_state, &state.ai_init_lock, model)
+        .await
+        .map_err(|e| e.to_string())?;
+    let models = get_or_init_ai_models(
+        app_handle,
+        &state.ai_state,
+        &state.ai_init_lock,
+        AiMaskModel::Face,
+    )
+    .await
+    .map_err(|e| e.to_string())?;
+
+    let loaded_image = get_loaded_image(state)?;
+    // owned, because it goes on to the blocking task below, which may outlive the loaded picture
+    let source_image = crate::masks::generation::build_converted_source_image(
+        &loaded_image.image,
+        loaded_image.is_raw,
+        &js_adjustments,
+    )
+    .into_owned();
+    let analysis = cached_face_analysis(
+        &state.ai_state,
+        &models,
+        &skin_cache_key(&path, &js_adjustments),
+        &source_image,
+        MaskTransform::from_adjustments(&js_adjustments),
+    )?;
+    if analysis.faces.is_empty() {
+        return Err(NO_FACES_FOUND.to_string());
+    }
+    let map = tauri::async_runtime::spawn_blocking(move || {
+        let compose = match model {
+            ManualModel::Wrinkles => crate::masks::face::compose_wrinkle_map,
+            ManualModel::Blemishes => crate::masks::face::compose_blemish_map,
+            ManualModel::DeblurMotion | ManualModel::DeblurDefocus => {
+                return Err(anyhow::anyhow!("{model:?} does not make a skin map"));
+            }
+        };
+        compose(
+            &source_image,
+            &analysis,
+            &session,
+            crate::effects::skin::DETECT_LONG_SIDE,
+        )
+    })
+    .await
+    .map_err(|e| e.to_string())?
+    .map_err(|e| e.to_string())?;
+    let encoded = encode_to_base64_png(&map)?;
+    Ok(format!(
+        "{}{}",
+        crate::effects::maps::SOURCE_SPACE_MAP_PREFIX,
+        encoded.trim_start_matches("data:image/png;base64,")
+    ))
 }
 
 #[tauri::command]
@@ -1131,7 +1334,7 @@ pub async fn get_depth_preview(
     .ok_or_else(|| "Depth map unavailable".to_string())
 }
 
-fn get_loaded_image(state: &tauri::State<'_, AppState>) -> Result<LoadedImage, String> {
+fn get_loaded_image(state: &AppState) -> Result<LoadedImage, String> {
     state
         .original_image
         .lock()

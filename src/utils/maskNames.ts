@@ -21,6 +21,10 @@ export function formatMaskTypeName(type: string) {
   if (type === Mask.Heal) return i18n.t('masks.types.heal');
   if (type === Mask.Liquify) return i18n.t('masks.types.liquify');
   if (type === Mask.Retouch) return i18n.t('masks.types.retouch');
+  if (type === Mask.FaceRestore) return i18n.t('masks.types.restoreFace');
+  if (type === Mask.Deblur) return i18n.t('masks.types.deblur');
+  if (type === Mask.DustRemoval) return i18n.t('masks.types.dustRemoval');
+  if (type === Mask.WireRemoval) return i18n.t('masks.types.wireRemoval');
   return type.charAt(0).toUpperCase() + type.slice(1);
 }
 

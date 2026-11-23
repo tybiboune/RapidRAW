@@ -8,7 +8,8 @@ interface FacePartsIllustrationProps {
 const EYES =
   'M81.5 64.5 C 84 61 90 60.5 93.5 64 C 90 66.8 84.5 67 81.5 64.5 Z M118.5 64.5 C 116 61 110 60.5 106.5 64 C 110 66.8 115.5 67 118.5 64.5 Z';
 
-const LAYERS: Array<{ part: FacePart | null; d: string; shade: number; clip?: boolean }> = [
+// `optional` layers are only drawn while their part is selected: glasses are not on every face
+const LAYERS: Array<{ part: FacePart | null; d: string; shade: number; clip?: boolean; optional?: boolean }> = [
   { part: null, d: 'M11 180 C 16.5 143.5 53 125 81 122 L 119 122 C 147 125 183.5 143.5 189 180 Z', shade: 12 },
   {
     part: 'bodySkin',
@@ -16,7 +17,7 @@ const LAYERS: Array<{ part: FacePart | null; d: string; shade: number; clip?: bo
     shade: 28,
   },
   {
-    part: null,
+    part: 'ears',
     d: 'M65 73 a 4 8.5 0 1 0 8 0 a 4 8.5 0 1 0 -8 0 Z M127 73 a 4 8.5 0 1 0 8 0 a 4 8.5 0 1 0 -8 0 Z',
     shade: 28,
   },
@@ -49,6 +50,12 @@ const LAYERS: Array<{ part: FacePart | null; d: string; shade: number; clip?: bo
     clip: true,
   },
   {
+    part: 'glasses',
+    d: 'M78 58.5 h 19 v 11 h -19 Z M80 60.5 v 7 h 15 v -7 Z M122 58.5 h -19 v 11 h 19 Z M120 60.5 v 7 h -15 v -7 Z M97 62.5 h 6 v 1.6 h -6 Z',
+    shade: 70,
+    optional: true,
+  },
+  {
     part: 'nose',
     d: 'M99.1 66 C 99 72 97.8 76 95.8 79.4 C 94.6 81 95.2 83.1 96.9 83.3 C 98.3 84.2 101.7 84.2 103.1 83.3 C 104.8 83.1 105.4 81 104.2 79.4 C 102.2 76 101 72 100.9 66 Z',
     shade: 36,
@@ -75,22 +82,24 @@ export default function FacePartsIllustration({ selected }: FacePartsIllustratio
           <path d={EYES} />
         </clipPath>
       </defs>
-      {LAYERS.map(({ part, d, shade, clip }) => (
-        <path
-          key={d}
-          d={d}
-          strokeWidth={0.8}
-          strokeLinejoin="round"
-          clipPath={clip ? `url(#${clipId})` : undefined}
-          style={{
-            fill:
-              part && selected.includes(part)
-                ? 'var(--color-accent)'
-                : `color-mix(in srgb, var(--color-text-secondary) ${shade}%, var(--color-surface))`,
-          }}
-          className={part ? 'stroke-surface transition-colors' : undefined}
-        />
-      ))}
+      {LAYERS.filter(({ part, optional }) => !optional || (part && selected.includes(part))).map(
+        ({ part, d, shade, clip }) => (
+          <path
+            key={d}
+            d={d}
+            strokeWidth={0.8}
+            strokeLinejoin="round"
+            clipPath={clip ? `url(#${clipId})` : undefined}
+            style={{
+              fill:
+                part && selected.includes(part)
+                  ? 'var(--color-accent)'
+                  : `color-mix(in srgb, var(--color-text-secondary) ${shade}%, var(--color-surface))`,
+            }}
+            className={part ? 'stroke-surface transition-colors' : undefined}
+          />
+        ),
+      )}
     </svg>
   );
 }
