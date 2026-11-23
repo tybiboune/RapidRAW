@@ -467,6 +467,129 @@ fn white_noise(w: usize, h: usize) -> Plane {
     Plane { w, h, v }
 }
 
+/// The narrowest high pass the grain is measured through, in pixels: wider than the coarsest grain used (4 px).
+const GRAIN_PROBE_MIN: f32 = 4.0;
+/// The farthest shift, in pixels, the grain's likeness to itself is followed to.
+const GRAIN_MAX_LAG: usize = 16;
+
+/// How alike `detail` is to itself shifted by 0, 1, 2… pixels, across and down averaged, counting only pairs
+/// of pixels that are both in `mask`; 1 at no shift.
+fn grain_curve(detail: &Plane, mask: &Plane) -> Vec<f32> {
+    let (w, h) = (detail.w, detail.h);
+    let at = |x: usize, y: usize| (detail.v[y * w + x] as f64, mask.v[y * w + x] > 0.5);
+    let along = |lag: usize, down: bool| -> f64 {
+        let (s, a, b) = (0..h)
+            .into_par_iter()
+            .map(|y| {
+                let mut acc = (0.0f64, 0.0f64, 0.0f64);
+                if down && y + lag >= h {
+                    return acc;
+                }
+                for x in 0..w {
+                    if !down && x + lag >= w {
+                        break;
+                    }
+                    let (d0, in0) = at(x, y);
+                    let (d1, in1) = if down { at(x, y + lag) } else { at(x + lag, y) };
+                    if in0 && in1 {
+                        acc.0 += d0 * d1;
+                        acc.1 += d0 * d0;
+                        acc.2 += d1 * d1;
+                    }
+                }
+                acc
+            })
+            .reduce(|| (0.0, 0.0, 0.0), |p, q| (p.0 + q.0, p.1 + q.1, p.2 + q.2));
+        s / (a * b).sqrt().max(1e-18)
+    };
+    (0..=GRAIN_MAX_LAG)
+        .map(|lag| {
+            if lag == 0 {
+                1.0
+            } else {
+                (0.5 * (along(lag, false) + along(lag, true))) as f32
+            }
+        })
+        .collect()
+}
+
+/// The shift, in pixels and between whole ones, at which the detail is half as alike to itself as unshifted.
+fn grain_half_width(detail: &Plane, mask: &Plane) -> f32 {
+    let curve = grain_curve(detail, mask);
+    for lag in 1..curve.len() {
+        if curve[lag] < 0.5 {
+            let (a, b) = (curve[lag - 1], curve[lag]);
+            return (lag - 1) as f32 + (a - 0.5) / (a - b).max(1e-6);
+        }
+    }
+    GRAIN_MAX_LAG as f32
+}
+
+/// Made-up grains, white noise of unit strength blurred by each width, measured through the high pass `probe`:
+/// (blur, half width, strength left after the high pass).
+fn grain_table(probe: f32) -> Vec<(f32, f32, f32)> {
+    let side = 320usize;
+    let edge = (3.0 * probe).ceil() as usize + GRAIN_MAX_LAG;
+    let inside = Plane {
+        w: side,
+        h: side,
+        v: (0..side * side)
+            .map(|i| {
+                let (x, y) = (i % side, i / side);
+                let ok = x >= edge && y >= edge && x + edge < side && y + edge < side;
+                if ok { 1.0 } else { 0.0 }
+            })
+            .collect(),
+    };
+    let white = white_noise(side, side);
+    let mut table: Vec<(f32, f32, f32)> = (0..=18)
+        .map(|i| {
+            let sigma = 0.5 + 0.25 * i as f32;
+            let g = gauss(&white, sigma);
+            let sd = mean_where(&g.map(|v| v * v), &inside).sqrt().max(1e-9);
+            let g = g.map(|v| v / sd);
+            let d = g.zip(&gauss(&g, probe), |a, b| a - b);
+            let rms = mean_where(&d.map(|v| v * v), &inside).sqrt();
+            (sigma, grain_half_width(&d, &inside), rms)
+        })
+        .collect();
+    // a wider blur never measures narrower, even where the probe flattens the curve
+    for i in 1..table.len() {
+        table[i].1 = table[i].1.max(table[i - 1].1 + 1e-4);
+    }
+    table
+}
+
+/// Reads `out` against `key` in the table, between its rows (both increasing with the row).
+fn interpolate(
+    table: &[(f32, f32, f32)],
+    key: impl Fn(&(f32, f32, f32)) -> f32,
+    at: f32,
+    out: impl Fn(&(f32, f32, f32)) -> f32,
+) -> f32 {
+    if at <= key(&table[0]) {
+        return out(&table[0]);
+    }
+    for pair in table.windows(2) {
+        let (a, b) = (&pair[0], &pair[1]);
+        if at <= key(b) {
+            let t = (at - key(a)) / (key(b) - key(a)).max(1e-9);
+            return out(a) + t * (out(b) - out(a));
+        }
+    }
+    out(&table[table.len() - 1])
+}
+
+/// The blur whose made-up grain measures `half_width`.
+fn blur_for_width(table: &[(f32, f32, f32)], half_width: f32) -> f32 {
+    interpolate(table, |r| r.1, half_width, |r| r.0)
+}
+
+/// What is left, through the high pass, of a grain of unit strength blurred by `blur`.
+fn strength_for_blur(table: &[(f32, f32, f32)], blur: f32) -> f32 {
+    interpolate(table, |r| r.0, blur, |r| r.2).max(1e-6)
+}
+
 const GAMMA: f32 = 2.2;
 
 /// The biggest face box, in pixels, that is renewed: about 16 million (4000 x 4000).
@@ -676,9 +799,9 @@ fn build(image: &Rgb32FImage, mask: &GrayImage, is_raw: bool, texture: f32) -> O
     );
     let tone = base_y.map(|v| (1.0 - smoothstep(hi0, hi1, v)) * smoothstep(sh0, sh1, v));
 
-    // the fine texture: its strength and grain size measured in the cleanest skin of this face, on a fine
-    // high pass made only to measure them
-    let sig_probe = (0.0016 * face).max(0.7);
+    // the fine texture: its strength and grain size measured in the cleanest skin of this face, on a high pass
+    // made only to measure them, wide enough to let the coarsest grain through
+    let sig_probe = (0.005 * face).max(GRAIN_PROBE_MIN);
     let detail = y.zip(&gauss(&y, sig_probe), |a, b| a - b);
     let clean = Plane {
         w,
@@ -700,29 +823,15 @@ fn build(image: &Rgb32FImage, mask: &GrayImage, is_raw: bool, texture: f32) -> O
         clean
     };
     let s_clean = mean_where(&detail.map(|d| d * d), &clean).sqrt().max(1e-5);
-    let dd: Vec<f32> = detail.v.iter().zip(&clean.v).map(|(d, c)| d * c).collect();
-    let power: f64 = dd
-        .par_iter()
-        .map(|&d| (d as f64) * (d as f64))
-        .sum::<f64>()
-        .max(1e-12);
-    let half_lag = (1..=8usize)
-        .find(|&lag| {
-            let s: f64 = (0..h)
-                .into_par_iter()
-                .map(|yy| {
-                    let row = &dd[yy * w..(yy + 1) * w];
-                    (lag..w)
-                        .map(|x| row[x] as f64 * row[x - lag] as f64)
-                        .sum::<f64>()
-                })
-                .sum();
-            s / power < 0.5
-        })
-        .unwrap_or(8);
+    // How wide the grain is: how far, across and down, the skin's detail goes on looking like itself. That
+    // width is then matched against made-up grains, blurred noise put through the same high pass, and the
+    // blur whose grain measures the same is the one used.
+    let half_width = grain_half_width(&detail, &clean);
+    let grains = grain_table(sig_probe);
     // the grain's blur, and, by the tutorial's rule, the High Pass radius too: "the exact number you chose for
     // the Gaussian blur"
-    let sig_tex = (half_lag as f32 * 0.85).clamp(0.8, 4.0);
+    let sig_tex = blur_for_width(&grains, half_width).clamp(0.8, 4.0);
+    let unit_rms = strength_for_blur(&grains, sig_tex);
     let noise = gauss(&white_noise(w, h), sig_tex);
     let (nm, nv) = {
         let n = noise.v.len() as f64;
@@ -735,8 +844,9 @@ fn build(image: &Rgb32FImage, mask: &GrayImage, is_raw: bool, texture: f32) -> O
             / n;
         (mean as f32, (var.sqrt() as f32).max(1e-9))
     };
-    // the noise layer's deviation from its 50 % grey: as rough, on mid-grey skin, as the face's cleanest skin
-    let tex_amp = s_clean * texture / nv;
+    // the noise layer's deviation from its 50 % grey: through the same high pass, as rough as the face's
+    // cleanest skin
+    let tex_amp = s_clean * texture / (nv * unit_rms);
 
     // "OG texture": a High Pass of each channel at the grain's radius, in Linear Light at the tutorial's 72 %.
     // Its strongest detail is soft-clipped, so a hair or a blemish's rim is not laid back as texture.
@@ -769,12 +879,13 @@ fn build(image: &Rgb32FImage, mask: &GrayImage, is_raw: bool, texture: f32) -> O
         });
 
     let report = format!(
-        "face {:.0} px, median radius {:.0} px ({:.1}% of the face, {} candidates), pore grain and high pass \
-         {:.1} px, texture {:.4}, detail {:.4}, highlights from {:.2}, shadows to {:.2}",
+        "face {:.0} px, median radius {:.0} px ({:.1}% of the face, {} candidates), grain half width {:.2} px, \
+         pore grain and high pass {:.2} px, texture {:.4}, detail {:.4}, highlights from {:.2}, shadows to {:.2}",
         face,
         radius,
         chosen.0 * 100.0,
         tried.len(),
+        half_width,
         sig_tex,
         s_clean,
         s_detail,
@@ -982,6 +1093,43 @@ mod tests {
         after
             .save(format!("{}.after.png", var("RRAW_OUT")))
             .unwrap();
+    }
+
+    #[test]
+    fn the_grain_size_is_found_again() {
+        // a noise field unlike the one the grains are matched against: the same generator, read down the columns
+        let side = 420usize;
+        let white = white_noise(side, side);
+        let other = Plane {
+            w: side,
+            h: side,
+            v: transpose(&white.v, side, side),
+        };
+        let mask = Plane {
+            w: side,
+            h: side,
+            v: (0..side * side)
+                .map(|i| {
+                    let (x, y) = ((i % side) as f32 - 210.0, (i / side) as f32 - 210.0);
+                    if x * x + y * y < 170.0 * 170.0 {
+                        1.0
+                    } else {
+                        0.0
+                    }
+                })
+                .collect(),
+        };
+        let table = grain_table(GRAIN_PROBE_MIN);
+        for blur in [0.9f32, 1.4, 1.8, 2.6, 3.5] {
+            let skin = gauss(&other, blur).map(|v| 0.4 + 0.01 * v);
+            let detail = skin.zip(&gauss(&skin, GRAIN_PROBE_MIN), |a, b| a - b);
+            let found = blur_for_width(&table, grain_half_width(&detail, &mask));
+            println!("grain blurred {blur} px: measured {found:.2} px");
+            assert!(
+                (found - blur).abs() < 0.12 * blur,
+                "a grain blurred {blur} px was measured as {found} px"
+            );
+        }
     }
 
     #[test]
