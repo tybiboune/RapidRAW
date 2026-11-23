@@ -805,6 +805,7 @@ fn build_session_with_dims(
         && GPU_STATUS.load(Ordering::Acquire) < GPU_FAILED
         && let Some(gpu_provider) = gpu_execution_provider()
     {
+        make_room_for(model_path);
         match create_session(model_path, kind, Some(gpu_provider), gpu_patch, fixed_dims) {
             Ok(session) => {
                 let _ = GPU_STATUS.compare_exchange(
@@ -826,14 +827,139 @@ fn build_session_with_dims(
 }
 
 pub fn gpu_acceleration_enabled(app_handle: &tauri::AppHandle) -> bool {
+    let _ = APP.set(app_handle.clone());
     GPU_STATUS.load(Ordering::Acquire) < GPU_FAILED
         && crate::app::settings::load_settings(app_handle.clone())
             .map(|settings| settings.ai_gpu_acceleration)
             .unwrap_or(true)
 }
 
+/// The GPU ran out of video memory for a model. That is worth freeing memory and trying again in smaller
+/// pieces for, not a reason to give the GPU up for every model.
+#[derive(Debug)]
+pub struct GpuOutOfMemory(pub String);
+
+impl std::fmt::Display for GpuOutOfMemory {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "the GPU is out of video memory: {}", self.0)
+    }
+}
+
+impl std::error::Error for GpuOutOfMemory {}
+
+/// The GPU could not take the work as it was given, and smaller pieces on a fresh session may go
+/// through: out of video memory (E_OUTOFMEMORY), or the device reset by Windows because one step ran
+/// past its time limit (DXGI_ERROR_DEVICE_REMOVED, DXGI_ERROR_DEVICE_HUNG), which a smaller tile makes
+/// shorter. DirectML gives the codes in whatever language Windows speaks.
+fn is_out_of_memory(message: &str) -> bool {
+    let message = message.to_ascii_lowercase();
+    [
+        "8007000e",
+        "e_outofmemory",
+        "out of memory",
+        "outofmemory",
+        "887a0005",
+        "887a0006",
+    ]
+    .iter()
+    .any(|sign| message.contains(sign))
+}
+
+/// The app, kept the first time a model asks whether it may use the GPU, so that memory can be freed
+/// from deep in a run that has none.
+static APP: std::sync::OnceLock<tauri::AppHandle> = std::sync::OnceLock::new();
+
+/// Drops every AI session the app keeps cached, so the video memory they hold is free for the model
+/// that needs it. A session in use is kept alive by whoever is using it. False when nothing was freed.
+pub fn make_room_on_gpu() -> bool {
+    let Some(app) = APP.get() else {
+        return false;
+    };
+    let state = app.state::<crate::app::state::AppState>();
+    // never wait on it: whoever holds it may be the one waiting for this
+    let Ok(mut ai_state) = state.ai_state.try_lock() else {
+        return false;
+    };
+    let Some(ai_state) = ai_state.as_mut() else {
+        return false;
+    };
+    ai_state.release_sessions();
+    log::info!("Freed the video memory of the AI models not in use");
+    true
+}
+
+/// How much video memory the high-performance GPU still lets this process have, by Windows' own budget.
+#[cfg(target_os = "windows")]
+pub fn gpu_memory_headroom() -> Option<u64> {
+    use windows::Win32::Graphics::Dxgi::{
+        CreateDXGIFactory2, DXGI_CREATE_FACTORY_FLAGS, DXGI_GPU_PREFERENCE_HIGH_PERFORMANCE,
+        DXGI_MEMORY_SEGMENT_GROUP_LOCAL, DXGI_QUERY_VIDEO_MEMORY_INFO, IDXGIAdapter3,
+        IDXGIFactory6,
+    };
+    unsafe {
+        let factory: IDXGIFactory6 = CreateDXGIFactory2(DXGI_CREATE_FACTORY_FLAGS(0)).ok()?;
+        let adapter: IDXGIAdapter3 = factory
+            .EnumAdapterByGpuPreference(0, DXGI_GPU_PREFERENCE_HIGH_PERFORMANCE)
+            .ok()?;
+        let mut info = DXGI_QUERY_VIDEO_MEMORY_INFO::default();
+        adapter
+            .QueryVideoMemoryInfo(0, DXGI_MEMORY_SEGMENT_GROUP_LOCAL, &mut info)
+            .ok()?;
+        Some(info.Budget.saturating_sub(info.CurrentUsage))
+    }
+}
+
+#[cfg(not(target_os = "windows"))]
+pub fn gpu_memory_headroom() -> Option<u64> {
+    None
+}
+
+/// Before a model is put on the GPU: when it would not fit beside what is there, the models not in use
+/// make way for it. What a network needs while it runs is a few times its weights, so that is the guess.
+fn make_room_for(model_path: &Path) {
+    let (Some(free), Ok(meta)) = (gpu_memory_headroom(), fs::metadata(model_path)) else {
+        return;
+    };
+    let wanted = meta.len().saturating_mul(4) + 768 * 1024 * 1024;
+    if free < wanted && make_room_on_gpu() {
+        log::info!(
+            "{} needs about {} MB of video memory and {} MB were free",
+            model_path.display(),
+            wanted / (1024 * 1024),
+            free / (1024 * 1024)
+        );
+    }
+}
+
+/// The last resort, once a model has run out of video memory with nothing else on the GPU and in its
+/// smallest pieces: every model goes to the CPU from now on.
+pub fn give_up_gpu(reason: &str) {
+    if GPU_STATUS
+        .compare_exchange(GPU_ACTIVE, GPU_FAILED, Ordering::AcqRel, Ordering::Acquire)
+        .is_ok()
+    {
+        log::warn!("GPU inference failed, using the CPU for AI models from now on: {reason}");
+    }
+}
+
+/// How many times in a row the GPU has run out of video memory. Each time the cached sessions make way
+/// and the work is tried again, smaller where it can be; the third time in a row, the CPU takes over.
+static OUT_OF_MEMORY_STREAK: AtomicU8 = AtomicU8::new(0);
+const OUT_OF_MEMORY_LIMIT: u8 = 3;
+
 pub fn gpu_inference<T>(result: ort::Result<T>) -> Result<T> {
+    if result.is_ok() {
+        OUT_OF_MEMORY_STREAK.store(0, Ordering::Release);
+    }
     result.map_err(|e| {
+        let message = e.to_string();
+        if GPU_STATUS.load(Ordering::Acquire) == GPU_ACTIVE && is_out_of_memory(&message) {
+            let streak = OUT_OF_MEMORY_STREAK.fetch_add(1, Ordering::AcqRel) + 1;
+            if streak >= OUT_OF_MEMORY_LIMIT {
+                give_up_gpu(&message);
+            }
+            return GpuOutOfMemory(message).into();
+        }
         if GPU_STATUS
             .compare_exchange(GPU_ACTIVE, GPU_FAILED, Ordering::AcqRel, Ordering::Acquire)
             .is_ok()
@@ -1356,6 +1482,13 @@ impl ManualModel {
         }
     }
 
+    /// Whether the model is put on the GPU. Restormer is not: on DirectML it takes most of a 6 GB card
+    /// whatever the tile size, and its long steps run past Windows' GPU time limit, which resets the
+    /// card for every model and can make the screen flicker. On the processor it is slower and safe.
+    pub fn gpu_capable(self) -> bool {
+        self != Self::DeblurDefocus
+    }
+
     fn what(self) -> &'static str {
         match self {
             Self::Wrinkles => "wrinkle",
@@ -1403,7 +1536,7 @@ pub async fn get_or_init_manual_model(
     let session = Arc::new(Mutex::new(build_session(
         &model_path,
         SessionKind::OneShot,
-        gpu_allowed_on_platform() && gpu_acceleration_enabled(app_handle),
+        model.gpu_capable() && gpu_allowed_on_platform() && gpu_acceleration_enabled(app_handle),
         None,
     )?));
 

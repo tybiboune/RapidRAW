@@ -75,6 +75,7 @@ pub fn deblur(
     session: &Mutex<Session>,
     scale: f32,
     strength: f32,
+    tile: usize,
 ) -> Result<RgbImage> {
     let scale = scale.clamp(0.2, 1.0);
     let pad = (48.0 / scale).round() as usize;
@@ -92,7 +93,7 @@ pub fn deblur(
     } else {
         imageops::resize(&full, sw, sh, FilterType::Triangle)
     };
-    let sharp = crate::ai::tiling::run_ai_deblur(&small, session, &|_: f32| {})?;
+    let sharp = crate::ai::tiling::run_ai_deblur(&small, session, tile, &|_: f32| {})?;
     let mut change = small;
     change
         .par_iter_mut()

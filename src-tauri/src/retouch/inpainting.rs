@@ -1370,21 +1370,63 @@ pub async fn generate_deblur_patch(
         Some("defocus") => models::ManualModel::DeblurDefocus,
         _ => models::ManualModel::DeblurMotion,
     };
-    let session =
-        models::get_or_init_manual_model(&app_handle, &state.ai_state, &state.ai_init_lock, model)
-            .await
-            .map_err(|e| e.to_string())?;
     // 0 is a blur of a pixel or two, worked at full size; 100 is a wide one, worked at a quarter
     let scale = 1.0 / (1.0 + 3.0 * brushed.share("blurSize", 0.0));
     let strength = brushed.share("strength", 80.0);
-    let (source, bounds) = (brushed.source.clone(), brushed.bounds);
-    let color_image = tauri::async_runtime::spawn_blocking(move || {
-        crate::retouch::repair::deblur(&source, bounds, &session, scale, strength)
-    })
-    .await
-    .map_err(|e| e.to_string())?
-    .map_err(|e| e.to_string())?;
-    brushed.patch(&color_image)
+    // About how much video memory each network takes per pixel of a tile, measured on DirectML:
+    // Restormer's attention at every level makes it the hungry one.
+    let bytes_per_pixel = match model {
+        models::ManualModel::DeblurDefocus => 22_000,
+        _ => 6_000,
+    };
+    // The largest tile the free video memory allows, then smaller ones on a fresh session when the GPU
+    // runs out after all (DirectML cannot go on with a session that ran out). After three, the CPU.
+    // a model kept on the processor has the memory it needs, so it runs at the largest tile
+    let free = if model.gpu_capable() {
+        models::gpu_memory_headroom()
+    } else {
+        None
+    };
+    let tiles = crate::ai::tiling::deblur_tiles_for(free, bytes_per_pixel);
+    match free {
+        Some(free) => log::info!(
+            "Deblur ({model:?}) on the GPU: {} MB of video memory free, tiles to try {tiles:?}",
+            free / (1024 * 1024)
+        ),
+        None => log::info!(
+            "Deblur ({model:?}) on the processor, tiles of {} px",
+            tiles[0]
+        ),
+    }
+    let mut last_error = String::new();
+    for tile in tiles
+        .into_iter()
+        .chain(std::iter::once(crate::ai::tiling::DEBLUR_TILE_SIZES[0]))
+    {
+        let session = models::get_or_init_manual_model(
+            &app_handle,
+            &state.ai_state,
+            &state.ai_init_lock,
+            model,
+        )
+        .await
+        .map_err(|e| e.to_string())?;
+        let (source, bounds) = (brushed.source.clone(), brushed.bounds);
+        let result = tauri::async_runtime::spawn_blocking(move || {
+            crate::retouch::repair::deblur(&source, bounds, &session, scale, strength, tile)
+        })
+        .await
+        .map_err(|e| e.to_string())?;
+        match result {
+            Ok(color_image) => return brushed.patch(&color_image),
+            Err(e) if e.downcast_ref::<models::GpuOutOfMemory>().is_some() => {
+                log::info!("Deblur: the GPU gave up at {tile} px tiles, trying smaller");
+                last_error = e.to_string();
+            }
+            Err(e) => return Err(e.to_string()),
+        }
+    }
+    Err(last_error)
 }
 
 /// Takes the sensor dust spots out of the brushed area: soft, round, neutral darkenings of a flat area
