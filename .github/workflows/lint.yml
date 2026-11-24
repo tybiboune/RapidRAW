@@ -76,3 +76,22 @@ jobs:
       - name: Clippy
         working-directory: src-tauri
         run: cargo clippy --all-targets -- -D warnings
+
+  skin-tests:
+    name: cargo test (skin retouch)
+    runs-on: windows-latest
+    steps:
+      - run: git config --global core.autocrlf false
+
+      - uses: actions/checkout@v5
+
+      - uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          rustflags: ''
+          rust-src-dir: src-tauri
+
+      # The CPU skin retouch (renewal, dodge & burn) and the method switch: their unit tests need no GPU and no
+      # model, so they run on every pull request.
+      - name: Test
+        working-directory: src-tauri
+        run: cargo test --lib -- effects::dodge_burn effects::renewal effects::skin_method

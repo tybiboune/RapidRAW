@@ -123,9 +123,9 @@ pub(crate) fn apply_content_steps<'a>(
 ) -> Result<Cow<'a, DynamicImage>> {
     let converted =
         crate::adjustments::negative_conversion::apply_negative_conversion(image, adjustments);
-    // the skin renewed, before the brushed repairs go on top of it
+    // the skin retouched (renewed, or dodged and burnt), before the brushed repairs go on top of it
     let source_path = crate::library::sidecars::parse_virtual_path(path).0;
-    let renewed = crate::effects::renewal::apply(
+    let renewed = crate::effects::skin_method::apply(
         converted,
         path,
         is_raw_file(source_path.to_string_lossy().as_ref()),
@@ -159,7 +159,7 @@ pub(crate) fn has_content_steps(adjustments: &Value) -> bool {
                     .is_some_and(|c| !c.is_empty())
         });
     crate::adjustments::negative_conversion::is_enabled(adjustments)
-        || crate::effects::renewal::is_enabled(adjustments)
+        || crate::effects::skin_method::is_enabled(adjustments)
         || shown_repair
 }
 

@@ -124,7 +124,7 @@ fn hash_ai_denoise(adjustments: &serde_json::Value, hasher: &mut DefaultHasher) 
         crate::ai::upscale::cache_epoch().hash(hasher);
     }
     // the skin renewal changes the picture itself, so it belongs with what the picture is made from
-    crate::effects::renewal::hash_inputs(adjustments, hasher);
+    crate::effects::skin_method::hash_inputs(adjustments, hasher, true);
 }
 
 fn hash_negative_conversion(adjustments: &serde_json::Value, hasher: &mut DefaultHasher) {
@@ -316,6 +316,8 @@ pub fn calculate_effects_hash(adjustments: &serde_json::Value) -> u64 {
                 "skinLinesSensitivity",
                 "skinRednessSensitivity",
                 "skinUnderEyeSensitivity",
+                // a map shown in the preview in place of the correction
+                "skinShowMap",
             ],
             &mut hasher,
         );
@@ -438,6 +440,7 @@ pub fn calculate_transform_hash(adjustments: &serde_json::Value) -> u64 {
             "skinPigment",
             "skinPigmentSensitivity",
             "skinTone",
+            "skinShowMap",
         ] {
             if let Some(val) = adjustments.get(key) {
                 val.to_string().hash(&mut hasher);

@@ -12,6 +12,7 @@ use std::sync::Arc;
 
 use image::GrayImage;
 
+use crate::effects::skin_method::{MAP_LINES, MAP_SHINE, MAP_SKIN, MAP_SPOTS, MAP_UNDER_EYE};
 use crate::render::adjustment_utils::is_effect_enabled;
 use crate::render::geometry::GeometryParams;
 use crate::render::gpu::compute::{Bind, ComputeEncoder, Grid, Group, Out, RGB_MODE, Slot};
@@ -73,7 +74,8 @@ struct Params {
     // 1 when the blemishes are read from the blemish detector's map rather than from the shape of the
     // brightness, else 0
     spots_ai: f32,
-    _pad0: u32,
+    // which of the maps to show in place of the correction, 0 for none (skin_method::MAP_*)
+    show_map: u32,
     _pad1: u32,
     _pad2: u32,
 }
@@ -157,6 +159,8 @@ pub struct Skin {
     // the threshold of each kind of fault, as a factor of the usual one: spots, lines, redness, under
     // eyes, pigment
     thresholds: [f32; 5],
+    // the map the preview asks to see instead of the correction, 0 for none
+    show_map: u32,
 }
 
 // The width of the face as a fraction of the picture's width, from the area of the largest blob on the
@@ -248,9 +252,15 @@ pub fn prepare(
     let under_eye = get("skinUnderEye");
     let pigment = get("skinPigment");
     let tone = get("skinTone");
-    if [spots, redness, shine, lines, under_eye, pigment, tone]
-        .iter()
-        .all(|&amount| amount <= 0.0)
+    // A map shown in the preview is drawn here whether or not its slider is up, so a detection can be set
+    // before anything is applied. Only this tool's own maps: the one-button retouch draws its own.
+    let show_map = Some(crate::effects::skin_method::shown_map(adjustments))
+        .filter(|map| (MAP_SKIN..=MAP_SHINE).contains(map))
+        .unwrap_or(0);
+    if show_map == 0
+        && [spots, redness, shine, lines, under_eye, pigment, tone]
+            .iter()
+            .all(|&amount| amount <= 0.0)
     {
         return None;
     }
@@ -270,7 +280,8 @@ pub fn prepare(
         Some((map, key))
     };
     // the wrinkle model's map, only when it is asked for and the lines are
-    let ai_wanted = lines > 0.0 && adjustments["skinLinesAi"].as_bool().unwrap_or(false);
+    let ai_wanted = (lines > 0.0 || show_map == MAP_LINES)
+        && adjustments["skinLinesAi"].as_bool().unwrap_or(false);
     // a model's map is only decoded when what it is for is asked for
     let model_map = |wanted: bool, key: &str| {
         if !wanted {
@@ -281,7 +292,7 @@ pub fn prepare(
     let ai_lines = model_map(ai_wanted, "skinLinesAiMap");
     // and the blemish detector's, only when it is asked for and the spots are
     let ai_spots = model_map(
-        spots > 0.0 && adjustments["skinSpotsAi"].as_bool().unwrap_or(false),
+        (spots > 0.0 || show_map == MAP_SPOTS) && adjustments["skinSpotsAi"].as_bool().unwrap_or(false),
         "skinSpotsAiMap",
     );
     let regions = match (map_of("skinLinesMap"), map_of("skinUnderEyeMap")) {
@@ -324,6 +335,7 @@ pub fn prepare(
             threshold("skinUnderEyeSensitivity"),
             threshold("skinPigmentSensitivity"),
         ],
+        show_map,
     })
 }
 
@@ -410,6 +422,7 @@ pub fn encode(enc: &mut ComputeEncoder, job: &Skin, src: &Slot, dst: &Slot) {
         tone: job.tone,
         thr_pigment: job.thresholds[4],
         spots_ai: if spots_ai { 1.0 } else { 0.0 },
+        show_map: job.show_map,
         ..Default::default()
     };
 
@@ -478,8 +491,11 @@ pub fn encode(enc: &mut ComputeEncoder, job: &Skin, src: &Slot, dst: &Slot) {
     // sharply upward and along it hardly at all. A blemish is a blob: it bends the same way in every
     // direction. Both are read from the curvature of the blurred copies, which is what tells a crease
     // from a spot from a pore, and the blur is what keeps noise out of it.
-    let wants_lines = job.lines > 0.0 || job.under_eye > 0.0;
-    let wants_blemishes = job.spots > 0.0;
+    let wants_lines = job.lines > 0.0
+        || job.under_eye > 0.0
+        || job.show_map == MAP_LINES
+        || job.show_map == MAP_UNDER_EYE;
+    let wants_blemishes = job.spots > 0.0 || job.show_map == MAP_SPOTS;
     let mut extras = None;
     let mut blemishes = None;
     if wants_lines || wants_blemishes {

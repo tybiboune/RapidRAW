@@ -347,6 +347,7 @@
   "skinPigmentSensitivity": 50,
   "skinRenewal": 0,
   "skinRenewalTexture": 50,
+  "skinRenewMethod": "renewal",
   "skinRedness": 0,
   "skinRednessSensitivity": 50,
   "skinRednessWay": 0,

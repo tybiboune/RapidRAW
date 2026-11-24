@@ -1,3 +1,4 @@
+pub mod dodge_burn;
 pub mod fog;
 pub mod lens_blur;
 pub mod light;
@@ -6,3 +7,4 @@ pub mod motion_blur;
 pub mod relight;
 pub mod renewal;
 pub mod skin;
+pub mod skin_method;

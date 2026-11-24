@@ -47,7 +47,8 @@ struct Params {
     // 1 when the blemishes are read from the blemish detector's map rather than from the shape of the
     // brightness, else 0
     spots_ai: f32,
-    _pad0: u32,
+    // which map to show in place of the correction (see sk_apply), 0 for none
+    show_map: u32,
     _pad1: u32,
     _pad2: u32,
 }
@@ -561,6 +562,46 @@ fn clean_ring(pos: vec2<f32>, reach: f32) -> Ring {
 // under-eye band, which is only read when one of those two is asked for. t5: the blemishes found, only
 // read when spots are asked for.
 // Out: the picture with each fault corrected by its own slider, and nothing else touched.
+// What a map reads at a pixel, for the preview to show in place of the correction, so a detection slider can
+// be set while what it finds is in view: 1 the skin, 2 spots, 3 redness, 4 pigment, 5 lines, 6 under the
+// eyes, 7 shine. Each reads as the correction would take it, at a full slider; pigment, which the correction
+// works out on the spot, is worked out here the same way.
+fn map_value(at: Tap, maps: vec4<f32>) -> f32 {
+    let skin = maps.w;
+    let unweighted = max(skin, 0.05);
+    switch params.show_map {
+        case 1u: { return skin; }
+        case 2u: { return tap_sample(t5, at).x; }
+        case 3u: { return clamp(maps.y / unweighted, 0.0, 1.0) * skin; }
+        case 4u: {
+            let fine = tap_sample(t2, at);
+            let wide = tap_sample(t3, at);
+            let l_fine = fine.x / max(fine.w, 1e-4);
+            let l_wide = wide.x / max(wide.w, 1e-4);
+            let lf = max(l_fine, 0.05);
+            let lw = max(l_wide, 0.05);
+            let darker = max(l_wide - l_fine, 0.0);
+            let browner = max(wide.y / max(wide.w, 1e-4) / lw - fine.y / max(fine.w, 1e-4) / lf, 0.0)
+                + max(fine.z / max(fine.w, 1e-4) / lf - wide.z / max(wide.w, 1e-4) / lw, 0.0) * 0.5;
+            let deep = smooth_step(0.25, 0.4, darker / lw);
+            return smooth_step(2.0 * params.thr_pigment, 8.0 * params.thr_pigment, browner)
+                * smooth_step(0.0, 0.02, darker) * (1.0 - deep) * skin;
+        }
+        case 5u: { return clamp(tap_sample(t4, at).x / unweighted, 0.0, 1.0) * skin; }
+        case 6u: { return tap_sample(t4, at).y * skin; }
+        case 7u: { return clamp(maps.z / unweighted, 0.0, 1.0) * skin; }
+        default: { return 0.0; }
+    }
+}
+
+// A map shown over the picture: the picture in grey, dimmed, with magenta as strong as the map reads.
+fn map_shown(rgb: vec3<f32>, at: Tap, maps: vec4<f32>) -> vec3<f32> {
+    let luma = dot(rgb, vec3<f32>(0.2126, 0.7152, 0.0722));
+    let grey = vec3<f32>(0.45 * luma);
+    let hot = vec3<f32>(1.6, 0.18, 0.6) * max(luma, 0.18);
+    return mix(grey, hot, clamp(map_value(at, maps), 0.0, 1.0));
+}
+
 @compute @workgroup_size(8, 8, 1)
 fn sk_apply(@builtin(global_invocation_id) id: vec3<u32>) {
     if (outside(id)) { return; }
@@ -573,6 +614,10 @@ fn sk_apply(@builtin(global_invocation_id) id: vec3<u32>) {
     let at = tap_uv((vec2<f32>(id.xy) + 0.5) / vec2<f32>(params.grid.dst), found_size);
     let maps = tap_sample(t1, at);
     let skin = maps.w;
+    if (params.show_map > 0u) {
+        textureStore(out_f16, p, vec4<f32>(map_shown(texel.rgb, at, maps), texel.a));
+        return;
+    }
     if (skin <= 0.01) {
         textureStore(out_f16, p, texel);
         return;

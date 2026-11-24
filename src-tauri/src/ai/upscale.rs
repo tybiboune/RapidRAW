@@ -167,7 +167,7 @@ fn content_tag(adjustments: &serde_json::Value) -> Option<u64> {
             }
         }
     }
-    crate::effects::renewal::hash_inputs(adjustments, &mut hasher);
+    crate::effects::skin_method::hash_inputs(adjustments, &mut hasher, false);
     // only the repairs that show and have a result: one still being made, or hidden, changes nothing,
     // and its flags must not set the upscaler going again
     for patch in adjustments["aiPatches"].as_array().into_iter().flatten() {

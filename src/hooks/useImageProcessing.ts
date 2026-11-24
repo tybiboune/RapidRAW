@@ -58,6 +58,7 @@ export function useImageProcessing(
   const isSliderDragging = useEditorStore((state) => state.isSliderDragging);
   const compareView = useEditorStore((state) => state.compareView);
   const influence = useEditorStore((state) => state.influence);
+  const skinMapView = useEditorStore((state) => state.skinMapView);
   const setEditor = useEditorStore((state) => state.setEditor);
 
   const activeView = useUIStore((state) => state.activeView);
@@ -151,6 +152,9 @@ export function useImageProcessing(
       if (!currentPath) return;
 
       const { payload, markSent } = prepareAdjustmentsPayload(currentAdjustments);
+      // a skin map asked for in the Skin tool rides along with the preview only: it is never saved or exported
+      const { skinMapView: shownSkinMap } = useEditorStore.getState();
+      if (shownSkinMap) payload.skinShowMap = shownSkinMap;
 
       const jobId = ++previewJobIdRef.current;
       const roi = calculateROI();
@@ -556,6 +560,7 @@ export function useImageProcessing(
     appSettings?.copyPasteSettings?.autoSync,
     isWaveformVisible,
     influence,
+    skinMapView,
   ]);
 
   return {

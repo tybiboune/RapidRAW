@@ -68,6 +68,8 @@ interface EditorState {
   isSliderDragging: boolean;
   // the control whose affected areas the preview shows while Alt is held on it
   influence: InfluenceTarget | null;
+  // the skin detection or retouch map the preview shows in place of the picture (0: none); never saved
+  skinMapView: number;
   speedEditTarget: RefObject<SpeedEditTarget | null> | null;
   isSpeedEditActive: boolean;
   zoom: number;
@@ -160,6 +162,7 @@ export const useEditorStore = create<EditorState>((set) => ({
 
   isSliderDragging: false,
   influence: null,
+  skinMapView: 0,
   speedEditTarget: null,
   isSpeedEditActive: false,
   interactivePatch: null,

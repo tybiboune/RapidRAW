@@ -42,6 +42,8 @@ pub struct Layer {
     /// red, green, blue change, in the picture's own encoding
     delta: Vec<f32>,
     weight: Vec<f32>,
+    /// the skin's middle brightness, in the picture's own encoding: what a map shown over it is scaled to
+    skin_level: f32,
     pub report: String,
 }
 
@@ -50,7 +52,9 @@ static BUILD: Mutex<()> = Mutex::new(());
 
 pub fn is_enabled(adjustments: &serde_json::Value) -> bool {
     is_effect_enabled(adjustments, "skin", "skinEnabled")
-        && adjustments["skinRenewal"].as_f64().unwrap_or(0.0) > 0.0
+        && super::skin_method::Method::of(adjustments) == super::skin_method::Method::Renewal
+        && (adjustments["skinRenewal"].as_f64().unwrap_or(0.0) > 0.0
+            || super::skin_method::shown_map(adjustments) == super::skin_method::MAP_RENEWAL)
         && adjustments["skinFaceMap"]
             .as_str()
             .is_some_and(|map| !map.is_empty())
@@ -66,12 +70,15 @@ fn texture_gain(adjustments: &serde_json::Value) -> f32 {
 }
 
 /// What the renewal depends on besides its amount, for the caches that must notice a change.
-pub fn hash_inputs(adjustments: &serde_json::Value, hasher: &mut DefaultHasher) {
+pub fn hash_inputs(adjustments: &serde_json::Value, hasher: &mut DefaultHasher, with_map: bool) {
     let on = is_enabled(adjustments);
     on.hash(hasher);
     if on {
         adjustments["skinRenewal"].to_string().hash(hasher);
         adjustments["skinRenewalTexture"].to_string().hash(hasher);
+        if with_map {
+            super::skin_method::shown_map(adjustments).hash(hasher);
+        }
         let map = adjustments["skinFaceMap"].as_str().unwrap_or("");
         map.len().hash(hasher);
         map.as_bytes()
@@ -159,6 +166,7 @@ pub fn apply<'a>(
     };
 
     let amount = amount(adjustments);
+    let show = super::skin_method::shown_map(adjustments) == super::skin_method::MAP_RENEWAL;
     let mut out = base.to_rgb32f();
     let stride = w as usize * 3;
     out.par_chunks_mut(stride)
@@ -168,11 +176,19 @@ pub fn apply<'a>(
         .for_each(|(y, row)| {
             let ly = y - layer.y0;
             for lx in 0..layer.w {
+                let px = (layer.x0 + lx) * 3;
+                if show {
+                    // where the renewal goes and how far, whatever the amount: the weight it is laid on with
+                    let here = [row[px], row[px + 1], row[px + 2]];
+                    let shown =
+                        super::skin_method::tint(here, layer.weight[ly * layer.w + lx], layer.skin_level);
+                    row[px..px + 3].copy_from_slice(&shown);
+                    continue;
+                }
                 let wt = (layer.weight[ly * layer.w + lx] * amount).clamp(0.0, 1.0);
                 if wt <= 0.0 {
                     continue;
                 }
-                let px = (layer.x0 + lx) * 3;
                 let d = &layer.delta[(ly * layer.w + lx) * 3..][..3];
                 for c in 0..3 {
                     row[px + c] += wt * d[c];
@@ -186,14 +202,14 @@ pub fn apply<'a>(
 
 /// One-channel float image, row by row.
 #[derive(Clone)]
-struct Plane {
-    w: usize,
-    h: usize,
-    v: Vec<f32>,
+pub(super) struct Plane {
+    pub(super) w: usize,
+    pub(super) h: usize,
+    pub(super) v: Vec<f32>,
 }
 
 impl Plane {
-    fn map(&self, f: impl Fn(f32) -> f32 + Sync) -> Plane {
+    pub(super) fn map(&self, f: impl Fn(f32) -> f32 + Sync) -> Plane {
         Plane {
             w: self.w,
             h: self.h,
@@ -201,7 +217,7 @@ impl Plane {
         }
     }
 
-    fn zip(&self, other: &Plane, f: impl Fn(f32, f32) -> f32 + Sync) -> Plane {
+    pub(super) fn zip(&self, other: &Plane, f: impl Fn(f32, f32) -> f32 + Sync) -> Plane {
         Plane {
             w: self.w,
             h: self.h,
@@ -215,7 +231,7 @@ impl Plane {
     }
 }
 
-fn smoothstep(a: f32, b: f32, x: f32) -> f32 {
+pub(super) fn smoothstep(a: f32, b: f32, x: f32) -> f32 {
     let t = ((x - a) / (b - a).max(1e-9)).clamp(0.0, 1.0);
     t * t * (3.0 - 2.0 * t)
 }
@@ -322,7 +338,7 @@ fn upsample(p: &Plane, w: usize, h: usize) -> Plane {
 }
 
 /// A Gaussian blur of any width: a kernel for small ones, and for wide ones the same blur on a shrunken copy.
-fn gauss(p: &Plane, sigma: f32) -> Plane {
+pub(super) fn gauss(p: &Plane, sigma: f32) -> Plane {
     if sigma < 0.3 {
         return p.clone();
     }
@@ -407,7 +423,7 @@ fn median(p: &Plane, radius: f32) -> Plane {
     Plane { w, h, v: out }
 }
 
-fn mean_where(p: &Plane, weight: &Plane) -> f32 {
+pub(super) fn mean_where(p: &Plane, weight: &Plane) -> f32 {
     let (s, n) =
         p.v.par_iter()
             .zip(weight.v.par_iter())
@@ -417,7 +433,7 @@ fn mean_where(p: &Plane, weight: &Plane) -> f32 {
 }
 
 /// The `q` quantile of `p` where `weight` is on, from a sample of it.
-fn quantile(p: &Plane, weight: &Plane, q: f32) -> f32 {
+pub(super) fn quantile(p: &Plane, weight: &Plane, q: f32) -> f32 {
     let step = (p.v.len() / 150_000).max(1);
     let mut v: Vec<f32> =
         p.v.iter()
@@ -433,7 +449,7 @@ fn quantile(p: &Plane, weight: &Plane, q: f32) -> f32 {
     *v.select_nth_unstable_by(i, |a, b| a.total_cmp(b)).1
 }
 
-fn gradient(p: &Plane) -> Plane {
+pub(super) fn gradient(p: &Plane) -> Plane {
     let mut v = vec![0.0f32; p.w * p.h];
     v.par_chunks_mut(p.w).enumerate().for_each(|(y, row)| {
         if y == 0 || y + 1 >= p.h {
@@ -449,7 +465,7 @@ fn gradient(p: &Plane) -> Plane {
 }
 
 /// Gaussian noise, the same every time: a made-up skin texture must not change from one render to the next.
-fn white_noise(w: usize, h: usize) -> Plane {
+pub(super) fn white_noise(w: usize, h: usize) -> Plane {
     let mut v = vec![0.0f32; w * h];
     v.par_chunks_mut(w).enumerate().for_each(|(y, row)| {
         let mut s = 0x9E37_79B9_7F4A_7C15u64 ^ (y as u64).wrapping_mul(0xBF58_476D_1CE4_E5B9);
@@ -468,7 +484,7 @@ fn white_noise(w: usize, h: usize) -> Plane {
 }
 
 /// The narrowest high pass the grain is measured through, in pixels: wider than the coarsest grain used (4 px).
-const GRAIN_PROBE_MIN: f32 = 4.0;
+pub(super) const GRAIN_PROBE_MIN: f32 = 4.0;
 /// The farthest shift, in pixels, the grain's likeness to itself is followed to.
 const GRAIN_MAX_LAG: usize = 16;
 
@@ -514,7 +530,7 @@ fn grain_curve(detail: &Plane, mask: &Plane) -> Vec<f32> {
 }
 
 /// The shift, in pixels and between whole ones, at which the detail is half as alike to itself as unshifted.
-fn grain_half_width(detail: &Plane, mask: &Plane) -> f32 {
+pub(super) fn grain_half_width(detail: &Plane, mask: &Plane) -> f32 {
     let curve = grain_curve(detail, mask);
     for lag in 1..curve.len() {
         if curve[lag] < 0.5 {
@@ -527,7 +543,7 @@ fn grain_half_width(detail: &Plane, mask: &Plane) -> f32 {
 
 /// Made-up grains, white noise of unit strength blurred by each width, measured through the high pass `probe`:
 /// (blur, half width, strength left after the high pass).
-fn grain_table(probe: f32) -> Vec<(f32, f32, f32)> {
+pub(super) fn grain_table(probe: f32) -> Vec<(f32, f32, f32)> {
     let side = 320usize;
     let edge = (3.0 * probe).ceil() as usize + GRAIN_MAX_LAG;
     let inside = Plane {
@@ -581,7 +597,7 @@ fn interpolate(
 }
 
 /// The blur whose made-up grain measures `half_width`.
-fn blur_for_width(table: &[(f32, f32, f32)], half_width: f32) -> f32 {
+pub(super) fn blur_for_width(table: &[(f32, f32, f32)], half_width: f32) -> f32 {
     interpolate(table, |r| r.1, half_width, |r| r.0)
 }
 
@@ -899,6 +915,7 @@ fn build(image: &Rgb32FImage, mask: &GrayImage, is_raw: bool, texture: f32) -> O
         h,
         delta,
         weight,
+        skin_level: from_gamma(quantile(&y, &interior, 0.5)),
         report,
     })
 }

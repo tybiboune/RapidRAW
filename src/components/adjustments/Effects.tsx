@@ -30,6 +30,31 @@ import Text from '../ui/Text';
 import AdjustmentSubSection from './AdjustmentSubSection';
 import { TextVariants } from '../../types/typography';
 import { FACE_METHODS } from '../panel/right/Masks';
+
+// The ways the one-button skin retouch can work: the "one-minute" renewal (median base and a new grain), or a
+// natural dodge & burn that evens the light and shade and keeps every pore.
+const SKIN_RETOUCH_METHODS = ['renewal', 'dodgeBurn'] as const;
+
+// The maps the preview can show in place of the picture, by the number the backend knows them by
+// (skin_method.rs): the Skin tool's own, then those of each retouch method.
+const SKIN_TOOL_MAPS = [
+  [0, 'off'],
+  [1, 'skin'],
+  [2, 'spots'],
+  [3, 'redness'],
+  [4, 'pigment'],
+  [5, 'lines'],
+  [6, 'underEye'],
+  [7, 'shine'],
+] as const;
+const SKIN_RETOUCH_MAPS = {
+  renewal: [[10, 'renewal']],
+  dodgeBurn: [
+    [11, 'dodgeBurn'],
+    [12, 'dodgeBurnSpots'],
+    [13, 'dodgeBurnKept'],
+  ],
+} as const;
 import { DepthRangePicker } from './DepthRangePicker';
 import DepthScope from './depthScope/DepthScope';
 import { ScenePatch } from './depthScope/scene';
@@ -223,6 +248,7 @@ function EffectsPanel({
   const [isGeneratingWrinkleMap, setIsGeneratingWrinkleMap] = useState(false);
   const [isGeneratingBlemishMap, setIsGeneratingBlemishMap] = useState(false);
   const selectedImagePath = useEditorStore((state) => state.selectedImage?.path ?? null);
+  const skinMapView = useEditorStore((state) => state.skinMapView);
   const [isGeneratingNormals, setIsGeneratingNormals] = useState(false);
   const [isGeneratingFogDepth, setIsGeneratingFogDepth] = useState(false);
   const [isGeneratingMotionDepth, setIsGeneratingMotionDepth] = useState(false);
@@ -320,12 +346,25 @@ function EffectsPanel({
     handleGenerateFaceMap(method);
   };
 
-  // The one-button renewal: it works out everything else from the picture, so all this does is ask for it.
+  // The one-button retouch: it works out everything else from the picture, so all this does is ask for it.
   const handleAutoRenew = () => {
     setAdjustments((prev: Partial<Adjustments>) => ({ ...prev, skinRenewal: 70, skinRenewalTexture: 50 }));
   };
 
+  const skinRetouchMethod = adjustments.skinRenewMethod ?? 'renewal';
+  const handleSkinRetouchMethodChange = (method: string) => {
+    if (method === skinRetouchMethod) return;
+    // a word, which handleAdjustmentChange would read as a number
+    setAdjustments((prev: Partial<Adjustments>) => ({ ...prev, [Effect.SkinRenewMethod]: method }));
+    // a map of the other method has nothing to show any more
+    if (skinMapView >= 10) setEditor({ skinMapView: 0 });
+  };
+
+  // A map is for this picture only, and only while it is being looked at.
+  useEffect(() => () => setEditor({ skinMapView: 0 }), [selectedImagePath, setEditor]);
+
   const handleSkinToggle = (enabled: boolean) => {
+    if (!enabled) setEditor({ skinMapView: 0 });
     handleAdjustmentChange(Effect.SkinEnabled, enabled);
     // an edit saved before the lines and under-eye maps existed has a face map but not those
     if (enabled && (!adjustments.skinFaceMap || !adjustments.skinLinesMap)) {
@@ -875,6 +914,22 @@ function EffectsPanel({
                       </div>
 
                       <div className="space-y-2 rounded-md bg-surface p-2">
+                        <div className="flex gap-1">
+                          {SKIN_RETOUCH_METHODS.map((method) => (
+                            <button
+                              key={method}
+                              type="button"
+                              onClick={() => handleSkinRetouchMethodChange(method)}
+                              className={`flex-1 rounded-md px-2 py-1 text-xs transition-colors ${
+                                skinRetouchMethod === method
+                                  ? 'bg-card-active text-primary'
+                                  : 'text-text-secondary hover:bg-card-active/60'
+                              }`}
+                            >
+                              {t(`adjustments.effects.skinRetouchMethods.${method}`)}
+                            </button>
+                          ))}
+                        </div>
                         <button
                           type="button"
                           onClick={handleAutoRenew}
@@ -883,11 +938,13 @@ function EffectsPanel({
                           {t('adjustments.effects.skinRenewAuto')}
                         </button>
                         <Text variant={TextVariants.small} className="text-text-secondary">
-                          {t('adjustments.effects.skinRenewHint')}
+                          {skinRetouchMethod === 'dodgeBurn'
+                            ? t('adjustments.effects.skinDodgeBurnHint')
+                            : t('adjustments.effects.skinRenewHint')}
                         </Text>
                         <Slider
                           resetKey="skinRenewal"
-                          label={t('adjustments.effects.skinRenewal')}
+                          label={t('adjustments.effects.skinStrength')}
                           max={100}
                           min={0}
                           defaultValue={0}
@@ -898,7 +955,7 @@ function EffectsPanel({
                           value={adjustments.skinRenewal ?? 0}
                           onDragStateChange={onDragStateChange}
                         />
-                        {(adjustments.skinRenewal ?? 0) > 0 && (
+                        {(adjustments.skinRenewal ?? 0) > 0 && skinRetouchMethod === 'renewal' && (
                           <Slider
                             resetKey="skinRenewalTexture"
                             label={t('adjustments.effects.skinRenewalTexture')}
@@ -1058,6 +1115,36 @@ function EffectsPanel({
                         value={adjustments.skinKeepTexture ?? 0}
                         onDragStateChange={onDragStateChange}
                       />
+
+                      <div className="space-y-1 pt-2">
+                        <Text variant={TextVariants.small} className="text-text-secondary">
+                          {t('adjustments.effects.skinShowMap')}
+                        </Text>
+                        <div className="flex flex-wrap gap-1">
+                          {[
+                            ...SKIN_TOOL_MAPS,
+                            ...(SKIN_RETOUCH_MAPS[skinRetouchMethod as keyof typeof SKIN_RETOUCH_MAPS] ?? []),
+                          ].map(([id, name]) => (
+                            <button
+                              key={id}
+                              type="button"
+                              onClick={() => setEditor({ skinMapView: id })}
+                              className={`rounded-md px-2 py-1 text-xs transition-colors ${
+                                skinMapView === id
+                                  ? 'bg-card-active text-primary'
+                                  : 'bg-surface text-text-secondary hover:bg-card-active/60'
+                              }`}
+                            >
+                              {t(`adjustments.effects.skinMaps.${name}`)}
+                            </button>
+                          ))}
+                        </div>
+                        {skinMapView > 0 && (
+                          <Text variant={TextVariants.small} className="text-text-secondary">
+                            {t('adjustments.effects.skinShowMapHint')}
+                          </Text>
+                        )}
+                      </div>
 
                       <div className="pt-2">
                         <Text variant={TextVariants.small} className="text-text-secondary">
