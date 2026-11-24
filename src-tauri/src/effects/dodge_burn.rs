@@ -512,7 +512,11 @@ fn dilate_line(line: &[f32], r: usize, out: &mut [f32]) {
     }
     let last = padded.len() - 1;
     for (i, (&v, b)) in padded.iter().zip(behind.iter_mut()).enumerate().rev() {
-        run = if i == last || (i + 1) % k == 0 { v } else { run.max(v) };
+        run = if i == last || (i + 1) % k == 0 {
+            v
+        } else {
+            run.max(v)
+        };
         *b = run;
     }
     for (i, o) in out.iter_mut().enumerate() {
@@ -835,8 +839,7 @@ fn build_face(
     let band_guard: Vec<Plane> = sigmas
         .windows(2)
         .map(|pair| {
-            dilate(&edges, (2.0 * pair[1]).round() as usize)
-                .map(|e| 1.0 - smoothstep(0.35, 0.9, e))
+            dilate(&edges, (2.0 * pair[1]).round() as usize).map(|e| 1.0 - smoothstep(0.35, 0.9, e))
         })
         .collect();
 
