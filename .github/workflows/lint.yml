@@ -94,4 +94,4 @@ jobs:
       # model, so they run on every pull request.
       - name: Test
         working-directory: src-tauri
-        run: cargo test --lib -- effects::dodge_burn effects::renewal effects::skin_method
+        run: cargo test --lib -- effects::dodge_burn effects::renewal effects::skin_method effects::ai_retouch

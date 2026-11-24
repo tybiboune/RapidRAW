@@ -1252,6 +1252,248 @@ pub fn compose_blemish_map(
     })
 }
 
+// ABPN's learned skin retouch (Alibaba, CVPR 2022), the way its pipeline runs it on each face, cut out 1.5 times
+// the face box: the blemish detector finds the spots, a gated-convolution network fills them with skin a 512-pixel
+// tile at a time at the face's own resolution, and a U-Net, from the filled face at 512 x 512, makes a blend layer
+// that evens the skin as a soft light (see effects/ai_retouch.rs, which lays both on).
+const RETOUCH_BLEND_SIZE: usize = 512;
+const RETOUCH_TILE: usize = 512;
+const RETOUCH_OVERLAP: usize = 32;
+/// The largest face cut-out the spots are filled at, in pixels a side; a bigger face is filled at this size.
+const RETOUCH_MAX_SIDE: usize = 2048;
+/// The pipeline fades the blend layer out over this share of the cut-out at each side.
+const RETOUCH_BORDER: f32 = 0.04;
+
+/// The two maps of the learned retouch over the whole frame: the blend layer (0.5 where nothing changes), on a
+/// copy at most `long_side` across, and the change the spot filling makes, at the picture's own size, as
+/// 128 + 254 times the change in 0..1 units.
+pub struct AiRetouchMaps {
+    pub blend: RgbImage,
+    pub spots: RgbImage,
+}
+
+/// How certain the detector is that each pixel is a blemish, as the pipeline reads it: nothing under 0.35,
+/// all of it from 0.5, as it is in between.
+fn retouch_blemish(p: f32) -> f32 {
+    if p >= 0.5 {
+        1.0
+    } else if p >= 0.35 {
+        p
+    } else {
+        0.0
+    }
+}
+
+/// The spots of one face filled with skin, `side` pixels a side, channels apart, -1..1, from the face cut out
+/// (`crop`) and where to fill (`keep`, 1 to keep).
+fn retouch_fill(
+    session: &Mutex<Session>,
+    crop: &Array4<f32>,
+    keep: &[f32],
+    side: usize,
+) -> Result<Vec<[f32; 3]>> {
+    let tiles = side.div_ceil(RETOUCH_TILE);
+    let window = RETOUCH_TILE + 2 * RETOUCH_OVERLAP;
+    // the face on a canvas with zeros around it, as the pipeline pads it
+    let at = |x: usize, y: usize| -> Option<(usize, usize)> {
+        let (x, y) = (x.checked_sub(RETOUCH_OVERLAP)?, y.checked_sub(RETOUCH_OVERLAP)?);
+        (x < side && y < side).then_some((x, y))
+    };
+    let mut filled = vec![[0.0f32; 3]; side * side];
+    for ty in 0..tiles {
+        for tx in 0..tiles {
+            let (ox, oy) = (tx * RETOUCH_TILE, ty * RETOUCH_TILE);
+            let mut image = Array4::<f32>::zeros((1, 3, window, window));
+            let mut mask = Array4::<f32>::zeros((1, 1, window, window));
+            for y in 0..window {
+                for x in 0..window {
+                    if let Some((sx, sy)) = at(ox + x, oy + y) {
+                        for c in 0..3 {
+                            image[[0, c, y, x]] = crop[[0, c, sy, sx]];
+                        }
+                        mask[[0, 0, y, x]] = keep[sy * side + sx];
+                    }
+                }
+            }
+            let out: Vec<f32> = {
+                let mut session = session.lock().unwrap();
+                let outputs = session.run(ort::inputs![
+                    "image" => Tensor::from_array(image)?,
+                    "keep" => Tensor::from_array(mask)?,
+                ])?;
+                outputs["filled"]
+                    .try_extract_array::<f32>()?
+                    .iter()
+                    .copied()
+                    .collect()
+            };
+            if out.len() != 3 * window * window {
+                return Err(anyhow::anyhow!(
+                    "Unexpected spot filler output of {} values",
+                    out.len()
+                ));
+            }
+            let plane = window * window;
+            for y in RETOUCH_OVERLAP..RETOUCH_OVERLAP + RETOUCH_TILE {
+                for x in RETOUCH_OVERLAP..RETOUCH_OVERLAP + RETOUCH_TILE {
+                    if let Some((sx, sy)) = at(ox + x, oy + y) {
+                        filled[sy * side + sx] =
+                            std::array::from_fn(|c| out[c * plane + y * window + x]);
+                    }
+                }
+            }
+        }
+    }
+    Ok(filled)
+}
+
+/// The blend layer of one face, 512 x 512, from the filled face.
+fn retouch_blend(session: &Mutex<Session>, filled: &[[f32; 3]], side: usize) -> Result<Vec<[f32; 3]>> {
+    let n = RETOUCH_BLEND_SIZE;
+    let source = ImageBuffer::<image::Rgb<f32>, Vec<f32>>::from_raw(
+        side as u32,
+        side as u32,
+        filled.iter().flatten().copied().collect(),
+    )
+    .ok_or_else(|| anyhow::anyhow!("the filled face does not fit its size"))?;
+    let small = imageops::resize(&source, n as u32, n as u32, imageops::FilterType::Triangle);
+    let mut tensor = Array4::<f32>::zeros((1, 3, n, n));
+    for (x, y, p) in small.enumerate_pixels() {
+        for c in 0..3 {
+            tensor[[0, c, y as usize, x as usize]] = p.0[c];
+        }
+    }
+    let out: Vec<f32> = {
+        let mut session = session.lock().unwrap();
+        let outputs = session.run(ort::inputs![Tensor::from_array(tensor)?])?;
+        outputs[0]
+            .try_extract_array::<f32>()?
+            .iter()
+            .copied()
+            .collect()
+    };
+    if out.len() != 3 * n * n {
+        return Err(anyhow::anyhow!(
+            "Unexpected blend layer output of {} values",
+            out.len()
+        ));
+    }
+    Ok((0..n * n)
+        .map(|i| std::array::from_fn(|c| out[c * n * n + i]))
+        .collect())
+}
+
+/// ABPN's learned retouch on every face of the picture (see `AiRetouchMaps`).
+pub fn compose_ai_retouch(
+    image: &DynamicImage,
+    analysis: &FaceAnalysis,
+    detector: &Mutex<Session>,
+    blend: &Mutex<Session>,
+    filler: &Mutex<Session>,
+    long_side: u32,
+) -> Result<AiRetouchMaps> {
+    let (width, height) = image.dimensions();
+    let scale = (long_side as f32 / width.max(height) as f32).min(1.0);
+    let bw = ((width as f32 * scale).round() as usize).max(1);
+    let bh = ((height as f32 * scale).round() as usize).max(1);
+    let rgb = image.to_rgb8();
+    let (w, h) = (width as usize, height as usize);
+    let mut layer = vec![[0.5f32; 3]; bw * bh];
+    let mut change = vec![[0.0f32; 3]; w * h];
+    for face in &analysis.faces {
+        let frame = blemish_frame(face);
+        let side = (frame.side.round() as usize).clamp(64, RETOUCH_MAX_SIDE);
+        let crop = face_tensor(&rgb, &frame, side, |v| v.map(|c| c / 127.5 - 1.0));
+        let found = run_face_model(
+            detector,
+            face_tensor(&rgb, &frame, BLEMISH_INPUT_SIZE, |v| v.map(|c| c / 127.5 - 1.0)),
+            BLEMISH_INPUT_SIZE,
+            BLEMISH_SOFTNESS,
+        )?;
+        // the detector's answer, read at the cut-out's size the way the pipeline reads it (nearest)
+        let keep: Vec<f32> = (0..side * side)
+            .map(|i| {
+                let (x, y) = (i % side, i / side);
+                let dx = (x * BLEMISH_INPUT_SIZE / side).min(BLEMISH_INPUT_SIZE - 1);
+                let dy = (y * BLEMISH_INPUT_SIZE / side).min(BLEMISH_INPUT_SIZE - 1);
+                1.0 - retouch_blemish(found[dy * BLEMISH_INPUT_SIZE + dx])
+            })
+            .collect();
+        let filled = retouch_fill(filler, &crop, &keep, side)?;
+        let mg = retouch_blend(blend, &filled, side)?;
+
+        // the change the filling makes, at the picture's own size
+        let corners: Vec<[f32; 2]> = [[0.0, 0.0], [1.0, 0.0], [0.0, 1.0], [1.0, 1.0]]
+            .into_iter()
+            .map(|[u, v]| frame.to_image(side, u * side as f32, v * side as f32))
+            .collect();
+        let (min, max) = bounds(&corners);
+        let x0 = (min[0].floor().max(0.0) as usize).min(w);
+        let y0 = (min[1].floor().max(0.0) as usize).min(h);
+        let x1 = (max[0].ceil().max(0.0) as usize).min(w);
+        let y1 = (max[1].ceil().max(0.0) as usize).min(h);
+        let plane = side * side;
+        let original = crop.as_slice().unwrap_or(&[]);
+        if original.len() == 3 * plane {
+            change
+                .par_chunks_mut(w)
+                .enumerate()
+                .skip(y0)
+                .take(y1.saturating_sub(y0))
+                .for_each(|(y, row)| {
+                    for (x, out) in row.iter_mut().enumerate().take(x1).skip(x0) {
+                        let [u, v] = frame.to_frame(side, [x as f32, y as f32]);
+                        if !inside(u, v, side, side) {
+                            continue;
+                        }
+                        let taps = bilinear(u, v, side, side);
+                        let d: [f32; 3] = std::array::from_fn(|c| {
+                            taps.iter()
+                                .map(|&(i, k)| (filled[i][c] - original[c * plane + i]) * k)
+                                .sum::<f32>()
+                                * 0.5
+                        });
+                        let size = |d: &[f32; 3]| d.iter().map(|v| v.abs()).sum::<f32>();
+                        if size(&d) > size(out) {
+                            *out = d;
+                        }
+                    }
+                });
+        }
+
+        // the blend layer on the copy, faded out towards the cut-out's border as the pipeline fades it
+        let n = RETOUCH_BLEND_SIZE;
+        let border = RETOUCH_BORDER * n as f32;
+        layer.par_chunks_mut(bw).enumerate().for_each(|(y, row)| {
+            for (x, out) in row.iter_mut().enumerate() {
+                let p = [(x as f32 + 0.5) / scale - 0.5, (y as f32 + 0.5) / scale - 0.5];
+                let [u, v] = frame.to_frame(n, p);
+                if !inside(u, v, n, n) {
+                    continue;
+                }
+                let fade = (u.min(v).min(n as f32 - u).min(n as f32 - v) / border).clamp(0.0, 1.0);
+                let taps = bilinear(u, v, n, n);
+                let m: [f32; 3] = std::array::from_fn(|c| {
+                    0.5 + fade * (taps.iter().map(|&(i, k)| mg[i][c] * k).sum::<f32>() - 0.5)
+                });
+                let size = |m: &[f32; 3]| m.iter().map(|v| (v - 0.5).abs()).sum::<f32>();
+                if size(&m) > size(out) {
+                    *out = m;
+                }
+            }
+        });
+    }
+    let to_rgb = |values: &[[f32; 3]], w: usize, h: usize, encode: &dyn Fn(f32) -> u8| {
+        RgbImage::from_fn(w as u32, h as u32, |x, y| {
+            image::Rgb(values[y as usize * w + x as usize].map(encode))
+        })
+    };
+    Ok(AiRetouchMaps {
+        blend: to_rgb(&layer, bw, bh, &|v| (v.clamp(0.0, 1.0) * 255.0).round() as u8),
+        spots: to_rgb(&change, w, h, &|v| (128.0 + 254.0 * v).round().clamp(0.0, 255.0) as u8),
+    })
+}
+
 // The face parser: SegFormer trained on CelebAMask-HQ, which tells every pixel of a face which of its
 // parts it is. It takes the face cut out the way FFHQ cuts it, ImageNet-normalised, and answers at a
 // quarter of its input.

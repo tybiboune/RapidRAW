@@ -33,7 +33,7 @@ import { FACE_METHODS } from '../panel/right/Masks';
 
 // The ways the one-button skin retouch can work: the "one-minute" renewal (median base and a new grain), or a
 // natural dodge & burn that evens the light and shade and keeps every pore.
-const SKIN_RETOUCH_METHODS = ['renewal', 'dodgeBurn'] as const;
+const SKIN_RETOUCH_METHODS = ['renewal', 'dodgeBurn', 'ai'] as const;
 
 // The maps the preview can show in place of the picture, by the number the backend knows them by
 // (skin_method.rs): the Skin tool's own, then those of each retouch method.
@@ -54,6 +54,7 @@ const SKIN_RETOUCH_MAPS = {
     [12, 'dodgeBurnSpots'],
     [13, 'dodgeBurnKept'],
   ],
+  ai: [[14, 'aiRetouch']],
 } as const;
 import { DepthRangePicker } from './DepthRangePicker';
 import DepthScope from './depthScope/DepthScope';
@@ -247,6 +248,7 @@ function EffectsPanel({
   const [isGeneratingFaceMap, setIsGeneratingFaceMap] = useState(false);
   const [isGeneratingWrinkleMap, setIsGeneratingWrinkleMap] = useState(false);
   const [isGeneratingBlemishMap, setIsGeneratingBlemishMap] = useState(false);
+  const [isGeneratingAiRetouch, setIsGeneratingAiRetouch] = useState(false);
   const selectedImagePath = useEditorStore((state) => state.selectedImage?.path ?? null);
   const skinMapView = useEditorStore((state) => state.skinMapView);
   const [isGeneratingNormals, setIsGeneratingNormals] = useState(false);
@@ -351,6 +353,28 @@ function EffectsPanel({
     setAdjustments((prev: Partial<Adjustments>) => ({ ...prev, skinRenewal: 70, skinRenewalTexture: 50 }));
   };
 
+  // The learned retouch runs its three models once, on the faces found, and keeps their two maps with the edit:
+  // the slider only lays them on.
+  const handleGenerateAiRetouch = async () => {
+    setIsGeneratingAiRetouch(true);
+    try {
+      const maps: { blendMap: string; spotsMap: string } = await invoke('generate_ai_skin_retouch', {
+        jsAdjustments: adjustments,
+        path: selectedImagePath,
+      });
+      setAdjustments((prev: Partial<Adjustments>) => ({
+        ...prev,
+        skinAiBlendMap: maps.blendMap,
+        skinAiSpotsMap: maps.spotsMap,
+      }));
+    } catch (e) {
+      toast.error(`Failed to retouch the skin with AI: ${e}`);
+      setAdjustments((prev: Partial<Adjustments>) => ({ ...prev, [Effect.SkinRenewMethod]: 'renewal' }));
+    } finally {
+      setIsGeneratingAiRetouch(false);
+    }
+  };
+
   const skinRetouchMethod = adjustments.skinRenewMethod ?? 'renewal';
   const handleSkinRetouchMethodChange = (method: string) => {
     if (method === skinRetouchMethod) return;
@@ -358,6 +382,9 @@ function EffectsPanel({
     setAdjustments((prev: Partial<Adjustments>) => ({ ...prev, [Effect.SkinRenewMethod]: method }));
     // a map of the other method has nothing to show any more
     if (skinMapView >= 10) setEditor({ skinMapView: 0 });
+    if (method === 'ai' && (!adjustments.skinAiBlendMap || !adjustments.skinAiSpotsMap)) {
+      handleGenerateAiRetouch();
+    }
   };
 
   // A map is for this picture only, and only while it is being looked at.
@@ -937,10 +964,15 @@ function EffectsPanel({
                         >
                           {t('adjustments.effects.skinRenewAuto')}
                         </button>
+                        {isGeneratingAiRetouch && (
+                          <MapGenerationStatus label={t('adjustments.effects.skinFindingAiRetouch')} />
+                        )}
                         <Text variant={TextVariants.small} className="text-text-secondary">
                           {skinRetouchMethod === 'dodgeBurn'
                             ? t('adjustments.effects.skinDodgeBurnHint')
-                            : t('adjustments.effects.skinRenewHint')}
+                            : skinRetouchMethod === 'ai'
+                              ? t('adjustments.effects.skinAiRetouchHint')
+                              : t('adjustments.effects.skinRenewHint')}
                         </Text>
                         <Slider
                           resetKey="skinRenewal"

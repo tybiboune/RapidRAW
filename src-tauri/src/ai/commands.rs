@@ -1233,6 +1233,90 @@ pub async fn generate_full_image_blemish_map(
     .await
 }
 
+/// The two maps of the skin tool's learned retouch (ABPN, see masks::face::compose_ai_retouch) for the faces of
+/// the loaded picture: the blend layer that evens the skin and the change that fills its spots, both as maps
+/// in the picture's own space, kept with the edit so the retouch is laid on without any model.
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AiSkinRetouchMaps {
+    blend_map: String,
+    spots_map: String,
+}
+
+#[tauri::command]
+pub async fn generate_ai_skin_retouch(
+    js_adjustments: serde_json::Value,
+    path: String,
+    state: tauri::State<'_, AppState>,
+    app_handle: tauri::AppHandle,
+) -> Result<AiSkinRetouchMaps, String> {
+    // the three models are checked for first: without them there is no point finding the faces
+    let mut sessions = Vec::new();
+    for model in [
+        ManualModel::Blemishes,
+        ManualModel::RetouchBlend,
+        ManualModel::RetouchInpaint,
+    ] {
+        sessions.push(
+            get_or_init_manual_model(&app_handle, &state.ai_state, &state.ai_init_lock, model)
+                .await
+                .map_err(|e| e.to_string())?,
+        );
+    }
+    let models = get_or_init_ai_models(
+        &app_handle,
+        &state.ai_state,
+        &state.ai_init_lock,
+        AiMaskModel::Face,
+    )
+    .await
+    .map_err(|e| e.to_string())?;
+    let loaded_image = get_loaded_image(&state)?;
+    let source_image = crate::masks::generation::build_converted_source_image(
+        &loaded_image.image,
+        loaded_image.is_raw,
+        &js_adjustments,
+    )
+    .into_owned();
+    let analysis = cached_face_analysis(
+        &state.ai_state,
+        &models,
+        &skin_cache_key(&path, &js_adjustments),
+        &source_image,
+        MaskTransform::from_adjustments(&js_adjustments),
+    )?;
+    if analysis.faces.is_empty() {
+        return Err(NO_FACES_FOUND.to_string());
+    }
+    let maps = tauri::async_runtime::spawn_blocking(move || {
+        crate::masks::face::compose_ai_retouch(
+            &source_image,
+            &analysis,
+            &sessions[0],
+            &sessions[1],
+            &sessions[2],
+            crate::effects::skin::DETECT_LONG_SIDE,
+        )
+    })
+    .await
+    .map_err(|e| e.to_string())?
+    .map_err(|e| e.to_string())?;
+    let encode = |map: &image::RgbImage| -> Result<String, String> {
+        let mut buf = Cursor::new(Vec::new());
+        map.write_to(&mut buf, ImageFormat::Png)
+            .map_err(|e| e.to_string())?;
+        Ok(format!(
+            "{}{}",
+            crate::effects::maps::SOURCE_SPACE_MAP_PREFIX,
+            general_purpose::STANDARD.encode(buf.get_ref())
+        ))
+    };
+    Ok(AiSkinRetouchMaps {
+        blend_map: encode(&maps.blend)?,
+        spots_map: encode(&maps.spots)?,
+    })
+}
+
 // A skin map from one of the face models put in by hand, over the faces of the loaded picture, as a map
 // in the picture's own space.
 async fn skin_model_map(
@@ -1277,7 +1361,10 @@ async fn skin_model_map(
         let compose = match model {
             ManualModel::Wrinkles => crate::masks::face::compose_wrinkle_map,
             ManualModel::Blemishes => crate::masks::face::compose_blemish_map,
-            ManualModel::DeblurMotion | ManualModel::DeblurDefocus => {
+            ManualModel::DeblurMotion
+            | ManualModel::DeblurDefocus
+            | ManualModel::RetouchBlend
+            | ManualModel::RetouchInpaint => {
                 return Err(anyhow::anyhow!("{model:?} does not make a skin map"));
             }
         };

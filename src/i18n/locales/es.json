@@ -265,6 +265,7 @@
       "roundness": "Redondez",
       "size": "Tamaño",
       "skin": "Skin",
+      "skinAiRetouchHint": "A retouch learned from retouched portraits (ABPN): spots filled with skin, then the skin evened by a learned blend layer. Its models run once for this photo; the slider then works at once.",
       "skinDetection": "Detection (higher finds fainter faults)",
       "skinDetectionAll": "Overall",
       "skinDetectionLines": "Lines",
@@ -274,6 +275,7 @@
       "skinDetectionUnderEye": "Under eyes",
       "skinDodgeBurnHint": "Evens out the light and shade of the skin and keeps every pore. Spots go first, then blotches and uneven colour. Everything is worked out from this photo.",
       "skinFaceMethod": "Skin found by",
+      "skinFindingAiRetouch": "Retouching the skin with AI...",
       "skinFindingFace": "Finding the face",
       "skinFindingLines": "Finding the lines",
       "skinFindingSpots": "Finding the spots",
@@ -281,6 +283,7 @@
       "skinLines": "Lines",
       "skinLinesAi": "Find lines with AI",
       "skinMaps": {
+        "aiRetouch": "AI retouch",
         "dodgeBurn": "Dodge & burn",
         "dodgeBurnKept": "Left alone",
         "dodgeBurnSpots": "D&B spots",
@@ -305,6 +308,7 @@
       "skinRenewAuto": "Renew skin automatically",
       "skinRenewHint": "Evens the skin and renews its texture where it needs it. Everything is worked out from this photo.",
       "skinRetouchMethods": {
+        "ai": "AI (learned)",
         "dodgeBurn": "Natural (dodge & burn)",
         "renewal": "Renewal"
       },

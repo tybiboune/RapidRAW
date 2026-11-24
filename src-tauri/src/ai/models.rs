@@ -185,6 +185,10 @@ pub const BLEMISH_FILENAME: &str = "abpn_blemish_detection.onnx";
 // in the models folder by hand.
 pub const DEBLUR_MOTION_FILENAME: &str = "deblur_motion_nafnet.onnx";
 pub const DEBLUR_DEFOCUS_FILENAME: &str = "deblur_defocus_restormer.onnx";
+/// ABPN's learned skin retouch, made by scripts/export_abpn_retouch_onnx.py: the blend layer that evens the
+/// skin, and the network that fills the spots the blemish detector finds.
+pub const RETOUCH_BLEND_FILENAME: &str = "abpn_retouch_blend.onnx";
+pub const RETOUCH_INPAINT_FILENAME: &str = "abpn_retouch_inpaint.onnx";
 
 type SharedSession = Arc<Mutex<Session>>;
 
@@ -1470,6 +1474,8 @@ pub enum ManualModel {
     Blemishes,
     DeblurMotion,
     DeblurDefocus,
+    RetouchBlend,
+    RetouchInpaint,
 }
 
 impl ManualModel {
@@ -1479,6 +1485,8 @@ impl ManualModel {
             Self::Blemishes => BLEMISH_FILENAME,
             Self::DeblurMotion => DEBLUR_MOTION_FILENAME,
             Self::DeblurDefocus => DEBLUR_DEFOCUS_FILENAME,
+            Self::RetouchBlend => RETOUCH_BLEND_FILENAME,
+            Self::RetouchInpaint => RETOUCH_INPAINT_FILENAME,
         }
     }
 
@@ -1495,6 +1503,8 @@ impl ManualModel {
             Self::Blemishes => "blemish",
             Self::DeblurMotion => "motion deblur",
             Self::DeblurDefocus => "defocus deblur",
+            Self::RetouchBlend => "skin retouch blend",
+            Self::RetouchInpaint => "skin retouch spot filler",
         }
     }
 }

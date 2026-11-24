@@ -150,6 +150,8 @@ export enum Effect {
   SkinLinesAiMap = 'skinLinesAiMap',
   SkinSpotsAi = 'skinSpotsAi',
   SkinSpotsAiMap = 'skinSpotsAiMap',
+  SkinAiBlendMap = 'skinAiBlendMap',
+  SkinAiSpotsMap = 'skinAiSpotsMap',
   SkinUnderEye = 'skinUnderEye',
   SkinUnderEyeMap = 'skinUnderEyeMap',
   SkinSensitivity = 'skinSensitivity',
@@ -384,6 +386,8 @@ export interface Adjustments {
   skinLinesAiMap: string | null;
   skinSpotsAi: boolean;
   skinSpotsAiMap: string | null;
+  skinAiBlendMap: string | null;
+  skinAiSpotsMap: string | null;
   skinUnderEye: number;
   skinUnderEyeMap: string | null;
   skinSensitivity: number;
@@ -894,6 +898,8 @@ export const normalizeLoadedAdjustments = (loadedAdjustments: Adjustments): any 
     skinLinesAiMap: loadedAdjustments.skinLinesAiMap ?? INITIAL_ADJUSTMENTS.skinLinesAiMap,
     skinSpotsAi: loadedAdjustments.skinSpotsAi ?? INITIAL_ADJUSTMENTS.skinSpotsAi,
     skinSpotsAiMap: loadedAdjustments.skinSpotsAiMap ?? INITIAL_ADJUSTMENTS.skinSpotsAiMap,
+    skinAiBlendMap: loadedAdjustments.skinAiBlendMap ?? INITIAL_ADJUSTMENTS.skinAiBlendMap,
+    skinAiSpotsMap: loadedAdjustments.skinAiSpotsMap ?? INITIAL_ADJUSTMENTS.skinAiSpotsMap,
     skinUnderEye: loadedAdjustments.skinUnderEye ?? INITIAL_ADJUSTMENTS.skinUnderEye,
     skinUnderEyeMap: loadedAdjustments.skinUnderEyeMap ?? INITIAL_ADJUSTMENTS.skinUnderEyeMap,
     skinSensitivity: loadedAdjustments.skinSensitivity ?? INITIAL_ADJUSTMENTS.skinSensitivity,
@@ -1345,6 +1351,8 @@ export const ADJUSTMENT_SECTIONS: Sections = {
     Effect.SkinLinesAiMap,
     Effect.SkinSpotsAi,
     Effect.SkinSpotsAiMap,
+    Effect.SkinAiBlendMap,
+    Effect.SkinAiSpotsMap,
     Effect.SkinUnderEye,
     Effect.SkinUnderEyeMap,
     Effect.SkinSensitivity,

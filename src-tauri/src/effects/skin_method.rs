@@ -3,6 +3,8 @@
 //     an even base and a made-up grain is laid back on. Strong; for skin with a lot wrong with it.
 //   - Natural (dodge & burn): the light and shade of the skin evened out between the size of a pore and the size
 //     of the face's own shapes, the pores themselves never touched (dodge_burn.rs). Subtle; the most natural.
+//   - AI (learned): Alibaba's ABPN, trained on retouched portraits: its spots filled and its skin evened by a
+//     learned blend layer (ai_retouch.rs). Its models run once and leave two maps with the edit.
 //
 // Each runs on the developed picture before the GPU pipeline, kept as a change to add, so its one Strength slider
 // moves without anything being worked out again. This module picks the one that is asked for, and holds what
@@ -17,12 +19,14 @@ use image::DynamicImage;
 pub enum Method {
     Renewal,
     DodgeBurn,
+    Ai,
 }
 
 impl Method {
     pub fn of(adjustments: &serde_json::Value) -> Self {
         match adjustments["skinRenewMethod"].as_str() {
             Some("dodgeBurn") => Method::DodgeBurn,
+            Some("ai") => Method::Ai,
             _ => Method::Renewal,
         }
     }
@@ -49,6 +53,8 @@ pub const MAP_DODGE_BURN: u32 = 11;
 pub const MAP_DODGE_BURN_SPOTS: u32 = 12;
 /// what the dodge & burn leaves alone inside the skin: hair and stubble, strong edges, deep shadows
 pub const MAP_DODGE_BURN_KEPT: u32 = 13;
+/// how much the learned retouch changes each place, at full strength
+pub const MAP_AI_RETOUCH: u32 = 14;
 
 /// The map the preview asks to see, or 0.
 pub fn shown_map(adjustments: &serde_json::Value) -> u32 {
@@ -56,7 +62,9 @@ pub fn shown_map(adjustments: &serde_json::Value) -> u32 {
 }
 
 pub fn is_enabled(adjustments: &serde_json::Value) -> bool {
-    super::renewal::is_enabled(adjustments) || super::dodge_burn::is_enabled(adjustments)
+    super::renewal::is_enabled(adjustments)
+        || super::dodge_burn::is_enabled(adjustments)
+        || super::ai_retouch::is_enabled(adjustments)
 }
 
 /// What the retouch depends on, for the caches that must notice a change. `with_map` counts the map shown in
@@ -65,6 +73,7 @@ pub fn is_enabled(adjustments: &serde_json::Value) -> bool {
 pub fn hash_inputs(adjustments: &serde_json::Value, hasher: &mut DefaultHasher, with_map: bool) {
     super::renewal::hash_inputs(adjustments, hasher, with_map);
     super::dodge_burn::hash_inputs(adjustments, hasher, with_map);
+    super::ai_retouch::hash_inputs(adjustments, hasher, with_map);
 }
 
 /// The picture with its skin retouched the way asked for, or as it was.
@@ -77,6 +86,7 @@ pub fn apply<'a>(
     match Method::of(adjustments) {
         Method::Renewal => super::renewal::apply(base, path, is_raw, adjustments),
         Method::DodgeBurn => super::dodge_burn::apply(base, path, is_raw, adjustments),
+        Method::Ai => super::ai_retouch::apply(base, is_raw, adjustments),
     }
 }
 

@@ -1,3 +1,4 @@
+pub mod ai_retouch;
 pub mod dodge_burn;
 pub mod fog;
 pub mod lens_blur;

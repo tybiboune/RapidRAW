@@ -356,6 +356,8 @@
   "skinSpots": 0,
   "skinSpotsAi": false,
   "skinSpotsAiMap": null,
+  "skinAiBlendMap": null,
+  "skinAiSpotsMap": null,
   "skinSpotsSensitivity": 50,
   "skinTone": 0,
   "skinUnderEye": 0,

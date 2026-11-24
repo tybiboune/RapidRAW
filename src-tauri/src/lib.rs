@@ -675,6 +675,7 @@ pub fn run() {
             ai::commands::generate_full_image_face_map,
             ai::commands::generate_full_image_wrinkle_map,
             ai::commands::generate_full_image_blemish_map,
+            ai::commands::generate_ai_skin_retouch,
             ai::commands::generate_relight_normal_map,
             ai::commands::get_depth_preview,
             ai::denoise::clear_ai_denoise_cache,
