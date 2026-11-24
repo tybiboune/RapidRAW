@@ -42,8 +42,8 @@ use image::{DynamicImage, GenericImageView, GrayImage, Rgb32FImage, imageops};
 use rayon::prelude::*;
 
 use super::renewal::{
-    GRAIN_PROBE_MIN, Plane, blur_for_width, gauss, gradient, grain_half_width, grain_table, quantile,
-    smoothstep,
+    GRAIN_PROBE_MIN, Plane, blur_for_width, gauss, gradient, grain_half_width, grain_table,
+    quantile, smoothstep, transpose,
 };
 use super::skin_method::{
     MAP_DODGE_BURN, MAP_DODGE_BURN_KEPT, MAP_DODGE_BURN_SPOTS, Method, shown_map, tint,
@@ -240,7 +240,13 @@ pub fn apply<'a>(
     };
 
     let mut out = base.to_rgb32f();
-    paint(&mut out, &layer, is_raw, amount(adjustments), shown_map(adjustments));
+    paint(
+        &mut out,
+        &layer,
+        is_raw,
+        amount(adjustments),
+        shown_map(adjustments),
+    );
     Cow::Owned(DynamicImage::ImageRgb32F(out))
 }
 
@@ -473,15 +479,66 @@ fn roundness(b: &Plane, h: usize) -> Plane {
             let c = at(x, y);
             let hxx = at(x + h, y) - 2.0 * c + at(x - h, y);
             let hyy = at(x, y + h) - 2.0 * c + at(x, y - h);
-            let hxy = 0.25 * (at(x + h, y + h) - at(x - h, y + h) - at(x + h, y - h) + at(x - h, y - h));
+            let hxy =
+                0.25 * (at(x + h, y + h) - at(x - h, y + h) - at(x + h, y - h) + at(x - h, y - h));
             let (tr, det) = (hxx + hyy, hxx * hyy - hxy * hxy);
             let disc = (0.25 * tr * tr - det).max(0.0).sqrt();
             let (l1, l2) = (0.5 * tr + disc, 0.5 * tr - disc);
-            let (big, small) = if l1.abs() >= l2.abs() { (l1, l2) } else { (l2, l1) };
+            let (big, small) = if l1.abs() >= l2.abs() {
+                (l1, l2)
+            } else {
+                (l2, l1)
+            };
             *o = if big.abs() < 1e-12 { 0.0 } else { small / big };
         }
     });
     Plane { w, h: hh, v }
+}
+
+/// The largest value within `r` of each place along a line, the line's ends repeated past it: van Herk's running
+/// maximum, so a wide reach costs no more than a narrow one.
+fn dilate_line(line: &[f32], r: usize, out: &mut [f32]) {
+    let n = line.len();
+    let k = 2 * r + 1;
+    let padded: Vec<f32> = (0..n + 2 * r)
+        .map(|i| line[i.saturating_sub(r).min(n - 1)])
+        .collect();
+    let mut ahead = vec![0.0f32; padded.len()];
+    let mut behind = vec![0.0f32; padded.len()];
+    let mut run = f32::MIN;
+    for (i, (&v, a)) in padded.iter().zip(ahead.iter_mut()).enumerate() {
+        run = if i % k == 0 { v } else { run.max(v) };
+        *a = run;
+    }
+    let last = padded.len() - 1;
+    for (i, (&v, b)) in padded.iter().zip(behind.iter_mut()).enumerate().rev() {
+        run = if i == last || (i + 1) % k == 0 { v } else { run.max(v) };
+        *b = run;
+    }
+    for (i, o) in out.iter_mut().enumerate() {
+        *o = behind[i].max(ahead[i + 2 * r]);
+    }
+}
+
+/// The largest value within a square of `r` either way of each place.
+fn dilate(p: &Plane, r: usize) -> Plane {
+    if r == 0 {
+        return p.clone();
+    }
+    let pass = |src: &[f32], w: usize, h: usize| -> Vec<f32> {
+        let mut out = vec![0.0f32; w * h];
+        out.par_chunks_mut(w)
+            .zip(src.par_chunks(w))
+            .for_each(|(o, line)| dilate_line(line, r, o));
+        out
+    };
+    let across = pass(&p.v, p.w, p.h);
+    let down = pass(&transpose(&across, p.w, p.h), p.h, p.w);
+    Plane {
+        w: p.w,
+        h: p.h,
+        v: transpose(&down, p.h, p.w),
+    }
 }
 
 /// What working out one channel comes to: its change at full strength, the spot-sized bands and their part of
@@ -503,6 +560,9 @@ struct Context<'a> {
     /// the skin a spot's yardstick is measured on: well inside, not hair, not an edge
     plain: &'a Plane,
     keep: &'a Plane,
+    /// for each band, how far it may act: nothing within its own reach of a strong edge, which a band that wide
+    /// would otherwise flatten (the edge of a hard shadow, the side of the nose)
+    band_guard: &'a [Plane],
     sigmas: &'a [f32],
     face: f32,
     threshold: f32,
@@ -521,19 +581,24 @@ fn work_channel(x: &Plane, cx: &Context, highlights: Option<&Plane>) -> Channel 
     let mut bands = Vec::new();
     let s_hi = *cx.sigmas.last().unwrap_or(&1.0);
     let mut previous = skin_blur(x, cx.m, cx.sigmas[0]);
-    for pair in cx.sigmas.windows(2) {
+    for (k, pair) in cx.sigmas.windows(2).enumerate() {
         let (sig, next_sig) = (pair[0], pair[1]);
+        let guard = &cx.band_guard[k];
         let next = skin_blur(x, cx.m, next_sig);
         let band = previous.zip(&next, |a, b| a - b);
         // how rough this band is around each place, and how rough the quietest quarter of the skin is
-        let rough = skin_blur(&band.map(|v| v * v), cx.m, 2.0 * next_sig).map(|v| v.max(0.0).sqrt() + 1e-6);
+        let rough =
+            skin_blur(&band.map(|v| v * v), cx.m, 2.0 * next_sig).map(|v| v.max(0.0).sqrt() + 1e-6);
         let quiet = quantile(&rough, cx.interior, 0.25).max(1e-6);
         // the coarsest bands are the face's shape: taken out less and less
         let taper = 1.0 - smoothstep(0.035 * cx.face, s_hi, next_sig);
         let take: Vec<f32> = (0..w * h)
             .into_par_iter()
             .map(|i| {
-                let mut a = (1.0 - TARGET * quiet / rough.v[i]).clamp(0.0, 1.0) * taper * cx.keep.v[i];
+                let mut a = (1.0 - TARGET * quiet / rough.v[i]).clamp(0.0, 1.0)
+                    * taper
+                    * cx.keep.v[i]
+                    * guard.v[i];
                 if let Some(hl) = highlights
                     && band.v[i] > 0.0
                 {
@@ -608,7 +673,9 @@ fn grain_blur(
             .into_par_iter()
             .map(|i| {
                 let p = image.get_pixel((x0 + i % w) as u32, (y0 + i / w) as u32).0;
-                (0.2126 * p[0] + 0.7152 * p[1] + 0.0722 * p[2]).max(1e-6).ln()
+                (0.2126 * p[0] + 0.7152 * p[1] + 0.0722 * p[2])
+                    .max(1e-6)
+                    .ln()
             })
             .collect(),
     };
@@ -617,7 +684,13 @@ fn grain_blur(
         h,
         v: (0..w * h)
             .into_par_iter()
-            .map(|i| if skin(x0 + i % w, y0 + i / w) > 0.9 { 1.0 } else { 0.0 })
+            .map(|i| {
+                if skin(x0 + i % w, y0 + i / w) > 0.9 {
+                    1.0
+                } else {
+                    0.0
+                }
+            })
             .collect(),
     };
     let probe = (0.005 * face).max(GRAIN_PROBE_MIN);
@@ -642,7 +715,10 @@ fn build_face(
         .max(0.6 * (area.y1 - area.y0) as f32)
         .max(32.0);
     let margin = (0.12 * face_full) as usize;
-    let (x0, y0) = (area.x0.saturating_sub(margin), area.y0.saturating_sub(margin));
+    let (x0, y0) = (
+        area.x0.saturating_sub(margin),
+        area.y0.saturating_sub(margin),
+    );
     let (x1, y1) = ((area.x1 + margin).min(iw), (area.y1 + margin).min(ih));
     let (w, h) = (x1 - x0, y1 - y0);
     let step = ((face_full / ANALYSIS_FACE).ceil() as usize).max(1);
@@ -755,12 +831,21 @@ fn build_face(
             .collect(),
     };
     let plain = interior.zip(&keep, |i, k| if i > 0.5 && k > 0.5 { 1.0 } else { 0.0 });
+    // each band kept away from the strong edges by its own width
+    let band_guard: Vec<Plane> = sigmas
+        .windows(2)
+        .map(|pair| {
+            dilate(&edges, (2.0 * pair[1]).round() as usize)
+                .map(|e| 1.0 - smoothstep(0.35, 0.9, e))
+        })
+        .collect();
 
     let context = Context {
         m: &m,
         interior: &interior,
         plain: &plain,
         keep: &keep,
+        band_guard: &band_guard,
         sigmas: &sigmas,
         face,
         threshold,
@@ -790,7 +875,9 @@ fn build_face(
             .iter()
             .zip(&interior.v)
             .filter(|(_, i)| **i > 0.5)
-            .fold((0usize, 0usize), |(on, all), (s, _)| (on + usize::from(*s > 0.5), all + 1));
+            .fold((0usize, 0usize), |(on, all), (s, _)| {
+                (on + usize::from(*s > 0.5), all + 1)
+            });
         on as f32 / all.max(1) as f32
     };
     // spots all over the face are freckles: the person's, and kept
@@ -817,7 +904,8 @@ fn build_face(
         .collect();
     let maps: Vec<[f32; 3]> = (0..aw * ah)
         .map(|i| {
-            let amount = (cl.change.v[i].abs() + 0.5 * (cu.change.v[i].abs() + cv.change.v[i].abs())) * 10.0;
+            let amount =
+                (cl.change.v[i].abs() + 0.5 * (cu.change.v[i].abs() + cv.change.v[i].abs())) * 10.0;
             [
                 amount.clamp(0.0, 1.0),
                 spots.v[i],
@@ -938,8 +1026,11 @@ mod tests {
         for y in cy - 12..=cy + 12 {
             for x in cx - 12..=cx + 12 {
                 let here = luma(img, x, y).ln();
-                let around = (luma(img, x + 1, y) * luma(img, x - 1, y) * luma(img, x, y + 1) * luma(img, x, y - 1))
-                    .ln()
+                let around = (luma(img, x + 1, y)
+                    * luma(img, x - 1, y)
+                    * luma(img, x, y + 1)
+                    * luma(img, x, y - 1))
+                .ln()
                     / 4.0;
                 s += (here - around).powi(2);
                 n += 1.0;
@@ -972,9 +1063,15 @@ mod tests {
         // the light still falls off down the face as it did
         let fall = |img: &Rgb32FImage| area(img, 200, 60, 6) / area(img, 200, 420, 6);
         let (f0, f1) = (fall(&img), fall(&out));
-        assert!((f1 / f0 - 1.0).abs() < 0.08, "fall-off {f0} -> {f1}: {report}");
+        assert!(
+            (f1 / f0 - 1.0).abs() < 0.08,
+            "fall-off {f0} -> {f1}: {report}"
+        );
         // the pores are where they were, as rough as they were
-        let (p0, p1) = (pore_roughness(&img, 200, 220), pore_roughness(&out, 200, 220));
+        let (p0, p1) = (
+            pore_roughness(&img, 200, 220),
+            pore_roughness(&out, 200, 220),
+        );
         assert!((p1 / p0 - 1.0).abs() < 0.15, "pores {p0} -> {p1}: {report}");
         // the hard edge is still there
         let step = area(&out, 340, 240, 4) / area(&out, 385, 240, 4);
@@ -1012,17 +1109,40 @@ mod tests {
     }
 
     #[test]
+    fn the_dilation_is_the_largest_value_within_reach() {
+        let line: Vec<f32> = (0..37).map(|i| ((i * 7919) % 23) as f32).collect();
+        for r in [1usize, 2, 5, 11, 40] {
+            let mut out = vec![0.0; line.len()];
+            dilate_line(&line, r, &mut out);
+            for (i, &got) in out.iter().enumerate() {
+                let lo = i.saturating_sub(r);
+                let hi = (i + r).min(line.len() - 1);
+                let want = line[lo..=hi].iter().cloned().fold(f32::MIN, f32::max);
+                assert_eq!(got, want, "r {r} at {i}");
+            }
+        }
+    }
+
+    #[test]
     fn two_faces_are_found_apart() {
         let mask = GrayImage::from_fn(600, 300, |x, y| {
-            let a = (x as f32 - 150.0).powi(2) / 90.0f32.powi(2) + (y as f32 - 150.0).powi(2) / 120.0f32.powi(2);
-            let b = (x as f32 - 450.0).powi(2) / 60.0f32.powi(2) + (y as f32 - 150.0).powi(2) / 80.0f32.powi(2);
+            let a = (x as f32 - 150.0).powi(2) / 90.0f32.powi(2)
+                + (y as f32 - 150.0).powi(2) / 120.0f32.powi(2);
+            let b = (x as f32 - 450.0).powi(2) / 60.0f32.powi(2)
+                + (y as f32 - 150.0).powi(2) / 80.0f32.powi(2);
             Luma([if a < 1.0 || b < 1.0 { 255 } else { 0 }])
         });
         let (areas, _, _, _) = face_areas(&mask);
         assert_eq!(areas.len(), 2);
         let widths: Vec<usize> = areas.iter().map(|a| a.x1 - a.x0).collect();
-        assert!(widths.iter().any(|&w| (160..=200).contains(&w)), "{widths:?}");
-        assert!(widths.iter().any(|&w| (100..=140).contains(&w)), "{widths:?}");
+        assert!(
+            widths.iter().any(|&w| (160..=200).contains(&w)),
+            "{widths:?}"
+        );
+        assert!(
+            widths.iter().any(|&w| (100..=140).contains(&w)),
+            "{widths:?}"
+        );
     }
 
     #[test]
@@ -1031,7 +1151,8 @@ mod tests {
             "skinEnabled": true, "skinRenewal": 60, "skinRenewMethod": "dodgeBurn", "skinFaceMap": "x"
         });
         assert!(is_enabled(&on));
-        let renewal = serde_json::json!({ "skinEnabled": true, "skinRenewal": 60, "skinFaceMap": "x" });
+        let renewal =
+            serde_json::json!({ "skinEnabled": true, "skinRenewal": 60, "skinFaceMap": "x" });
         assert!(!is_enabled(&renewal));
         let none = serde_json::json!({
             "skinEnabled": true, "skinRenewal": 0, "skinRenewMethod": "dodgeBurn", "skinFaceMap": "x"

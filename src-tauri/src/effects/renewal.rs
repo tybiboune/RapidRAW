@@ -180,8 +180,11 @@ pub fn apply<'a>(
                 if show {
                     // where the renewal goes and how far, whatever the amount: the weight it is laid on with
                     let here = [row[px], row[px + 1], row[px + 2]];
-                    let shown =
-                        super::skin_method::tint(here, layer.weight[ly * layer.w + lx], layer.skin_level);
+                    let shown = super::skin_method::tint(
+                        here,
+                        layer.weight[ly * layer.w + lx],
+                        layer.skin_level,
+                    );
                     row[px..px + 3].copy_from_slice(&shown);
                     continue;
                 }
@@ -254,7 +257,7 @@ fn linear_light(bottom: f32, top: f32) -> f32 {
     (bottom + 2.0 * top - 1.0).clamp(0.0, 1.0)
 }
 
-fn transpose(src: &[f32], w: usize, h: usize) -> Vec<f32> {
+pub(super) fn transpose(src: &[f32], w: usize, h: usize) -> Vec<f32> {
     let mut out = vec![0.0f32; w * h];
     out.par_chunks_mut(h).enumerate().for_each(|(x, col)| {
         for (y, v) in col.iter_mut().enumerate() {
@@ -1098,9 +1101,9 @@ mod tests {
                 let i = (y * w + x) as usize;
                 let px = img.get_pixel(layer.x0 as u32 + x, layer.y0 as u32 + y).0;
                 let wt = (layer.weight[i] * amount).clamp(0.0, 1.0);
-                for c in 0..3 {
-                    before.get_pixel_mut(x, y).0[c] = view(px[c]);
-                    after.get_pixel_mut(x, y).0[c] = view(px[c] + wt * layer.delta[i * 3 + c]);
+                for (c, &v) in px.iter().enumerate() {
+                    before.get_pixel_mut(x, y).0[c] = view(v);
+                    after.get_pixel_mut(x, y).0[c] = view(v + wt * layer.delta[i * 3 + c]);
                 }
             }
         }

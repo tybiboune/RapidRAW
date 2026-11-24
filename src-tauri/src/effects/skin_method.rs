@@ -39,7 +39,10 @@ impl Method {
 // The Skin tool's own maps are drawn by its shader (skin.wgsl):
 pub const MAP_SKIN: u32 = 1;
 pub const MAP_SPOTS: u32 = 2;
+// (redness and pigment are only ever read by the shader, by their number)
+#[allow(dead_code)]
 pub const MAP_REDNESS: u32 = 3;
+#[allow(dead_code)]
 pub const MAP_PIGMENT: u32 = 4;
 pub const MAP_LINES: u32 = 5;
 pub const MAP_UNDER_EYE: u32 = 6;

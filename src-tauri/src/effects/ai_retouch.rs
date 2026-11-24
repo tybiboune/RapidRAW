@@ -37,9 +37,11 @@ pub fn is_enabled(adjustments: &serde_json::Value) -> bool {
     is_effect_enabled(adjustments, "skin", "skinEnabled")
         && Method::of(adjustments) == Method::Ai
         && (amount(adjustments) > 0.0 || shown_map(adjustments) == MAP_AI_RETOUCH)
-        && KEYS
-            .iter()
-            .all(|key| adjustments[*key].as_str().is_some_and(|map| !map.is_empty()))
+        && KEYS.iter().all(|key| {
+            adjustments[*key]
+                .as_str()
+                .is_some_and(|map| !map.is_empty())
+        })
 }
 
 /// The Strength slider, shared by every way of retouching.
@@ -129,7 +131,9 @@ fn to_model(v: f32) -> Option<f32> {
 }
 
 fn from_model(e: f32) -> f32 {
-    ((e.clamp(0.0, 1.0) - 0.5) / RAW_CONTRAST + 0.5).max(0.0).powf(RAW_GAMMA)
+    ((e.clamp(0.0, 1.0) - 0.5) / RAW_CONTRAST + 0.5)
+        .max(0.0)
+        .powf(RAW_GAMMA)
 }
 
 /// One pixel retouched: `e` as the models saw it (0..1), the spots' change `d`, the blend layer `m` (0.5 where
@@ -155,14 +159,20 @@ pub fn apply<'a>(
     let resolve_rgba = |key: &str| -> Option<Arc<RgbaImage>> {
         crate::effects::maps::resolve_rgba_map(adjustments[key].as_str()?, adjustments, None)
     };
-    let (Some(blend), Some(spots)) = (resolve_rgba("skinAiBlendMap"), resolve_rgba("skinAiSpotsMap")) else {
+    let (Some(blend), Some(spots)) = (
+        resolve_rgba("skinAiBlendMap"),
+        resolve_rgba("skinAiSpotsMap"),
+    ) else {
         return base;
     };
     let face_map = adjustments["skinFaceMap"].as_str().unwrap_or("");
     let Some(skin) = crate::effects::maps::resolve_luma_map(face_map, adjustments, None) else {
         return base;
     };
-    let skin = where_to(&skin, crate::effects::maps::effect_map_key(face_map, adjustments));
+    let skin = where_to(
+        &skin,
+        crate::effects::maps::effect_map_key(face_map, adjustments),
+    );
     if [blend.width(), blend.height(), spots.width(), spots.height()].contains(&0) {
         return base;
     }
@@ -183,9 +193,10 @@ pub fn apply<'a>(
             if weight <= 1e-3 {
                 continue;
             }
-            let m: [f32; 3] = sample::<3>(blend.as_raw(), 4, blend_size, size, (x, y)).map(|v| v / 255.0);
-            let d: [f32; 3] =
-                sample::<3>(spots.as_raw(), 4, spots_size, size, (x, y)).map(|v| (v - 128.0) / 254.0);
+            let m: [f32; 3] =
+                sample::<3>(blend.as_raw(), 4, blend_size, size, (x, y)).map(|v| v / 255.0);
+            let d: [f32; 3] = sample::<3>(spots.as_raw(), 4, spots_size, size, (x, y))
+                .map(|v| (v - 128.0) / 254.0);
             let px = x * 3;
             let here = [row[px], row[px + 1], row[px + 2]];
             if show {

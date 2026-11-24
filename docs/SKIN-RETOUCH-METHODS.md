@@ -41,7 +41,9 @@ the same by splitting the skin into bands of size and evening each band against 
    hardly touched; a band quiet in most of the skin and rough in places (blotches, bump shadows, mottling) is evened
    exactly there. This is what makes it adapt to the person and the light: a young face and an old one, soft light and
    hard, get the same "even to this face's best skin".
-6. **The coarsest bands** (from 3.5 % to 8 % of `F`) are taken out less and less: they are the face's shape.
+6. **The coarsest bands** (from 3.5 % to 8 % of `F`) are taken out less and less: they are the face's shape. And
+   each band keeps away from the strongest edges by its own width (a running maximum of the edges, twice the band's
+   width across): a band that wide would otherwise flatten the edge of a hard shadow or the side of the nose.
 7. **Left alone** (the "Left alone" map): hair, a beard and stubble (where the skin has far more fine detail than its
    own pores, so a beard's shadow is not lightened away), the strongest edges (nostrils, lid lines, the lip line),
    the deepest shadows, and, for brightening patches only, the highlights (the face's sheen).

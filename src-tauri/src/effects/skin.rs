@@ -292,7 +292,8 @@ pub fn prepare(
     let ai_lines = model_map(ai_wanted, "skinLinesAiMap");
     // and the blemish detector's, only when it is asked for and the spots are
     let ai_spots = model_map(
-        (spots > 0.0 || show_map == MAP_SPOTS) && adjustments["skinSpotsAi"].as_bool().unwrap_or(false),
+        (spots > 0.0 || show_map == MAP_SPOTS)
+            && adjustments["skinSpotsAi"].as_bool().unwrap_or(false),
         "skinSpotsAiMap",
     );
     let regions = match (map_of("skinLinesMap"), map_of("skinUnderEyeMap")) {

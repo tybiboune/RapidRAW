@@ -1296,7 +1296,10 @@ fn retouch_fill(
     let window = RETOUCH_TILE + 2 * RETOUCH_OVERLAP;
     // the face on a canvas with zeros around it, as the pipeline pads it
     let at = |x: usize, y: usize| -> Option<(usize, usize)> {
-        let (x, y) = (x.checked_sub(RETOUCH_OVERLAP)?, y.checked_sub(RETOUCH_OVERLAP)?);
+        let (x, y) = (
+            x.checked_sub(RETOUCH_OVERLAP)?,
+            y.checked_sub(RETOUCH_OVERLAP)?,
+        );
         (x < side && y < side).then_some((x, y))
     };
     let mut filled = vec![[0.0f32; 3]; side * side];
@@ -1348,7 +1351,11 @@ fn retouch_fill(
 }
 
 /// The blend layer of one face, 512 x 512, from the filled face.
-fn retouch_blend(session: &Mutex<Session>, filled: &[[f32; 3]], side: usize) -> Result<Vec<[f32; 3]>> {
+fn retouch_blend(
+    session: &Mutex<Session>,
+    filled: &[[f32; 3]],
+    side: usize,
+) -> Result<Vec<[f32; 3]>> {
     let n = RETOUCH_BLEND_SIZE;
     let source = ImageBuffer::<image::Rgb<f32>, Vec<f32>>::from_raw(
         side as u32,
@@ -1399,14 +1406,18 @@ pub fn compose_ai_retouch(
     let rgb = image.to_rgb8();
     let (w, h) = (width as usize, height as usize);
     let mut layer = vec![[0.5f32; 3]; bw * bh];
-    let mut change = vec![[0.0f32; 3]; w * h];
+    // the change is written straight into its map, 128 for none: kept as numbers at the picture's size it would
+    // take hundreds of megabytes on a large photo
+    let mut spots = RgbImage::from_pixel(width, height, image::Rgb([128; 3]));
     for face in &analysis.faces {
         let frame = blemish_frame(face);
         let side = (frame.side.round() as usize).clamp(64, RETOUCH_MAX_SIDE);
         let crop = face_tensor(&rgb, &frame, side, |v| v.map(|c| c / 127.5 - 1.0));
         let found = run_face_model(
             detector,
-            face_tensor(&rgb, &frame, BLEMISH_INPUT_SIZE, |v| v.map(|c| c / 127.5 - 1.0)),
+            face_tensor(&rgb, &frame, BLEMISH_INPUT_SIZE, |v| {
+                v.map(|c| c / 127.5 - 1.0)
+            }),
             BLEMISH_INPUT_SIZE,
             BLEMISH_SOFTNESS,
         )?;
@@ -1435,38 +1446,43 @@ pub fn compose_ai_retouch(
         let plane = side * side;
         let original = crop.as_slice().unwrap_or(&[]);
         if original.len() == 3 * plane {
-            change
-                .par_chunks_mut(w)
+            spots
+                .par_chunks_mut(w * 3)
                 .enumerate()
                 .skip(y0)
                 .take(y1.saturating_sub(y0))
                 .for_each(|(y, row)| {
-                    for (x, out) in row.iter_mut().enumerate().take(x1).skip(x0) {
+                    for (x, out) in row.chunks_mut(3).enumerate().take(x1).skip(x0) {
                         let [u, v] = frame.to_frame(side, [x as f32, y as f32]);
                         if !inside(u, v, side, side) {
                             continue;
                         }
                         let taps = bilinear(u, v, side, side);
-                        let d: [f32; 3] = std::array::from_fn(|c| {
-                            taps.iter()
+                        let d: [u8; 3] = std::array::from_fn(|c| {
+                            let change = taps
+                                .iter()
                                 .map(|&(i, k)| (filled[i][c] - original[c * plane + i]) * k)
                                 .sum::<f32>()
-                                * 0.5
+                                * 0.5;
+                            (128.0 + 254.0 * change).round().clamp(0.0, 255.0) as u8
                         });
-                        let size = |d: &[f32; 3]| d.iter().map(|v| v.abs()).sum::<f32>();
-                        if size(&d) > size(out) {
-                            *out = d;
+                        let size =
+                            |d: &[u8]| d.iter().map(|&v| (v as i32 - 128).abs()).sum::<i32>();
+                        if size(&d[..]) > size(out) {
+                            out.copy_from_slice(&d);
                         }
                     }
                 });
         }
-
         // the blend layer on the copy, faded out towards the cut-out's border as the pipeline fades it
         let n = RETOUCH_BLEND_SIZE;
         let border = RETOUCH_BORDER * n as f32;
         layer.par_chunks_mut(bw).enumerate().for_each(|(y, row)| {
             for (x, out) in row.iter_mut().enumerate() {
-                let p = [(x as f32 + 0.5) / scale - 0.5, (y as f32 + 0.5) / scale - 0.5];
+                let p = [
+                    (x as f32 + 0.5) / scale - 0.5,
+                    (y as f32 + 0.5) / scale - 0.5,
+                ];
                 let [u, v] = frame.to_frame(n, p);
                 if !inside(u, v, n, n) {
                     continue;
@@ -1489,8 +1505,10 @@ pub fn compose_ai_retouch(
         })
     };
     Ok(AiRetouchMaps {
-        blend: to_rgb(&layer, bw, bh, &|v| (v.clamp(0.0, 1.0) * 255.0).round() as u8),
-        spots: to_rgb(&change, w, h, &|v| (128.0 + 254.0 * v).round().clamp(0.0, 255.0) as u8),
+        blend: to_rgb(&layer, bw, bh, &|v| {
+            (v.clamp(0.0, 1.0) * 255.0).round() as u8
+        }),
+        spots,
     })
 }
 
