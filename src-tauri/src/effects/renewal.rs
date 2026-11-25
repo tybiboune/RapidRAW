@@ -623,11 +623,20 @@ pub(super) struct Tuning {
     pub spread: f32,
     /// highlights judged on each place's own light, so a shine narrower than the median is kept
     pub local_highlights: bool,
+    /// the evened skin's colour taken from the skin alone (a blur over the face's mask) rather than from a
+    /// median of each channel over the whole box, which can bring in the colour of an eye or of hair and
+    /// make up a colour of its own (a green cast at the corner of a lit eye)
+    pub skin_colour: bool,
+    /// how much of the renewal goes on even where the skin is already even; the rest follows how uneven
+    /// each place is
+    pub floor: f32,
 }
 
 const TUNING: Tuning = Tuning {
     spread: VOLUME_SPREAD,
     local_highlights: false,
+    skin_colour: true,
+    floor: 0.4,
 };
 
 /// The biggest face box, in pixels, that is worked out at full size: about 16 million (4000 x 4000). A bigger
@@ -886,7 +895,20 @@ fn build_within(
         .unwrap_or_else(|| usable.last().unwrap());
     let radius = chosen.0 * face;
 
-    let evened: [Plane; 3] = std::array::from_fn(|c| median(&chan[c], radius));
+    let evened: [Plane; 3] = if tuning.skin_colour {
+        // the brightness evened by the median; the colour from the skin around, over the skin only, at half
+        // the radius, so a red spot goes and a blotch wider than that stays for Even tone
+        let y_even = median(&y, radius);
+        std::array::from_fn(|c| {
+            let offset = chan[c].zip(&y, |a, b| a - b);
+            let num = gauss(&offset.zip(&m, |o, w| o * w), 0.5 * radius);
+            let den = gauss(&m, 0.5 * radius);
+            let colour = num.zip(&den, |a, b| a / b.max(1e-3));
+            y_even.zip(&colour, |e, o| e + o)
+        })
+    } else {
+        std::array::from_fn(|c| median(&chan[c], radius))
+    };
     // The median evens the skin but also clips the face's own light: the top of a cheekbone, the shade
     // beside the nose, the roundness of the forehead all come out flatter. That light is given back: what
     // the median took from the brightness, spread wider than its radius so a blemish (narrower) melts
@@ -941,7 +963,7 @@ fn build_within(
         quantile(&score, &interior, 0.92),
     );
     let need_raw = score.map(|s| smoothstep(lo, hi, s));
-    let need = need_raw.map(|n| 0.4 + 0.6 * n);
+    let need = need_raw.map(|n| tuning.floor + (1.0 - tuning.floor) * n);
 
     // edges and the mask's border let go of the effect
     // only the strongest edges count, those of the nose, the lips and the eyes: a blemish's own edge is not
@@ -1251,10 +1273,12 @@ mod tests {
         let amount: f32 = var("RRAW_AMOUNT").parse().unwrap();
         let out = var("RRAW_OUT");
         for spread in var("RRAW_SPREADS").split(',') {
-            let (s, local) = spread.split_once(':').unwrap_or((spread, "0"));
+            let parts: Vec<&str> = spread.split(':').collect();
             let tuning = Tuning {
-                spread: s.parse().unwrap(),
-                local_highlights: local == "1",
+                spread: parts[0].parse().unwrap(),
+                local_highlights: parts.get(1) == Some(&"1"),
+                skin_colour: parts.get(2).is_none_or(|c| *c == "1"),
+                floor: parts.get(3).map_or(TUNING.floor, |f| f.parse().unwrap()),
             };
             let layer = build_within(&img, &mask, false, 1.0, MAX_PIXELS, tuning).expect("a layer");
             eprintln!("variant {spread}: {}", layer.report);

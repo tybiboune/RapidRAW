@@ -59,6 +59,12 @@ const TARGET: f32 = 0.5;
 const CHROMA: f32 = 0.6;
 /// The strength at which the spots are out entirely.
 const SPOTS_FULL_AT: f32 = 0.4;
+/// How much the light changes (in natural log) across SHADOW_REACH of the face's width where the skin is left
+/// alone as a shadow's edge: from the first value on less and less, at the second not at all. A blotch changes
+/// it by about 0.15 at most; the edge of a shadow in sunlight by one or more.
+const SHADOW_TURN_LO: f32 = 0.25;
+const SHADOW_TURN_HI: f32 = 0.45;
+const SHADOW_REACH: f32 = 0.02;
 
 /// One face's change, on the copy it was worked out on (see `FIELDS`), and, to be shown on request, how much
 /// changes, the spots and what is left alone.
@@ -572,7 +578,18 @@ struct Context<'a> {
     threshold: f32,
 }
 
-fn work_channel(x: &Plane, cx: &Context, highlights: Option<&Plane>) -> Channel {
+/// How one channel treats the face's highlights and its spots.
+struct Treat<'a> {
+    /// the highlights and the sheen: never darkened in brightness, never moved in colour
+    highlights: &'a Plane,
+    /// brightness: only what is brighter is held by the highlights; colour: all of it
+    brighter_only: bool,
+    /// which way a spot stands out in this channel: darker in brightness, redder, less blue. A shine is
+    /// brighter and paler, and is never a spot
+    spot_sign: f32,
+}
+
+fn work_channel(x: &Plane, cx: &Context, treat: &Treat) -> Channel {
     let (w, h) = (x.w, x.h);
     let mut change = Plane {
         w,
@@ -584,6 +601,9 @@ fn work_channel(x: &Plane, cx: &Context, highlights: Option<&Plane>) -> Channel 
     let mut spots = change.clone();
     let mut bands = Vec::new();
     let s_hi = *cx.sigmas.last().unwrap_or(&1.0);
+    // where a spot is taken out whole, the coarser bands it darkens are its own too, and are not dodged as
+    // well: counted twice, the place would end lighter than the skin, a pale ghost of the spot
+    let mut under_spots: Option<Plane> = None;
     let mut previous = skin_blur(x, cx.m, cx.sigmas[0]);
     for (k, pair) in cx.sigmas.windows(2).enumerate() {
         let (sig, next_sig) = (pair[0], pair[1]);
@@ -596,6 +616,9 @@ fn work_channel(x: &Plane, cx: &Context, highlights: Option<&Plane>) -> Channel 
         let quiet = quantile(&rough, cx.interior, 0.25).max(1e-6);
         // the coarsest bands are the face's shape: taken out less and less
         let taper = 1.0 - smoothstep(0.035 * cx.face, s_hi, next_sig);
+        if sig > 0.02 * cx.face && under_spots.is_none() {
+            under_spots = Some(gauss(&spots, 0.004 * cx.face).map(|s| (2.0 * s).clamp(0.0, 1.0)));
+        }
         let take: Vec<f32> = (0..w * h)
             .into_par_iter()
             .map(|i| {
@@ -603,10 +626,11 @@ fn work_channel(x: &Plane, cx: &Context, highlights: Option<&Plane>) -> Channel 
                     * taper
                     * cx.keep.v[i]
                     * guard.v[i];
-                if let Some(hl) = highlights
-                    && band.v[i] > 0.0
-                {
-                    a *= 1.0 - hl.v[i];
+                if !treat.brighter_only || band.v[i] > 0.0 {
+                    a *= 1.0 - treat.highlights.v[i];
+                }
+                if let Some(under) = &under_spots {
+                    a *= 1.0 - under.v[i];
                 }
                 a
             })
@@ -635,8 +659,12 @@ fn work_channel(x: &Plane, cx: &Context, highlights: Option<&Plane>) -> Channel 
             let (lo, hi) = (4.0 * cx.threshold, 6.5 * cx.threshold);
             spots.v.par_iter_mut().enumerate().for_each(|(i, s)| {
                 if inside.v[i] > 0.9 {
-                    let z = band.v[i].abs() / spread;
-                    *s = s.max(smoothstep(lo, hi, z) * smoothstep(0.2, 0.45, round.v[i]));
+                    let z = (band.v[i] * treat.spot_sign).max(0.0) / spread;
+                    *s = s.max(
+                        smoothstep(lo, hi, z)
+                            * smoothstep(0.2, 0.45, round.v[i])
+                            * (1.0 - treat.highlights.v[i]),
+                    );
                 }
             });
         }
@@ -822,7 +850,20 @@ fn build_face(
         quantile(&lie, &interior, 0.002),
         quantile(&lie, &interior, 0.04),
     );
-    let highlights = lie.map(|v| smoothstep(h0, h1, v));
+    // and the sheen: a shine on the nose, the forehead or a cheekbone is far narrower than the face's light, so
+    // it is found where the skin is well brighter than around it, not on the broad light
+    let local = skin_blur(&l, &m, s_lo);
+    let around = skin_blur(&l, &m, 0.03 * face);
+    let highlights = Plane {
+        w: aw,
+        h: ah,
+        v: (0..aw * ah)
+            .map(|i| {
+                smoothstep(h0, h1, lie.v[i]).max(smoothstep(0.15, 0.3, local.v[i] - around.v[i]))
+            })
+            .collect(),
+    };
+    let highlights = gauss(&highlights, s_lo).map(|v| (1.5 * v).min(1.0));
     let keep = Plane {
         w: aw,
         h: ah,
@@ -835,11 +876,22 @@ fn build_face(
             .collect(),
     };
     let plain = interior.zip(&keep, |i, k| if i > 0.5 && k > 0.5 { 1.0 } else { 0.0 });
-    // each band kept away from the strong edges by its own width
+    // the edge of a shadow: where the light changes by far more, over a short way, than a blotch ever does. It
+    // is rough in every band near it, and evening it out there leaves grey and brown blotches along it.
+    let shadow_edge = gradient(&skin_blur(&l, &m, 0.006 * face)).map(|g| {
+        smoothstep(
+            SHADOW_TURN_LO,
+            SHADOW_TURN_HI,
+            0.5 * g * SHADOW_REACH * face,
+        )
+    });
+    // each band kept away from the strong edges and from the shadows' edges by its own width
     let band_guard: Vec<Plane> = sigmas
         .windows(2)
         .map(|pair| {
-            dilate(&edges, (2.0 * pair[1]).round() as usize).map(|e| 1.0 - smoothstep(0.35, 0.9, e))
+            let reach = (2.0 * pair[1]).round() as usize;
+            let edge = dilate(&edges, reach).map(|e| 1.0 - smoothstep(0.35, 0.9, e));
+            edge.zip(&dilate(&shadow_edge, reach), |e, s| e * (1.0 - s))
         })
         .collect();
 
@@ -853,12 +905,17 @@ fn build_face(
         face,
         threshold,
     };
+    let treat = |brighter_only: bool, spot_sign: f32| Treat {
+        highlights: &highlights,
+        brighter_only,
+        spot_sign,
+    };
     let (cl, (cu, cv)) = rayon::join(
-        || work_channel(&l, &context, Some(&highlights)),
+        || work_channel(&l, &context, &treat(true, -1.0)),
         || {
             rayon::join(
-                || work_channel(&u, &context, None),
-                || work_channel(&v, &context, None),
+                || work_channel(&u, &context, &treat(false, 1.0)),
+                || work_channel(&v, &context, &treat(false, -1.0)),
             )
         },
     );
@@ -1097,6 +1154,110 @@ mod tests {
             (after - skin_red).abs() < 0.5 * (before - skin_red).abs(),
             "spot redness {before} -> {after}: {report}"
         );
+    }
+
+    // Plain skin with its pores, lit evenly, with one thing on it: `shape(x, y)` is (brightness factor, red
+    // factor, blue factor) at each place.
+    fn plain_skin(shape: impl Fn(f32, f32) -> (f32, f32, f32)) -> (Rgb32FImage, GrayImage) {
+        let (w, h) = (420u32, 480u32);
+        let noise = white_noise(w as usize, h as usize);
+        let pores = gauss(
+            &Plane {
+                w: w as usize,
+                h: h as usize,
+                v: noise.v.clone(),
+            },
+            0.8,
+        );
+        let mut img = Rgb32FImage::new(w, h);
+        for (x, y, p) in img.enumerate_pixels_mut() {
+            let grain = 1.0 + 0.06 * pores.v[(y * w + x) as usize];
+            let (k, red, blue) = shape(x as f32, y as f32);
+            let level = 0.2 * grain * k;
+            p.0 = [level * 1.25 * red, level, level * 0.85 * blue];
+        }
+        let mask = GrayImage::from_fn(w, h, |x, y| {
+            Luma([if (12..408).contains(&x) && (12..468).contains(&y) {
+                255
+            } else {
+                0
+            }])
+        });
+        (img, mask)
+    }
+
+    fn bump(x: f32, y: f32, cx: f32, cy: f32, s: f32) -> f32 {
+        (-((x - cx).powi(2) + (y - cy).powi(2)) / (2.0 * s * s)).exp()
+    }
+
+    #[test]
+    fn a_shine_stays_bright_and_white() {
+        // a shine on the tip of a nose: much brighter than the skin, small, round and paler
+        let (img, mask) = plain_skin(|x, y| {
+            let s = bump(x, y, 200.0, 240.0, 5.0);
+            (1.0 + 0.8 * s, 1.0 - 0.15 * s, 1.0 + 0.1 * s)
+        });
+        let layer = build(&img, &mask, true, 1.0);
+        let report = &layer.faces[0].report;
+        let out = render(&img, &layer, 1.0);
+        let skin = area(&img, 120, 240, 6);
+        let (before, after) = (area(&img, 200, 240, 2), area(&out, 200, 240, 2));
+        assert!(
+            (after - skin) > 0.85 * (before - skin),
+            "shine {before} -> {after}, skin {skin}: {report}"
+        );
+        let red = |img: &Rgb32FImage| {
+            let p = img.get_pixel(200, 240).0;
+            p[0] / p[1]
+        };
+        assert!(
+            (red(&out) / red(&img) - 1.0).abs() < 0.05,
+            "shine colour {} -> {}: {report}",
+            red(&img),
+            red(&out)
+        );
+    }
+
+    #[test]
+    #[ignore]
+    fn dodge_burn_on_a_picture() {
+        let var = |k: &str| std::env::var(k).unwrap_or_else(|_| panic!("{k}"));
+        let img = image::open(var("RRAW_IN")).expect("picture").to_rgb32f();
+        let mask = image::open(var("RRAW_MASK")).expect("mask").to_luma8();
+        let strength: f32 = var("RRAW_STRENGTH").parse().unwrap();
+        // RRAW_GAIN: worked on as a raw is, in linear light raised by this much, so a shine goes above 1
+        let gain: f32 = std::env::var("RRAW_GAIN")
+            .ok()
+            .and_then(|g| g.parse().ok())
+            .unwrap_or(0.0);
+        let raw = gain > 0.0;
+        let mut img = img;
+        if raw {
+            img.pixels_mut()
+                .for_each(|p| p.0 = p.0.map(|v| v.max(0.0).powf(GAMMA) * gain));
+            // RRAW_CLIP: the sensor clips each channel before the white balance, as on a shiny nose in a real
+            // raw: green first, then red and blue scaled up past it
+            if std::env::var("RRAW_CLIP").is_ok() {
+                let wb = [2.0f32, 1.0, 1.6];
+                img.pixels_mut().for_each(|p| {
+                    p.0 = std::array::from_fn(|c| (p.0[c] / wb[c]).min(1.0) * wb[c]);
+                });
+            }
+        }
+        let layer = build(&img, &mask, raw, 1.0);
+        for face in &layer.faces {
+            eprintln!("{}", face.report);
+        }
+        let mut out = img.clone();
+        paint(&mut out, &layer, raw, strength, 0);
+        if raw {
+            out.pixels_mut()
+                .for_each(|p| p.0 = p.0.map(|v| (v / gain).max(0.0).powf(1.0 / GAMMA)));
+        }
+        image::DynamicImage::ImageRgb32F(out)
+            .to_rgb8()
+            .save(var("RRAW_OUT"))
+            .unwrap();
     }
 
     #[test]
