@@ -1535,8 +1535,12 @@ fn retouch_blend(
 }
 
 /// ABPN's learned retouch on every face of the picture (see `AiRetouchMaps`).
+/// `seen` is the picture the blemishes are looked for on: the copy the faces were found on, where the
+/// shadows are opened (see `FaceAnalysis::found_on`), or `image` itself. The skin is filled and evened on
+/// `image` only.
 pub fn compose_ai_retouch(
     image: &DynamicImage,
+    seen: &DynamicImage,
     analysis: &FaceAnalysis,
     detector: &Mutex<Session>,
     blend: &Mutex<Session>,
@@ -1548,6 +1552,8 @@ pub fn compose_ai_retouch(
     let bw = ((width as f32 * scale).round() as usize).max(1);
     let bh = ((height as f32 * scale).round() as usize).max(1);
     let rgb = image.to_rgb8();
+    let seen_rgb = (seen.dimensions() == image.dimensions()).then(|| seen.to_rgb8());
+    let seen_rgb = seen_rgb.as_ref().unwrap_or(&rgb);
     let (w, h) = (width as usize, height as usize);
     let mut layer = vec![[0.5f32; 3]; bw * bh];
     // the change is written straight into its map, 128 for none: kept as numbers at the picture's size it would
@@ -1559,7 +1565,7 @@ pub fn compose_ai_retouch(
         let crop = face_tensor(&rgb, &frame, side, |v| v.map(|c| c / 127.5 - 1.0));
         let found = run_face_model(
             detector,
-            face_tensor(&rgb, &frame, BLEMISH_INPUT_SIZE, |v| {
+            face_tensor(seen_rgb, &frame, BLEMISH_INPUT_SIZE, |v| {
                 v.map(|c| c / 127.5 - 1.0)
             }),
             BLEMISH_INPUT_SIZE,

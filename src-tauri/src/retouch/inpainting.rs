@@ -1223,12 +1223,23 @@ pub async fn generate_face_restore_patch(
     let picture = DynamicImage::ImageRgb8(source_image.as_ref().clone());
     let without_patch = adjustments_without_patch(&patch_definition.id, &current_adjustments);
     let key = format!("{}#faces", patched_cache_key(&path, &without_patch));
+    // and on the copies of the photo the faces are also looked for in, in the same frame
+    let loaded = state.original_image.lock().unwrap().clone();
+    let copies = loaded.as_ref().and_then(|loaded| {
+        crate::ai::commands::DetectionCopies::for_app(
+            &state,
+            &app_handle,
+            loaded,
+            &without_patch,
+            false,
+        )
+    });
     let analysis = crate::ai::commands::cached_face_analysis(
         &state.ai_state,
         &ai_models,
         &key,
         &picture,
-        None,
+        copies.as_ref(),
         crate::ai::commands::MaskTransform::from_adjustments(&current_adjustments),
     )?;
     if analysis.faces.is_empty() {

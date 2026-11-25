@@ -590,6 +590,15 @@ pub(crate) fn keep_the_fullest_faces(
     let mut best = found;
     let mut best_name = "the photo as it is";
     for (name, copy) in copies.make() {
+        // a copy is only of use in the picture's own frame and size
+        if copy.dimensions() != picture.dimensions() {
+            log::warn!(
+                "The {name} copy is {:?}, the picture {:?}: not looked in",
+                copy.dimensions(),
+                picture.dimensions()
+            );
+            continue;
+        }
         let features = models
             .esam3_image_encoder()
             .map_err(|e| e.to_string())
@@ -1552,8 +1561,11 @@ pub async fn generate_ai_skin_retouch(
         return Err(NO_FACES_FOUND.to_string());
     }
     let maps = tauri::async_runtime::spawn_blocking(move || {
+        // the blemishes are looked for where the faces were found, the skin is retouched on the photo
+        let seen = analysis.found_on.clone();
         crate::masks::face::compose_ai_retouch(
             &source_image,
+            seen.as_deref().unwrap_or(&source_image),
             &analysis,
             &sessions[0],
             &sessions[1],

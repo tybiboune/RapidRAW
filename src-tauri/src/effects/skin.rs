@@ -1142,6 +1142,8 @@ mod tests {
         let Ok(photo) = std::env::var("RRAW_PHOTO") else {
             return;
         };
+        // the raw developer runs on the GPU, which a test has to hand it
+        let _ = crate::render::gpu::context::TEST_GPU.set(gpu());
         let out_dir = PathBuf::from(std::env::var("RRAW_OUT").expect("RRAW_OUT"));
         std::fs::create_dir_all(&out_dir).unwrap();
         let app_data =
@@ -1274,7 +1276,11 @@ mod tests {
                     "texture" => "skinKeepTexture",
                     other => other,
                 };
-                adjustments[key] = json!(value.parse::<f64>().unwrap());
+                // a whole number goes in as one: the map shown is read as an integer
+                adjustments[key] = match value.parse::<u64>() {
+                    Ok(whole) => json!(whole),
+                    Err(_) => json!(value.parse::<f64>().unwrap()),
+                };
             }
             let started = std::time::Instant::now();
             let out = render_sized(&context, &crop, adjustments);
