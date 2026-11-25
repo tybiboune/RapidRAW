@@ -550,6 +550,16 @@ impl<'a> DetectionCopies<'a> {
     }
 }
 
+/// How well the face points must fit on the photo as it is for its copies not to be looked in at all: twice
+/// what a face needs (FACE_PRESENCE_THRESHOLD). A face that plain is found as fully on the photo as on any
+/// copy, and the copies cost seconds.
+const PLAIN_FACE_FIT: f32 = 12.0;
+
+/// How much more face skin a copy has to show than the version kept so far to be kept instead: the three
+/// versions of a well found face differ by a few thousandths, which says nothing about which is better, so
+/// the photo as it is stays unless a copy finds clearly more of the face.
+const CLEARLY_MORE_SKIN: f64 = 1.02;
+
 /// How much face skin the landmarks of an analysis cover on its picture.
 pub(crate) fn face_skin_area(picture: &DynamicImage, analysis: &FaceAnalysis) -> u64 {
     if analysis.faces.is_empty() {
@@ -581,6 +591,13 @@ pub(crate) fn keep_the_fullest_faces(
     let Some(copies) = copies else {
         return (found, "the photo as it is");
     };
+    if !found.faces.is_empty() && found.faces.iter().all(|face| face.fit >= PLAIN_FACE_FIT) {
+        log::info!(
+            "Faces on the photo as it is: {} plain face(s), the copies are not looked in",
+            found.faces.len()
+        );
+        return (found, "the photo as it is");
+    }
     let started = std::time::Instant::now();
     let mut best_area = face_skin_area(picture, &found);
     log::info!(
@@ -615,7 +632,7 @@ pub(crate) fn keep_the_fullest_faces(
                     "Faces on the {name} copy: {} face(s), {area} of face skin",
                     analysis.faces.len()
                 );
-                if area > best_area {
+                if area as f64 > best_area as f64 * CLEARLY_MORE_SKIN {
                     best_area = area;
                     best_name = name;
                     analysis.found_on = Some(Arc::new(copy));

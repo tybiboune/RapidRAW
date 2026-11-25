@@ -163,6 +163,9 @@ impl FaceFrame {
 }
 
 pub struct DetectedFace {
+    /// How well the face points fitted (the better of the picture and its mirror, see
+    /// `fit_landmarks_judged`): a face counts from FACE_PRESENCE_THRESHOLD, and one at twice that is plain.
+    pub fit: f32,
     landmarks: Vec<[f32; 2]>,
     center: [f32; 2],
     angle: f32,
@@ -520,12 +523,12 @@ pub fn analyze_faces(
                 let (landmarks, score, angle, apart) =
                     fit_landmarks_judged(landmark_session, &rgb, &mirrored, face_box, angle)?;
                 if is_face_fit(score, apart) {
-                    fitted = Some((landmarks, angle));
+                    fitted = Some((landmarks, angle, score));
                     break 'boxes;
                 }
             }
         }
-        let Some((landmarks, angle)) = fitted else {
+        let Some((landmarks, angle, fit)) = fitted else {
             continue;
         };
 
@@ -553,6 +556,7 @@ pub fn analyze_faces(
         let [_, _, body] = run_segmenter(segmenter_session, &rgb, &body_frame)?;
         analysis.body.push((body_frame, body));
         faces.push(DetectedFace {
+            fit,
             landmarks,
             center,
             angle,
