@@ -632,16 +632,55 @@ pub(super) struct Tuning {
     pub floor: f32,
 }
 
+/// How much of the renewal goes on where the skin is already even. Chosen by eye on four sharp portraits
+/// against 40 %, which made even skin look waxy, and 0.
+const FLOOR: f32 = 0.2;
+
 const TUNING: Tuning = Tuning {
     spread: VOLUME_SPREAD,
     local_highlights: false,
     skin_colour: true,
-    floor: 0.4,
+    floor: FLOOR,
 };
 
 /// The biggest face box, in pixels, that is worked out at full size: about 16 million (4000 x 4000). A bigger
 /// one is worked out on a reduced copy.
 const MAX_PIXELS: usize = 16_000_000;
+
+/// How much each place is a thin line standing out of the skin, 0 to 1: from the curvature of the light at
+/// `sigma`, its strongest curvature well above the skin's own detail (`s_detail`) and far stronger than the
+/// other way. Spread a little, so a line's soft rim is kept with it.
+fn thin_lines(y: &Plane, sigma: f32, s_detail: f32) -> Plane {
+    let smooth = gauss(y, sigma);
+    let (w, h) = (y.w, y.h);
+    let at = |x: usize, yy: usize| smooth.v[yy * w + x];
+    let mut v = vec![0.0f32; w * h];
+    v.par_chunks_mut(w).enumerate().for_each(|(yy, row)| {
+        if yy == 0 || yy + 1 >= h {
+            return;
+        }
+        for (x, o) in row.iter_mut().enumerate().take(w - 1).skip(1) {
+            let c = at(x, yy);
+            let dxx = at(x + 1, yy) + at(x - 1, yy) - 2.0 * c;
+            let dyy = at(x, yy + 1) + at(x, yy - 1) - 2.0 * c;
+            let dxy = 0.25
+                * (at(x + 1, yy + 1) + at(x - 1, yy - 1) - at(x + 1, yy - 1) - at(x - 1, yy + 1));
+            let mean = 0.5 * (dxx + dyy);
+            let spread = (0.25 * (dxx - dyy).powi(2) + dxy * dxy).sqrt();
+            let (big, small) = ((mean.abs() + spread), (mean.abs() - spread).abs());
+            // scale-normalised: the line's own contrast, against the skin's usual detail
+            let strength = big * sigma * sigma / s_detail.max(1e-6);
+            let elongation = 1.0 - small / big.max(1e-9);
+            *o = smoothstep(LINE_LO, LINE_HI, strength) * smoothstep(0.55, 0.85, elongation);
+        }
+    });
+    gauss(&Plane { w, h, v }, sigma).map(|l| (2.0 * l).min(1.0))
+}
+
+/// How far a thin line must stand out of the skin's own detail to be kept: from the first on more and more,
+/// fully at the second. A lash or a stray hair stands several times further out than a fine wrinkle does.
+const LINE_LO: f32 = 1.5;
+const LINE_HI: f32 = 3.0;
 
 /// The picture reduced by `k`, each pixel the mean of the k x k it stands for.
 fn shrink_rgb(image: &Rgb32FImage, k: usize) -> Rgb32FImage {
@@ -1052,6 +1091,12 @@ fn build_within(
         .max(1e-5);
     let clip = 2.5 * s_detail;
 
+    // thin lines that stand far out of the skin's own detail - the lashes, a stray hair across the cheek - are
+    // not texture to even: the clip above would fade them. A line curves the light strongly across it and hardly
+    // along it, where a pore or a blemish curves it alike in every way; the faint lines of fine wrinkles stay
+    // well under the bar and are still evened.
+    let lines = thin_lines(&y, sig_tex.max(1.0), s_detail);
+
     // the renewed skin, layer by layer as in Photoshop: the median base; the noise layer in Overlay; the High
     // Pass in Linear Light
     let mut delta = vec![0.0f32; w * h * 3];
@@ -1070,7 +1115,7 @@ fn build_within(
                 // a clipped pixel is changed from where the gamma-coded copy had it
                 d[c] = from_gamma(renewed) - from_gamma(chan[c].v[i]);
             }
-            *wt = need.v[i] * guard.v[i] * border.v[i] * tone.v[i];
+            *wt = need.v[i] * guard.v[i] * border.v[i] * tone.v[i] * (1.0 - lines.v[i]);
         });
 
     let report = format!(
@@ -1228,6 +1273,48 @@ mod tests {
         );
         // shading as wide as the median's radius is the hardest to keep: about 0.85 of it is, against 0.7
         assert!(kept > 0.8, "the shading kept {kept}");
+    }
+
+    /// A thin dark line (a lash, a stray hair) is found as a line; a round spot just as dark is not.
+    #[test]
+    fn a_hair_is_a_line_and_a_spot_is_not() {
+        let (w, h) = (200usize, 200usize);
+        let noise = white_noise(w, h);
+        let y = Plane {
+            w,
+            h,
+            v: (0..w * h)
+                .map(|i| {
+                    let (x, yy) = ((i % w) as f32, (i / w) as f32);
+                    // a hair along a slant, about 1.5 px wide, and a round spot of the same depth
+                    let d = ((x - yy) / 2f32.sqrt()).abs();
+                    let hair = if x < 100.0 {
+                        (-(d * d) / (2.0 * 0.8 * 0.8)).exp()
+                    } else {
+                        0.0
+                    };
+                    let spot =
+                        (-(((x - 150.0).powi(2) + (yy - 60.0).powi(2)) / (2.0 * 2.0 * 2.0))).exp();
+                    0.5 + 0.004 * noise.v[i] - 0.12 * hair - 0.12 * spot
+                })
+                .collect(),
+        };
+        let lines = thin_lines(&y, 1.0, 0.006);
+        assert!(
+            lines.v[50 * w + 50] > 0.8,
+            "on the hair {}",
+            lines.v[50 * w + 50]
+        );
+        assert!(
+            lines.v[60 * w + 150] < 0.2,
+            "on the spot {}",
+            lines.v[60 * w + 150]
+        );
+        assert!(
+            lines.v[150 * w + 30] < 0.2,
+            "on plain skin {}",
+            lines.v[150 * w + 30]
+        );
     }
 
     /// A face too big to work out at full size, as in an upscaled picture: it is renewed on a reduced copy,
