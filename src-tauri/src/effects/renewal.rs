@@ -611,10 +611,131 @@ fn strength_for_blur(table: &[(f32, f32, f32)], blur: f32) -> f32 {
 
 const GAMMA: f32 = 2.2;
 
-/// The biggest face box, in pixels, that is renewed: about 16 million (4000 x 4000).
+/// Over how many median radii the face's light is taken back: half a radius brings back the creases and
+/// the contours of the cheeks and lips the median softens, while blemishes, narrower still, stay evened.
+/// Chosen by eye on six portraits against wider spreads, which left the faces looking flatter.
+const VOLUME_SPREAD: f32 = 0.5;
+
+/// The choices that shape how much of the face's own light the renewal keeps.
+#[derive(Clone, Copy, Debug)]
+pub(super) struct Tuning {
+    /// how far, in median radii, the light the median took is given back over; 0 gives none back
+    pub spread: f32,
+    /// highlights judged on each place's own light, so a shine narrower than the median is kept
+    pub local_highlights: bool,
+}
+
+const TUNING: Tuning = Tuning {
+    spread: VOLUME_SPREAD,
+    local_highlights: false,
+};
+
+/// The biggest face box, in pixels, that is worked out at full size: about 16 million (4000 x 4000). A bigger
+/// one is worked out on a reduced copy.
 const MAX_PIXELS: usize = 16_000_000;
 
+/// The picture reduced by `k`, each pixel the mean of the k x k it stands for.
+fn shrink_rgb(image: &Rgb32FImage, k: usize) -> Rgb32FImage {
+    let (sw, sh) = (image.width() as usize / k, image.height() as usize / k);
+    let mut out = Rgb32FImage::new(sw as u32, sh as u32);
+    let n = (k * k) as f32;
+    out.par_chunks_mut(sw * 3).enumerate().for_each(|(y, row)| {
+        for x in 0..sw {
+            let mut sum = [0.0f32; 3];
+            for dy in 0..k {
+                for dx in 0..k {
+                    let p = image.get_pixel((x * k + dx) as u32, (y * k + dy) as u32).0;
+                    for c in 0..3 {
+                        sum[c] += p[c];
+                    }
+                }
+            }
+            for c in 0..3 {
+                row[x * 3 + c] = sum[c] / n;
+            }
+        }
+    });
+    out
+}
+
+fn shrink_mask(mask: &GrayImage, k: usize) -> GrayImage {
+    let (sw, sh) = (mask.width() as usize / k, mask.height() as usize / k);
+    let mut out = GrayImage::new(sw as u32, sh as u32);
+    out.par_chunks_mut(sw).enumerate().for_each(|(y, row)| {
+        for (x, v) in row.iter_mut().enumerate() {
+            let mut sum = 0u32;
+            for dy in 0..k {
+                for dx in 0..k {
+                    sum += mask.get_pixel((x * k + dx) as u32, (y * k + dy) as u32).0[0] as u32;
+                }
+            }
+            *v = (sum / (k * k) as u32) as u8;
+        }
+    });
+    out
+}
+
+/// A layer worked out at 1/k of the size, brought to a picture of `iw` x `ih`: its change and its weight
+/// are interpolated between the reduced pixels' centres.
+fn enlarge(small: &Layer, k: usize, iw: usize, ih: usize) -> Layer {
+    let x0 = small.x0 * k;
+    let y0 = small.y0 * k;
+    let w = (small.w * k).min(iw - x0);
+    let h = (small.h * k).min(ih - y0);
+    // where a full-size pixel falls in the reduced layer: its two neighbours on each axis and the share of
+    // the second
+    let place = |p: usize, origin: usize, len: usize| -> (usize, usize, f32) {
+        let s = ((origin + p) as f32 + 0.5) / k as f32 - 0.5 - (origin / k) as f32;
+        let s = s.clamp(0.0, (len - 1) as f32);
+        let a = s.floor() as usize;
+        (a, (a + 1).min(len - 1), s - a as f32)
+    };
+    let cols: Vec<(usize, usize, f32)> = (0..w).map(|x| place(x, x0, small.w)).collect();
+    let mut delta = vec![0.0f32; w * h * 3];
+    let mut weight = vec![0.0f32; w * h];
+    delta
+        .par_chunks_mut(w * 3)
+        .zip(weight.par_chunks_mut(w))
+        .enumerate()
+        .for_each(|(y, (drow, wrow))| {
+            let (ya, yb, fy) = place(y, y0, small.h);
+            for (x, &(xa, xb, fx)) in cols.iter().enumerate() {
+                let mix = |v: &[f32], stride: usize, c: usize| {
+                    let at = |sx: usize, sy: usize| v[(sy * small.w + sx) * stride + c];
+                    let top = at(xa, ya) + fx * (at(xb, ya) - at(xa, ya));
+                    let bottom = at(xa, yb) + fx * (at(xb, yb) - at(xa, yb));
+                    top + fy * (bottom - top)
+                };
+                for c in 0..3 {
+                    drow[x * 3 + c] = mix(&small.delta, 3, c);
+                }
+                wrow[x] = mix(&small.weight, 1, 0);
+            }
+        });
+    Layer {
+        x0,
+        y0,
+        w,
+        h,
+        delta,
+        weight,
+        skin_level: small.skin_level,
+        report: format!("{}, worked out at 1/{k} of the size", small.report),
+    }
+}
+
 fn build(image: &Rgb32FImage, mask: &GrayImage, is_raw: bool, texture: f32) -> Option<Layer> {
+    build_within(image, mask, is_raw, texture, MAX_PIXELS, TUNING)
+}
+
+fn build_within(
+    image: &Rgb32FImage,
+    mask: &GrayImage,
+    is_raw: bool,
+    texture: f32,
+    max_pixels: usize,
+    tuning: Tuning,
+) -> Option<Layer> {
     let (iw, ih) = (image.width() as usize, image.height() as usize);
     // the face's box
     let (mut min_x, mut max_x, mut min_y, mut max_y) = (usize::MAX, 0usize, usize::MAX, 0usize);
@@ -638,13 +759,21 @@ fn build(image: &Rgb32FImage, mask: &GrayImage, is_raw: bool, texture: f32) -> O
     let (x0, y0) = (min_x.saturating_sub(margin), min_y.saturating_sub(margin));
     let (x1, y1) = ((max_x + margin).min(iw - 1), (max_y + margin).min(ih - 1));
     let (w, h) = (x1 - x0 + 1, y1 - y0 + 1);
-    // The work keeps a few dozen planes of the face's box at once: a face filling a big picture would need
-    // several gigabytes, so it is left alone, said in the log, until the work is made to fit.
-    if w * h > MAX_PIXELS {
-        log::warn!(
-            "Skin renewal skipped: the face's box is {w}x{h}, more than the {MAX_PIXELS} pixels it is worked out on"
-        );
-        return None;
+    // The work keeps a few dozen planes of the face's box at once: a face filling a big picture (an upscaled
+    // one above all) would need several gigabytes. It is then worked out on a copy reduced by a whole factor,
+    // and only the change is scaled back up: added to the full-size picture, it keeps all of the picture's
+    // detail finer than the copy, so the result is the renewed copy plus the full size's own finest grain.
+    if w * h > max_pixels {
+        let k = ((w * h) as f64 / max_pixels as f64).sqrt().ceil() as usize;
+        let small = build_within(
+            &shrink_rgb(image, k),
+            &shrink_mask(mask, k),
+            is_raw,
+            texture,
+            max_pixels,
+            tuning,
+        )?;
+        return Some(enlarge(&small, k, iw, ih));
     }
 
     // the skin's own light: raw pictures are linear, and are scaled so that the skin sits mid-grey in the
@@ -757,7 +886,22 @@ fn build(image: &Rgb32FImage, mask: &GrayImage, is_raw: bool, texture: f32) -> O
         .unwrap_or_else(|| usable.last().unwrap());
     let radius = chosen.0 * face;
 
-    let base: [Plane; 3] = std::array::from_fn(|c| median(&chan[c], radius));
+    let evened: [Plane; 3] = std::array::from_fn(|c| median(&chan[c], radius));
+    // The median evens the skin but also clips the face's own light: the top of a cheekbone, the shade
+    // beside the nose, the roundness of the forehead all come out flatter. That light is given back: what
+    // the median took from the brightness, spread wider than its radius so a blemish (narrower) melts
+    // away in it, and counted only over the face so the hair and the background do not leak in. It goes on
+    // every channel alike, so it brings back brightness and not a blotch's colour.
+    let evened_y = luma(&evened);
+    let taken = y.zip(&evened_y, |a, b| a - b).zip(&m, |d, w| d * w);
+    let light = if tuning.spread > 0.0 {
+        let spread = tuning.spread * radius;
+        let weight_sum = gauss(&m, spread);
+        gauss(&taken, spread).zip(&weight_sum, |d, w| d / w.max(1e-3))
+    } else {
+        taken.map(|_| 0.0)
+    };
+    let base: [Plane; 3] = std::array::from_fn(|c| evened[c].zip(&light, |b, l| b + l));
     let base_y = luma(&base);
 
     // where the skin is uneven, next to its own evened-out self
@@ -816,7 +960,17 @@ fn build(image: &Rgb32FImage, mask: &GrayImage, is_raw: bool, texture: f32) -> O
         quantile(&base_y, &interior, 0.04),
         quantile(&base_y, &interior, 0.002),
     );
-    let tone = base_y.map(|v| (1.0 - smoothstep(hi0, hi1, v)) * smoothstep(sh0, sh1, v));
+    let tone = if tuning.local_highlights {
+        // a shine (the tip of the nose, a cheekbone, the forehead) is narrower than the median and gone
+        // from the evened skin: highlights are judged on each place's own light, shadows still on the
+        // evened skin
+        let local = gauss(&y, sig_mid);
+        base_y.zip(&local, |b, l| {
+            (1.0 - smoothstep(hi0, hi1, b.max(l))) * smoothstep(sh0, sh1, b)
+        })
+    } else {
+        base_y.map(|v| (1.0 - smoothstep(hi0, hi1, v)) * smoothstep(sh0, sh1, v))
+    };
 
     // the fine texture: its strength and grain size measured in the cleanest skin of this face, on a high pass
     // made only to measure them, wide enough to let the coarsest grain through
@@ -984,6 +1138,142 @@ mod tests {
         assert!(step > 0.03, "edge {step}: {}", layer.report);
         // far from anything, the weight is not nothing and not everything
         assert!(layer.weight[at(180, 300)] > 0.0);
+    }
+
+    /// The light that shapes a face, the shading of its creases and contours, comes through the renewal: the
+    /// median would soften it, and it is given back. The face is a mid-tone skin modelled by soft shading a
+    /// few percent of its width across, with a brighter forehead so that the shading is not a highlight.
+    fn modelled_face() -> (Rgb32FImage, GrayImage) {
+        let (w, h) = (400u32, 480u32);
+        let noise = white_noise(w as usize, h as usize);
+        let mut img = Rgb32FImage::new(w, h);
+        for (x, y, p) in img.enumerate_pixels_mut() {
+            let g = noise.v[(y * w + x) as usize] * 0.004;
+            let (fx, fy) = (x as f32, y as f32);
+            let shade = 0.02 * (fx / 9.0).sin() * (fy / 11.0).cos();
+            let forehead = if y < 110 { 0.12 } else { 0.0 };
+            let v = 0.15 + g + shade + forehead;
+            p.0 = [v * 1.3, v, v * 0.8];
+        }
+        let mask = GrayImage::from_fn(w, h, |x, y| {
+            Luma([if (10..390).contains(&x) && (10..470).contains(&y) {
+                255
+            } else {
+                0
+            }])
+        });
+        (img, mask)
+    }
+
+    fn shading_kept(spread: f32) -> f32 {
+        let (img, mask) = modelled_face();
+        let tuning = Tuning { spread, ..TUNING };
+        let layer = build_within(&img, &mask, true, 1.0, MAX_PIXELS, tuning).expect("a layer");
+        let at = |x: u32, y: u32| (y as usize - layer.y0) * layer.w + (x as usize - layer.x0);
+        // the shading's swing over the cheeks, through a band that leaves out the grain
+        let band = |renewed: bool| {
+            let plane = Plane {
+                w: 200,
+                h: 200,
+                v: (0..200 * 200)
+                    .map(|i| {
+                        let (x, y) = (100 + (i % 200) as u32, 200 + (i / 200) as u32);
+                        let j = at(x, y);
+                        let change = if renewed {
+                            0.7 * layer.weight[j] * layer.delta[j * 3 + 1]
+                        } else {
+                            0.0
+                        };
+                        img.get_pixel(x, y).0[1] + change
+                    })
+                    .collect(),
+            };
+            let shading = gauss(&plane, 2.0);
+            let mean = shading.v.iter().sum::<f32>() / shading.v.len() as f32;
+            (shading.v.iter().map(|v| (v - mean).powi(2)).sum::<f32>() / shading.v.len() as f32)
+                .sqrt()
+        };
+        band(true) / band(false)
+    }
+
+    #[test]
+    fn the_face_keeps_its_shading() {
+        let kept = shading_kept(VOLUME_SPREAD);
+        let flattened = shading_kept(0.0);
+        assert!(
+            kept > flattened + 0.1,
+            "with the light given back {kept}, without {flattened}"
+        );
+        // shading as wide as the median's radius is the hardest to keep: about 0.85 of it is, against 0.7
+        assert!(kept > 0.8, "the shading kept {kept}");
+    }
+
+    /// A face too big to work out at full size, as in an upscaled picture: it is renewed on a reduced copy,
+    /// and the change, brought back to full size, still evens the spot and keeps the edge.
+    #[test]
+    fn a_face_too_big_is_renewed_on_a_reduced_copy() {
+        let (small_img, small_mask) = skin();
+        let img = imageops::resize(&small_img, 720, 840, imageops::FilterType::Nearest);
+        let mask = imageops::resize(&small_mask, 720, 840, imageops::FilterType::Nearest);
+        let layer = build_within(&img, &mask, true, 1.0, 200_000, TUNING).expect("a layer");
+        assert!(layer.report.contains("1/2 of the size"), "{}", layer.report);
+        assert!(layer.x0 + layer.w <= 720 && layer.y0 + layer.h <= 840);
+        assert!(
+            layer.w * layer.h > 200_000,
+            "the layer covers the full-size box"
+        );
+        let at = |x: u32, y: u32| (y as usize - layer.y0) * layer.w + (x as usize - layer.x0);
+        let renewed = |x: u32, y: u32, c: usize| {
+            let i = at(x, y);
+            img.get_pixel(x, y).0[c] + layer.weight[i] * layer.delta[i * 3 + c]
+        };
+        let skin_green = 0.12;
+        let before = (img.get_pixel(500, 300).0[1] - skin_green).abs();
+        let after = (renewed(500, 300, 1) - skin_green).abs();
+        assert!(
+            after < before * 0.7,
+            "spot {before} -> {after}: {}",
+            layer.report
+        );
+        let step = renewed(592, 600, 1) - renewed(620, 600, 1);
+        assert!(step > 0.03, "edge {step}: {}", layer.report);
+    }
+
+    /// Renders the renewal of an 8-bit picture (RRAW_IN) with its skin mask (RRAW_MASK, grey PNG), at the
+    /// amount RRAW_AMOUNT (0..1), once for each light spread in RRAW_SPREADS ("0,1.25,..."; 0 is no light
+    /// given back), to RRAW_OUT_<spread>.png. For judging the face's volumes on real portraits.
+    #[test]
+    #[ignore]
+    fn renewal_spreads_on_a_picture() {
+        let var = |k: &str| std::env::var(k).unwrap_or_else(|_| panic!("{k}"));
+        let img = image::open(var("RRAW_IN")).expect("picture").to_rgb32f();
+        let mask = image::open(var("RRAW_MASK")).expect("mask").to_luma8();
+        let amount: f32 = var("RRAW_AMOUNT").parse().unwrap();
+        let out = var("RRAW_OUT");
+        for spread in var("RRAW_SPREADS").split(',') {
+            let (s, local) = spread.split_once(':').unwrap_or((spread, "0"));
+            let tuning = Tuning {
+                spread: s.parse().unwrap(),
+                local_highlights: local == "1",
+            };
+            let layer = build_within(&img, &mask, false, 1.0, MAX_PIXELS, tuning).expect("a layer");
+            eprintln!("variant {spread}: {}", layer.report);
+            let mut res = img.clone();
+            for ly in 0..layer.h {
+                for lx in 0..layer.w {
+                    let i = ly * layer.w + lx;
+                    let wt = (layer.weight[i] * amount).clamp(0.0, 1.0);
+                    let p = res.get_pixel_mut((layer.x0 + lx) as u32, (layer.y0 + ly) as u32);
+                    for c in 0..3 {
+                        p.0[c] += wt * layer.delta[i * 3 + c];
+                    }
+                }
+            }
+            image::DynamicImage::ImageRgb32F(res)
+                .to_rgb8()
+                .save(format!("{out}_{}.png", spread.replace(':', "_")))
+                .unwrap();
+        }
     }
 
     /// Runs the renewal on a linear float picture (RRAW_PHOTO: raw f32 RGB rows, RRAW_SIZE: "width,height") with
