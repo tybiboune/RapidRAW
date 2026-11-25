@@ -19,7 +19,7 @@ use std::time::Instant;
 
 pub fn process_and_get_dynamic_image(
     context: &GpuContext,
-    state: &tauri::State<AppState>,
+    state: &AppState,
     source: &RenderSource,
     request: RenderRequest,
     caller_id: &str,
@@ -38,7 +38,7 @@ pub fn process_and_get_dynamic_image(
 
 pub fn process_and_get_dynamic_image_with_precision(
     context: &GpuContext,
-    state: &tauri::State<AppState>,
+    state: &AppState,
     source: &RenderSource,
     request: RenderRequest,
     caller_id: &str,
@@ -72,7 +72,7 @@ pub fn release_gpu_caches(context: &GpuContext, state: &AppState) {
 
 pub fn process_and_get_dynamic_image_with_analytics(
     context: &GpuContext,
-    state: &tauri::State<AppState>,
+    state: &AppState,
     source: &RenderSource,
     request: RenderRequest,
     caller_id: &str,
@@ -94,7 +94,7 @@ pub fn process_and_get_dynamic_image_with_analytics(
 #[allow(clippy::too_many_arguments)]
 fn process_and_get_dynamic_image_inner(
     context: &GpuContext,
-    state: &tauri::State<AppState>,
+    state: &AppState,
     source: &RenderSource,
     request: RenderRequest,
     caller_id: &str,

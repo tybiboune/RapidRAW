@@ -33,7 +33,15 @@ pub fn app_handle() -> Option<&'static tauri::AppHandle> {
     APP_HANDLE.get()
 }
 
+/// The GPU a test decodes raws with, there being no app to take it from.
+#[cfg(test)]
+pub static TEST_GPU: OnceLock<GpuContext> = OnceLock::new();
+
 pub fn shared_gpu_context() -> Result<GpuContext, String> {
+    #[cfg(test)]
+    if let Some(context) = TEST_GPU.get() {
+        return Ok(context.clone());
+    }
     let app_handle = APP_HANDLE
         .get()
         .ok_or("GPU context requested before app setup")?;
@@ -121,7 +129,7 @@ fn open_device(
 }
 
 pub fn get_or_init_gpu_context(
-    state: &tauri::State<AppState>,
+    state: &AppState,
     #[cfg_attr(target_os = "android", allow(unused_variables))] app_handle: &tauri::AppHandle,
 ) -> Result<GpuContext, String> {
     let mut context_lock = match state.gpu_context.lock() {

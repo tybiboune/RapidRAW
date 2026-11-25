@@ -14,11 +14,12 @@ use crate::ai::models::{
 };
 use crate::ai::processing::{
     AiDepthMaskParameters, AiFaceMaskParameters, AiForegroundMaskParameters, AiSkyMaskParameters,
-    AiSubjectMaskParameters, AiTextMaskParameters, CachedDepthMap, ESAM3_FACE_SCORE_THRESHOLD,
-    ESAM3_SKY_REFINE_EPS, ESAM3_SKY_SCORE_THRESHOLD, ESAM3_TEXT_REFINE_EPS,
-    ESAM3_TEXT_SCORE_THRESHOLD, Esam3Features, ImageEmbeddings, generate_image_embeddings,
-    run_birefnet_model, run_depth_anything_model, run_esam3_boxes, run_esam3_decoder,
-    run_esam3_image_encoder, run_esam3_zoomed_decoder, run_sam_decoder,
+    AiSubjectMaskParameters, AiTextMaskParameters, CachedDepthMap,
+    ESAM3_FACE_ALTERNATIVE_BOX_SCORE, ESAM3_FACE_SCORE_THRESHOLD, ESAM3_SKY_REFINE_EPS,
+    ESAM3_SKY_SCORE_THRESHOLD, ESAM3_TEXT_REFINE_EPS, ESAM3_TEXT_SCORE_THRESHOLD, Esam3Features,
+    ImageEmbeddings, generate_image_embeddings, run_birefnet_model, run_depth_anything_model,
+    run_esam3_boxes, run_esam3_decoder, run_esam3_image_encoder, run_esam3_zoomed_decoder,
+    run_sam_decoder,
 };
 use crate::app::settings::load_settings;
 use crate::app::state::{AiTaskGuard, AppState, LoadedImage};
@@ -299,6 +300,7 @@ pub(crate) fn cached_face_analysis(
     models: &AiModels,
     cache_key: &str,
     warped_image: &DynamicImage,
+    copies: Option<&DetectionCopies>,
     transform: MaskTransform,
 ) -> Result<Arc<FaceAnalysis>, String> {
     if let Some(cached) = ai_state
@@ -328,7 +330,9 @@ pub(crate) fn cached_face_analysis(
         result = compute_face_analysis(ai_state, models, cache_key, warped_image, transform);
     }
     let analysis = match result {
-        Ok(analysis) => Arc::new(analysis),
+        Ok(analysis) => Arc::new(
+            keep_the_fullest_faces(models, cache_key, warped_image, analysis, copies, transform).0,
+        ),
         Err(error) => {
             log::error!("Face analysis failed after a retry: {error}");
             reset_face_models(ai_state, models);
@@ -357,22 +361,266 @@ pub(crate) fn compute_face_analysis(
     transform: MaskTransform,
 ) -> Result<FaceAnalysis, String> {
     let features = cached_esam3_features(ai_state, models, cache_key, warped_image)?;
+    faces_from_features(models, &features, cache_key, warped_image, transform)
+}
+
+/// The faces on a picture from its encoded features: the boxes the detector puts round them, then the
+/// landmarks fitted in each.
+fn faces_from_features(
+    models: &AiModels,
+    features: &Esam3Features,
+    cache_key: &str,
+    warped_image: &DynamicImage,
+    transform: MaskTransform,
+) -> Result<FaceAnalysis, String> {
     let detections = run_esam3_boxes(
         &*models.esam3_decoder().map_err(|e| e.to_string())?,
-        &features,
+        features,
         &*models.esam3_face_prompt().map_err(|e| e.to_string())?,
-        ESAM3_FACE_SCORE_THRESHOLD,
+        ESAM3_FACE_ALTERNATIVE_BOX_SCORE,
     )
     .map_err(|e| e.to_string())?;
     analyze_faces(
         warped_image,
         &detections,
+        ESAM3_FACE_SCORE_THRESHOLD,
         &*models.face_landmarks().map_err(|e| e.to_string())?,
         &*models.face_segmenter().map_err(|e| e.to_string())?,
         -(transform.orientation_steps as f32) * std::f32::consts::FRAC_PI_2,
         cache_key.to_string(),
     )
     .map_err(|e| e.to_string())
+}
+
+/// The copies of the loaded photo the faces are looked for in as well as in the photo itself: the app's
+/// own Auto, as its button sets it, and the same Auto with Shadows and Blacks at +100, rendered as the app
+/// renders. Depending on the light, the faces are found best, or most fully, on the photo, on the one or
+/// on the other copy, and whichever shows the most face skin is kept (`keep_the_fullest_faces`). The
+/// copies are only for finding the faces and what is looked for on them: they are never shown or
+/// exported.
+pub(crate) struct DetectionCopies<'a> {
+    context: crate::render::gpu::context::GpuContext,
+    state: &'a AppState,
+    loaded: &'a LoadedImage,
+    adjustments: &'a Value,
+    render: crate::render::options::RenderOptions,
+    /// whether the copies are put in the photo's cropped and turned frame, as the masks' picture is, or
+    /// left in the photo's own frame, as the skin tools' picture is
+    warped: bool,
+}
+
+impl<'a> DetectionCopies<'a> {
+    pub(crate) fn new(
+        context: crate::render::gpu::context::GpuContext,
+        state: &'a AppState,
+        loaded: &'a LoadedImage,
+        adjustments: &'a Value,
+        render: crate::render::options::RenderOptions,
+        warped: bool,
+    ) -> Self {
+        Self {
+            context,
+            state,
+            loaded,
+            adjustments,
+            render,
+            warped,
+        }
+    }
+
+    /// The copies of the loaded photo in the app. None when the GPU can't be had: the faces are then
+    /// looked for in the photo alone.
+    pub(crate) fn for_app(
+        state: &'a AppState,
+        app_handle: &tauri::AppHandle,
+        loaded: &'a LoadedImage,
+        adjustments: &'a Value,
+        warped: bool,
+    ) -> Option<Self> {
+        let context = crate::render::gpu::context::get_or_init_gpu_context(state, app_handle)
+            .map_err(|e| log::warn!("No copies of the photo to find the faces in: {e}"))
+            .ok()?;
+        let render =
+            crate::render::options::resolve_render_options_from_handle(app_handle, loaded.is_raw);
+        Some(Self::new(
+            context,
+            state,
+            loaded,
+            adjustments,
+            render,
+            warped,
+        ))
+    }
+
+    /// The copies, each with what it is called in the log. One that fails to render is left out.
+    pub(crate) fn make(&self) -> Vec<(&'static str, DynamicImage)> {
+        let base = crate::adjustments::negative_conversion::apply_negative_conversion(
+            std::borrow::Cow::Borrowed(self.loaded.image.as_ref()),
+            self.adjustments,
+        );
+        let is_raw = crate::adjustments::negative_conversion::effective_is_raw(
+            self.loaded.is_raw,
+            self.adjustments,
+        );
+        let exposure = crate::render::adjustment_utils::effective_baseline_exposure(
+            &json!({}),
+            self.loaded.as_shot,
+            self.render.baseline,
+        );
+        let auto = crate::adjustments::auto_adjust::auto_results_to_json(
+            &crate::adjustments::auto_adjust::perform_auto_analysis(&base, exposure),
+            crate::adjustments::auto_adjust::AutoAdjustMode::Normal,
+        );
+        let mut lifted = auto.clone();
+        lifted["shadows"] = json!(100.0);
+        lifted["blacks"] = json!(100.0);
+        // both copies are rendered from the same picture, which the GPU then keeps between the two
+        let mut hasher = DefaultHasher::new();
+        "face detection copy".hash(&mut hasher);
+        self.loaded.path.hash(&mut hasher);
+        self.adjustments.to_string().hash(&mut hasher);
+        let id = hasher.finish();
+        [
+            ("Auto", auto),
+            ("Auto with Shadows and Blacks at +100", lifted),
+        ]
+        .into_iter()
+        .filter_map(|(name, settings)| {
+            let copy = self
+                .render_copy(&base, id, is_raw, &settings)
+                .map_err(|e| log::warn!("The {name} copy to find the faces in failed: {e}"))
+                .ok()?;
+            let copy = DynamicImage::ImageRgb8(copy.to_rgb8());
+            let copy = if self.warped {
+                crate::render::geometry::apply_geometry_warp(
+                    copy,
+                    &self.loaded.path,
+                    self.adjustments,
+                )
+                .into_owned()
+            } else {
+                copy
+            };
+            Some((name, copy))
+        })
+        .collect()
+    }
+
+    fn render_copy(
+        &self,
+        base: &DynamicImage,
+        id: u64,
+        is_raw: bool,
+        settings: &Value,
+    ) -> Result<DynamicImage, String> {
+        let mut adjustments = crate::render::uniforms::get_all_adjustments_from_json(
+            settings,
+            is_raw,
+            self.loaded.as_shot,
+            self.render,
+        );
+        adjustments.global.show_clipping = 0;
+        let size = base.dimensions();
+        crate::render::gpu::output::process_and_get_dynamic_image(
+            &self.context,
+            self.state,
+            &crate::render::source::RenderSource::new(
+                base,
+                id,
+                settings,
+                crate::render::source::SourceTransform::default(),
+            ),
+            crate::render::gpu::processor::RenderRequest {
+                adjustments,
+                mask_bitmaps: &[],
+                mask_cache_key: None,
+                lut: None,
+                roi: None,
+                hsl_probe: false,
+                motion_blur: crate::effects::motion_blur::MotionBlurs::new(
+                    &self.loaded.path,
+                    settings,
+                    size,
+                    (0.0, 0.0),
+                    size.0.max(size.1) as f32,
+                ),
+            },
+            "face_detection_copy",
+        )
+    }
+}
+
+/// How much face skin the landmarks of an analysis cover on its picture.
+pub(crate) fn face_skin_area(picture: &DynamicImage, analysis: &FaceAnalysis) -> u64 {
+    if analysis.faces.is_empty() {
+        return 0;
+    }
+    compose_face_mask(
+        picture,
+        analysis,
+        None,
+        &[FacePart::FaceSkin],
+        FaceMethod::Landmarks,
+    )
+    .pixels()
+    .map(|p| p[0] as u64)
+    .sum()
+}
+
+/// Looks for the faces on the copies of the photo too, and keeps whichever of the photo and its copies
+/// shows the most face skin: a face in hard light, or half in shadow, is often found more fully, or only,
+/// on a copy. On a tie the photo itself is kept.
+pub(crate) fn keep_the_fullest_faces(
+    models: &AiModels,
+    cache_key: &str,
+    picture: &DynamicImage,
+    found: FaceAnalysis,
+    copies: Option<&DetectionCopies>,
+    transform: MaskTransform,
+) -> (FaceAnalysis, &'static str) {
+    let Some(copies) = copies else {
+        return (found, "the photo as it is");
+    };
+    let started = std::time::Instant::now();
+    let mut best_area = face_skin_area(picture, &found);
+    log::info!(
+        "Faces on the photo as it is: {} face(s), {best_area} of face skin",
+        found.faces.len()
+    );
+    let mut best = found;
+    let mut best_name = "the photo as it is";
+    for (name, copy) in copies.make() {
+        let features = models
+            .esam3_image_encoder()
+            .map_err(|e| e.to_string())
+            .and_then(|encoder| {
+                run_esam3_image_encoder(&copy, &encoder).map_err(|e| e.to_string())
+            });
+        let analysis = features.and_then(|features| {
+            faces_from_features(models, &features, cache_key, &copy, transform)
+        });
+        match analysis {
+            Ok(mut analysis) => {
+                let area = face_skin_area(&copy, &analysis);
+                log::info!(
+                    "Faces on the {name} copy: {} face(s), {area} of face skin",
+                    analysis.faces.len()
+                );
+                if area > best_area {
+                    best_area = area;
+                    best_name = name;
+                    analysis.found_on = Some(Arc::new(copy));
+                    best = analysis;
+                }
+            }
+            Err(e) => log::warn!("Looking for the faces on the {name} copy failed: {e}"),
+        }
+    }
+    log::info!(
+        "Kept the faces found on {best_name} (the copies took {:?})",
+        started.elapsed()
+    );
+    (best, best_name)
 }
 
 fn reset_face_models(ai_state: &Mutex<Option<AiState>>, models: &AiModels) {
@@ -421,13 +669,17 @@ pub fn generate_face_mask(
     warped_image: &DynamicImage,
     parts: &[String],
     method: Option<String>,
+    copies: Option<&DetectionCopies>,
     transform: MaskTransform,
     ai_source: Option<String>,
 ) -> Result<AiFaceMaskParameters, String> {
-    let analysis = cached_face_analysis(ai_state, models, cache_key, warped_image, transform)?;
+    let analysis =
+        cached_face_analysis(ai_state, models, cache_key, warped_image, copies, transform)?;
     if analysis.faces.is_empty() {
         return Err(NO_FACES_FOUND.to_string());
     }
+    // the parts are found on the picture the faces were found on
+    let warped_image = analysis.picture(warped_image);
     let face_parts: Vec<FacePart> = parts.iter().filter_map(|p| FacePart::from_id(p)).collect();
     let face_method = FaceMethod::from_id(method.as_deref());
     let parsing = if face_method.needs_parsing(&face_parts) {
@@ -863,6 +1115,9 @@ pub async fn generate_ai_face_mask(
         orientation_steps,
     };
     let ai_source = loaded_source_id(&state);
+    let loaded_image = get_loaded_image(&state)?;
+    let copies =
+        DetectionCopies::for_app(&state, &app_handle, &loaded_image, &js_adjustments, true);
     let params = mask_command_result(
         generate_face_mask(
             &state.ai_state,
@@ -871,6 +1126,7 @@ pub async fn generate_ai_face_mask(
             &warped_image,
             &parts,
             method,
+            copies.as_ref(),
             transform,
             ai_source.clone(),
         )
@@ -1135,28 +1391,32 @@ pub async fn generate_full_image_face_map(
         loaded_image.is_raw,
         &js_adjustments,
     );
+    let copies =
+        DetectionCopies::for_app(&state, &app_handle, &loaded_image, &js_adjustments, false);
     let analysis = cached_face_analysis(
         &state.ai_state,
         &models,
         &skin_cache_key(&path, &js_adjustments),
         &source_image,
+        copies.as_ref(),
         MaskTransform::from_adjustments(&js_adjustments),
     )?;
     if analysis.faces.is_empty() {
         return Err(NO_FACES_FOUND.to_string());
     }
+    let picture = analysis.picture(&source_image);
     let parsing = if face_method.needs_parsing(&[FacePart::FaceSkin]) {
         Some(cached_face_parsing(
             &state.ai_state,
             &models,
             &analysis,
-            &source_image,
+            picture,
         )?)
     } else {
         None
     };
     let mask = compose_face_mask(
-        &source_image,
+        picture,
         &analysis,
         parsing.as_deref(),
         &[FacePart::FaceSkin],
@@ -1278,11 +1538,14 @@ pub async fn generate_ai_skin_retouch(
         &js_adjustments,
     )
     .into_owned();
+    let copies =
+        DetectionCopies::for_app(&state, &app_handle, &loaded_image, &js_adjustments, false);
     let analysis = cached_face_analysis(
         &state.ai_state,
         &models,
         &skin_cache_key(&path, &js_adjustments),
         &source_image,
+        copies.as_ref(),
         MaskTransform::from_adjustments(&js_adjustments),
     )?;
     if analysis.faces.is_empty() {
@@ -1347,16 +1610,22 @@ async fn skin_model_map(
         &js_adjustments,
     )
     .into_owned();
+    let copies = DetectionCopies::for_app(state, app_handle, &loaded_image, &js_adjustments, false);
     let analysis = cached_face_analysis(
         &state.ai_state,
         &models,
         &skin_cache_key(&path, &js_adjustments),
         &source_image,
+        copies.as_ref(),
         MaskTransform::from_adjustments(&js_adjustments),
     )?;
     if analysis.faces.is_empty() {
         return Err(NO_FACES_FOUND.to_string());
     }
+    let picture = analysis
+        .found_on
+        .clone()
+        .unwrap_or_else(|| Arc::new(source_image));
     let map = tauri::async_runtime::spawn_blocking(move || {
         let compose = match model {
             ManualModel::Wrinkles => crate::masks::face::compose_wrinkle_map,
@@ -1369,7 +1638,7 @@ async fn skin_model_map(
             }
         };
         compose(
-            &source_image,
+            &picture,
             &analysis,
             &session,
             crate::effects::skin::DETECT_LONG_SIDE,
@@ -1451,5 +1720,346 @@ pub async fn test_ai_connector_connection(address: String) -> Result<(), String>
         Ok(true) => Ok(()),
         Ok(false) => Err("Server reachable but returned bad health status".to_string()),
         Err(e) => Err(e.to_string()),
+    }
+}
+
+#[cfg(test)]
+mod detection_probe {
+    use super::*;
+    use std::sync::OnceLock;
+
+    fn gpu() -> crate::render::gpu::context::GpuContext {
+        let instance =
+            wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle_from_env());
+        let adapter = pollster::block_on(instance.request_adapter(&Default::default()))
+            .expect("no wgpu adapter");
+        let limits = adapter.limits();
+        let (device, queue) = pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
+            required_limits: limits.clone(),
+            ..Default::default()
+        }))
+        .expect("device");
+        crate::render::gpu::context::GpuContext {
+            instance,
+            adapter,
+            device: Arc::new(device),
+            queue: Arc::new(queue),
+            limits,
+            display: Arc::new(Mutex::new(None)),
+            viewer_display: Arc::new(Mutex::new(None)),
+            pipelines: Arc::new(OnceLock::new()),
+            compute: Arc::new(OnceLock::new()),
+        }
+    }
+
+    /// For each raw in RRAW_PICTURES (paths split by `;`), finds the faces as the skin tools do: on the
+    /// photo as it is and on its two copies, keeping the one with the most face skin. Reports each pass's
+    /// faces and face skin, and the pass kept. RRAW_MODELS is the models folder; RRAW_OUT, if set, is a
+    /// folder to save the kept picture with its face skin tinted in.
+    #[test]
+    #[ignore]
+    fn face_detection_keeps_the_fullest_faces() {
+        let var = |k: &str| std::env::var(k).unwrap_or_else(|_| panic!("{k}"));
+        let models = AiModels::new(std::path::PathBuf::from(var("RRAW_MODELS")), false);
+        let context = gpu();
+        let _ = crate::render::gpu::context::TEST_GPU.set(context.clone());
+        let state = AppState::new();
+        let settings = crate::app::settings::AppSettings::default();
+        let render = crate::render::options::resolve_render_options(&settings, true);
+        let adjustments = json!({});
+        let _ = fern::Dispatch::new()
+            .level(log::LevelFilter::Info)
+            .format(|out, message, _| {
+                out.finish(format_args!(
+                    "LOG {:?} {message}",
+                    std::time::SystemTime::now()
+                ))
+            })
+            .chain(std::io::stderr())
+            .apply();
+        let tint = |picture: &DynamicImage, analysis: &FaceAnalysis| {
+            let mask = compose_face_mask(
+                picture,
+                analysis,
+                None,
+                &[FacePart::FaceSkin],
+                FaceMethod::Landmarks,
+            );
+            let mut shown = picture.to_rgb8();
+            for (x, y, p) in shown.enumerate_pixels_mut() {
+                let m = mask.get_pixel(x, y)[0] as f32 / 255.0 * 0.55;
+                let tint = [255.0, 40.0, 140.0];
+                for c in 0..3 {
+                    p[c] = (p[c] as f32 * (1.0 - m) + tint[c] * m) as u8;
+                }
+            }
+            shown
+        };
+        let dng_cache = std::path::PathBuf::from(var("LOCALAPPDATA"))
+            .join("io.github.CyberTimon.RapidRAW")
+            .join("dng_converted");
+        for path in var("RRAW_PICTURES").split(';') {
+            // an HE NEF is read from the DNG the app converted it to, as the app reads it
+            let dng = crate::decode::dng_converter::cache_key(std::path::Path::new(path))
+                .map(|key| dng_cache.join(format!("{key}.dng")))
+                .ok()
+                .filter(|dng| dng.exists())
+                .or_else(|| {
+                    // or from one converted the same way beforehand, named after the raw
+                    let stem = std::path::Path::new(path).file_stem()?;
+                    let dir = std::env::var("RRAW_DNG").ok()?;
+                    let dng = std::path::Path::new(&dir).join(stem).with_extension("dng");
+                    dng.exists().then_some(dng)
+                });
+            let source = dng
+                .as_ref()
+                .map_or(path.to_string(), |dng| dng.to_string_lossy().to_string());
+            let bytes = std::fs::read(&source).expect("raw");
+            let full = crate::decode::image_loader::load_base_image_from_bytes(
+                &bytes, &source, false, &settings, None,
+            )
+            .expect("decoded");
+            let base = full;
+            let loaded = LoadedImage {
+                path: source.clone(),
+                image: Arc::new(base),
+                is_raw: true,
+                as_shot: crate::decode::as_shot::as_shot(&source),
+            };
+            let name = std::path::Path::new(path)
+                .file_stem()
+                .unwrap()
+                .to_string_lossy()
+                .to_string();
+            eprintln!("PROBE {name} read from {source}");
+            let seen = crate::masks::generation::build_converted_source_image(
+                &loaded.image,
+                true,
+                &adjustments,
+            )
+            .into_owned();
+            let transform = MaskTransform::from_adjustments(&adjustments);
+            let copies = DetectionCopies::new(
+                context.clone(),
+                &state,
+                &loaded,
+                &adjustments,
+                render,
+                false,
+            );
+            let pixels = (seen.width() * seen.height()) as f64 * 255.0;
+            let out = std::env::var("RRAW_OUT").ok();
+            // each pass on its own, to see them all
+            let mut passes = vec![("seen", seen.clone())];
+            for (copy_name, copy) in copies.make() {
+                passes.push((
+                    if copy_name == "Auto" {
+                        "auto"
+                    } else {
+                        "lifted"
+                    },
+                    copy,
+                ));
+            }
+            for (key, picture) in &passes {
+                let encoder = models.esam3_image_encoder().expect("encoder");
+                let features = run_esam3_image_encoder(picture, &encoder).expect("features");
+                let analysis = faces_from_features(&models, &features, &name, picture, transform)
+                    .expect("analysis");
+                eprintln!(
+                    "PROBE {name} {key}: {} face(s), face skin {:.2}%",
+                    analysis.faces.len(),
+                    face_skin_area(picture, &analysis) as f64 / pixels * 100.0
+                );
+                if let Some(dir) = &out {
+                    picture
+                        .to_rgb8()
+                        .save(format!("{dir}/{name}_{key}.jpg"))
+                        .unwrap();
+                    tint(picture, &analysis)
+                        .save(format!("{dir}/{name}_{key}_mask.jpg"))
+                        .unwrap();
+                }
+            }
+            // and the app's own choice
+            let started = std::time::Instant::now();
+            let found = compute_face_analysis(&Mutex::new(None), &models, &name, &seen, transform)
+                .expect("analysis");
+            let (kept, kept_name) =
+                keep_the_fullest_faces(&models, &name, &seen, found, Some(&copies), transform);
+            eprintln!(
+                "PROBE {name} kept: {kept_name}, {} face(s), three passes took {:?}",
+                kept.faces.len(),
+                started.elapsed()
+            );
+        }
+    }
+
+    /// For each raw in RRAW_PICTURES, read at full size as the app reads it, and for each of the three
+    /// versions: every box the detector puts round a face down to a score of 0.1, whether the app keeps
+    /// it (score over ESAM3_FACE_SCORE_THRESHOLD, not a duplicate) and how well the face points fit in
+    /// it. RRAW_OUT, if set, gets each version with its boxes drawn: green a face, orange a box kept but
+    /// whose face points fit too poorly, blue a box under the detector's bar, grey a duplicate.
+    #[test]
+    #[ignore]
+    fn why_a_face_is_missed() {
+        let var = |k: &str| std::env::var(k).unwrap_or_else(|_| panic!("{k}"));
+        let models = AiModels::new(std::path::PathBuf::from(var("RRAW_MODELS")), false);
+        let context = gpu();
+        let _ = crate::render::gpu::context::TEST_GPU.set(context.clone());
+        let state = AppState::new();
+        let settings = crate::app::settings::AppSettings::default();
+        let render = crate::render::options::resolve_render_options(&settings, true);
+        let adjustments = json!({});
+        let dng_cache = std::path::PathBuf::from(var("LOCALAPPDATA"))
+            .join("io.github.CyberTimon.RapidRAW")
+            .join("dng_converted");
+        let encoder = models.esam3_image_encoder().expect("encoder");
+        let decoder = models.esam3_decoder().expect("decoder");
+        let prompt = models.esam3_face_prompt().expect("prompt");
+        let landmarks = models.face_landmarks().expect("landmarks");
+        for path in var("RRAW_PICTURES").split(';') {
+            let name = std::path::Path::new(path)
+                .file_stem()
+                .unwrap()
+                .to_string_lossy()
+                .to_string();
+            let dng = crate::decode::dng_converter::cache_key(std::path::Path::new(path))
+                .map(|key| dng_cache.join(format!("{key}.dng")))
+                .ok()
+                .filter(|dng| dng.exists())
+                .or_else(|| {
+                    let dng = std::path::Path::new(&var("RRAW_DNG")).join(format!("{name}.dng"));
+                    dng.exists().then_some(dng)
+                })
+                .expect("a DNG");
+            let source = dng.to_string_lossy().to_string();
+            let bytes = std::fs::read(&dng).expect("dng");
+            let base = crate::decode::image_loader::load_base_image_from_bytes(
+                &bytes, &source, false, &settings, None,
+            )
+            .expect("decoded");
+            let loaded = LoadedImage {
+                path: source.clone(),
+                image: Arc::new(base),
+                is_raw: true,
+                as_shot: crate::decode::as_shot::as_shot(&source),
+            };
+            let seen = crate::masks::generation::build_converted_source_image(
+                &loaded.image,
+                true,
+                &adjustments,
+            )
+            .into_owned();
+            let copies = DetectionCopies::new(
+                context.clone(),
+                &state,
+                &loaded,
+                &adjustments,
+                render,
+                false,
+            );
+            let mut passes = vec![("seen", seen)];
+            for (copy_name, copy) in copies.make() {
+                passes.push((
+                    if copy_name == "Auto" {
+                        "auto"
+                    } else {
+                        "lifted"
+                    },
+                    copy,
+                ));
+            }
+            for (key, picture) in &passes {
+                let (w, h) = picture.dimensions();
+                let features = run_esam3_image_encoder(picture, &encoder).expect("features");
+                let boxes = run_esam3_boxes(&decoder, &features, &prompt, 0.1).expect("boxes");
+                let kept: Vec<(f32, [f32; 4])> = boxes
+                    .iter()
+                    .copied()
+                    .filter(|(score, _)| *score > ESAM3_FACE_SCORE_THRESHOLD)
+                    .collect();
+                let report = crate::masks::face::box_report(picture, &boxes, &landmarks);
+                let kept_report = crate::masks::face::box_report(picture, &kept, &landmarks);
+                let mut drawn = picture.to_rgb8();
+                for (i, (b, score, dropped, presence)) in report.iter().enumerate() {
+                    let in_app = kept_report
+                        .iter()
+                        .find(|(k, ..)| k == b)
+                        .map(|(_, _, dropped, _)| dropped.is_none());
+                    let verdict = match in_app {
+                        None => "under the detector bar",
+                        Some(false) => "dropped as a duplicate",
+                        Some(true) if *presence >= 6.0 => "FACE",
+                        Some(true) => "face points fit too poorly",
+                    };
+                    eprintln!(
+                        "PROBE {name} {key} box {i}: score {score:.2}, {:.0}x{:.0} px at {:.0},{:.0} ({:.1}% of the width), points {presence:.1} -> {verdict}{}",
+                        b[2] - b[0],
+                        b[3] - b[1],
+                        b[0],
+                        b[1],
+                        (b[2] - b[0]) / w as f32 * 100.0,
+                        dropped.map_or(String::new(), |d| format!(" (overlaps box {d})"))
+                    );
+                    let colour = match verdict {
+                        "FACE" => image::Rgb([40u8, 220, 90]),
+                        "face points fit too poorly" => image::Rgb([255, 150, 0]),
+                        "dropped as a duplicate" => image::Rgb([160, 160, 160]),
+                        _ => image::Rgb([60, 140, 255]),
+                    };
+                    let t = (w.max(h) / 400).max(2) as i32;
+                    for d in 0..t {
+                        let x0 = b[0] as i32 - d;
+                        let y0 = b[1] as i32 - d;
+                        let rw = (b[2] - b[0]) as u32 + 2 * d as u32;
+                        let rh = (b[3] - b[1]) as u32 + 2 * d as u32;
+                        imageproc::drawing::draw_hollow_rect_mut(
+                            &mut drawn,
+                            imageproc::rect::Rect::at(x0, y0).of_size(rw.max(1), rh.max(1)),
+                            colour,
+                        );
+                    }
+                }
+                if report.is_empty() {
+                    eprintln!("PROBE {name} {key}: no box at all, even down to a score of 0.1");
+                }
+                // the face points fitted in the strongest box, drawn on a close crop of it
+                if let (Some((b, ..)), Ok(dir)) = (report.first(), std::env::var("RRAW_OUT")) {
+                    let (points, score) =
+                        crate::masks::face::points_in_box(picture, *b, &landmarks);
+                    let pad = (b[2] - b[0]).max(b[3] - b[1]) * 0.35;
+                    let x0 = (b[0] - pad).max(0.0) as u32;
+                    let y0 = (b[1] - pad).max(0.0) as u32;
+                    let x1 = ((b[2] + pad) as u32).min(w);
+                    let y1 = ((b[3] + pad) as u32).min(h);
+                    let mut crop =
+                        image::imageops::crop_imm(&picture.to_rgb8(), x0, y0, x1 - x0, y1 - y0)
+                            .to_image();
+                    let r = ((x1 - x0) / 250).max(3) as i32;
+                    for p in &points {
+                        imageproc::drawing::draw_filled_circle_mut(
+                            &mut crop,
+                            (p[0] as i32 - x0 as i32, p[1] as i32 - y0 as i32),
+                            r,
+                            image::Rgb([0u8, 255, 120]),
+                        );
+                    }
+                    eprintln!(
+                        "PROBE {name} {key}: points fitted in the strongest box score {score:.1}"
+                    );
+                    crop.save(format!("{dir}/{name}_{key}_points.jpg")).unwrap();
+                }
+                if let Ok(dir) = std::env::var("RRAW_OUT") {
+                    let small = image::imageops::resize(
+                        &drawn,
+                        w * 1400 / w.max(h),
+                        h * 1400 / w.max(h),
+                        image::imageops::FilterType::Triangle,
+                    );
+                    small.save(format!("{dir}/{name}_{key}_boxes.jpg")).unwrap();
+                }
+            }
+        }
     }
 }

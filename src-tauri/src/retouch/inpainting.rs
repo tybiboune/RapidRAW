@@ -1228,6 +1228,7 @@ pub async fn generate_face_restore_patch(
         &ai_models,
         &key,
         &picture,
+        None,
         crate::ai::commands::MaskTransform::from_adjustments(&current_adjustments),
     )?;
     if analysis.faces.is_empty() {

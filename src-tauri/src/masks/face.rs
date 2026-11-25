@@ -1,5 +1,5 @@
 use std::f32::consts::FRAC_PI_2;
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 
 use anyhow::Result;
 use image::{DynamicImage, GenericImageView, GrayImage, ImageBuffer, Luma, RgbImage, imageops};
@@ -17,6 +17,15 @@ const LANDMARK_PASSES: usize = 4;
 const LANDMARK_CONVERGED_SCORE: f32 = 12.0;
 const FACE_PRESENCE_THRESHOLD: f32 = 6.0;
 const DUPLICATE_BOX_OVERLAP: f32 = 0.5;
+/// How many boxes over the same place are tried, strongest first, for the face points to fit in: the
+/// detector's strongest box round a face is sometimes drawn round the face and what is next to it (a hat,
+/// a hand, the chest) and the points fit only in a tighter one, even a weaker one.
+const BOXES_TRIED_PER_FACE: usize = 8;
+/// How far apart, as a share of the face's size, the face points fitted in a box and those fitted in the
+/// same box of the mirrored picture (mirrored back) may be for the fit to be trusted. A face fits the same
+/// both ways, profiles too, to within about 2%; points guessed where the face is hidden or cut (eyes put
+/// on the mouth under a hat brim) come out several percent apart.
+const MIRROR_AGREEMENT: f32 = 0.03;
 const DUPLICATE_FACE_DISTANCE: f32 = 0.3;
 const SEGMENTER_INPUT_SIZE: usize = 256;
 const SEGMENTER_CLASSES: usize = 6;
@@ -167,6 +176,16 @@ pub struct FaceAnalysis {
     pub path_hash: String,
     pub faces: Vec<DetectedFace>,
     body: Vec<(FaceFrame, Vec<f32>)>,
+    /// The copy of the picture the faces were found on, when it was not the picture itself (see
+    /// `ai::commands::DetectionCopies`): what is looked for on the faces afterwards is looked for on it too.
+    pub found_on: Option<Arc<DynamicImage>>,
+}
+
+impl FaceAnalysis {
+    /// The picture the faces were found on: their copy if they were found on one, else `picture`.
+    pub fn picture<'a>(&'a self, picture: &'a DynamicImage) -> &'a DynamicImage {
+        self.found_on.as_deref().unwrap_or(picture)
+    }
 }
 
 fn inside(x: f32, y: f32, width: usize, height: usize) -> bool {
@@ -304,6 +323,49 @@ fn fit_landmarks(
     Ok(best)
 }
 
+/// The face points fitted in a box, judged against the same fit on the mirrored picture: the model
+/// often trusts a face turned one way more than the same face turned the other (a profile can score 0
+/// one way and 9 the other), so the fit's score is the better of the two, and it counts only if the
+/// two fits agree (MIRROR_AGREEMENT). Returns the points fitted on the picture itself (their order is
+/// the model's, which mirroring would swap), the score, the angle and how far apart the two fits are.
+fn fit_landmarks_judged(
+    session: &Mutex<Session>,
+    image: &RgbImage,
+    mirrored: &RgbImage,
+    face_box: [f32; 4],
+    angle: f32,
+) -> Result<(Vec<[f32; 2]>, f32, f32, f32)> {
+    let (landmarks, score, angle) = fit_landmarks(session, image, face_box, angle)?;
+    let last = image.width() as f32 - 1.0;
+    let mirrored_box = [
+        last - face_box[2],
+        face_box[1],
+        last - face_box[0],
+        face_box[3],
+    ];
+    let (other, other_score, _) = fit_landmarks(session, mirrored, mirrored_box, -angle)?;
+    let back: Vec<[f32; 2]> = other.iter().map(|p| [last - p[0], p[1]]).collect();
+    let (min, max) = bounds(&landmarks);
+    let size = (max[0] - min[0]).max(max[1] - min[1]).max(1.0);
+    let nearest = |from: &[[f32; 2]], to: &[[f32; 2]]| {
+        from.iter()
+            .map(|p| {
+                to.iter()
+                    .map(|q| (p[0] - q[0]).hypot(p[1] - q[1]))
+                    .fold(f32::MAX, f32::min)
+            })
+            .sum::<f32>()
+            / from.len().max(1) as f32
+    };
+    let apart = (nearest(&landmarks, &back) + nearest(&back, &landmarks)) / 2.0 / size;
+    Ok((landmarks, score.max(other_score), angle, apart))
+}
+
+/// Whether a judged fit (`fit_landmarks_judged`) is a face.
+fn is_face_fit(score: f32, apart: f32) -> bool {
+    score >= FACE_PRESENCE_THRESHOLD && apart <= MIRROR_AGREEMENT
+}
+
 fn run_segmenter(
     session: &Mutex<Session>,
     image: &RgbImage,
@@ -336,49 +398,131 @@ fn box_overlap(a: &[f32; 4], b: &[f32; 4]) -> f32 {
     w * h / smaller.max(f32::EPSILON)
 }
 
-pub fn analyze_faces(
+/// The face points the landmark model fits in a box, with its score, at the best of the four quarter turns.
+#[cfg(test)]
+pub(crate) fn points_in_box(
+    image: &DynamicImage,
+    face_box: [f32; 4],
+    landmark_session: &Mutex<Session>,
+) -> (Vec<[f32; 2]>, f32) {
+    let rgb = image.to_rgb8();
+    (0..4)
+        .filter_map(|quarter| {
+            fit_landmarks(landmark_session, &rgb, face_box, quarter as f32 * FRAC_PI_2).ok()
+        })
+        .map(|(points, score, _)| (points, score))
+        .max_by(|a, b| a.1.total_cmp(&b.1))
+        .unwrap_or_default()
+}
+
+/// What became of each box the detector put round a face (strongest first): the box in pixels, its
+/// detector score, the stronger box it was dropped as a duplicate of (if it was), and how well the face
+/// points fitted in it at best over the four quarter turns (a face counts from FACE_PRESENCE_THRESHOLD).
+#[cfg(test)]
+pub(crate) fn box_report(
     image: &DynamicImage,
     detections: &[(f32, [f32; 4])],
     landmark_session: &Mutex<Session>,
-    segmenter_session: &Mutex<Session>,
-    base_angle: f32,
-    path_hash: String,
-) -> Result<FaceAnalysis> {
+) -> Vec<([f32; 4], f32, Option<usize>, f32)> {
     let (width, height) = image.dimensions();
-    let mut boxes: Vec<[f32; 4]> = Vec::new();
-    for (_, b) in detections {
+    let rgb = image.to_rgb8();
+    let mut kept: Vec<[f32; 4]> = Vec::new();
+    let mut report = Vec::new();
+    for (score, b) in detections {
         let b = [
             b[0] * width as f32,
             b[1] * height as f32,
             b[2] * width as f32,
             b[3] * height as f32,
         ];
-        if !boxes
+        let dropped = kept
             .iter()
-            .any(|kept| box_overlap(kept, &b) > DUPLICATE_BOX_OVERLAP)
+            .position(|k| box_overlap(k, &b) > DUPLICATE_BOX_OVERLAP);
+        if dropped.is_none() {
+            kept.push(b);
+        }
+        let presence = (0..4)
+            .map(|quarter| {
+                fit_landmarks(landmark_session, &rgb, b, quarter as f32 * FRAC_PI_2)
+                    .map_or(f32::MIN, |(_, score, _)| score)
+            })
+            .fold(f32::MIN, f32::max);
+        report.push((b, *score, dropped, presence));
+    }
+    report
+}
+
+/// Finds the faces in `detections` (the detector's boxes, strongest first). A box over `face_score` is a
+/// face if the face points fit in it, or, failing that, in one of the other boxes over the same place,
+/// whatever their score (see BOXES_TRIED_PER_FACE).
+pub fn analyze_faces(
+    image: &DynamicImage,
+    detections: &[(f32, [f32; 4])],
+    face_score: f32,
+    landmark_session: &Mutex<Session>,
+    segmenter_session: &Mutex<Session>,
+    base_angle: f32,
+    path_hash: String,
+) -> Result<FaceAnalysis> {
+    let (width, height) = image.dimensions();
+    let all: Vec<(f32, [f32; 4])> = detections
+        .iter()
+        .map(|(score, b)| {
+            (
+                *score,
+                [
+                    b[0] * width as f32,
+                    b[1] * height as f32,
+                    b[2] * width as f32,
+                    b[3] * height as f32,
+                ],
+            )
+        })
+        .collect();
+    // one box per place the detector is sure of, and with it the other boxes over that place
+    let mut boxes: Vec<Vec<[f32; 4]>> = Vec::new();
+    for (score, b) in &all {
+        if *score > face_score
+            && !boxes
+                .iter()
+                .any(|kept| box_overlap(&kept[0], b) > DUPLICATE_BOX_OVERLAP)
         {
-            boxes.push(b);
+            let others = all
+                .iter()
+                .map(|(_, other)| *other)
+                .filter(|other| other != b && box_overlap(b, other) > DUPLICATE_BOX_OVERLAP);
+            boxes.push(
+                std::iter::once(*b)
+                    .chain(others)
+                    .take(BOXES_TRIED_PER_FACE)
+                    .collect(),
+            );
         }
     }
     let mut analysis = FaceAnalysis {
         path_hash,
         faces: Vec::new(),
         body: Vec::new(),
+        found_on: None,
     };
     if boxes.is_empty() {
         return Ok(analysis);
     }
 
     let rgb = image.to_rgb8();
+    let mirrored = imageops::flip_horizontal(&rgb);
     let faces = &mut analysis.faces;
-    for face_box in boxes {
+    for tried in boxes {
         let mut fitted = None;
-        for quarter in 0..4 {
-            let angle = base_angle + quarter as f32 * FRAC_PI_2;
-            let (landmarks, score, angle) = fit_landmarks(landmark_session, &rgb, face_box, angle)?;
-            if score >= FACE_PRESENCE_THRESHOLD {
-                fitted = Some((landmarks, angle));
-                break;
+        'boxes: for face_box in tried {
+            for quarter in 0..4 {
+                let angle = base_angle + quarter as f32 * FRAC_PI_2;
+                let (landmarks, score, angle, apart) =
+                    fit_landmarks_judged(landmark_session, &rgb, &mirrored, face_box, angle)?;
+                if is_face_fit(score, apart) {
+                    fitted = Some((landmarks, angle));
+                    break 'boxes;
+                }
             }
         }
         let Some((landmarks, angle)) = fitted else {

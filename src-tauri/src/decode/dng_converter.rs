@@ -80,7 +80,7 @@ fn cache_dir(app: &AppHandle) -> Result<PathBuf> {
     Ok(dir)
 }
 
-fn cache_key(src: &Path) -> Result<String> {
+pub(crate) fn cache_key(src: &Path) -> Result<String> {
     let meta = fs::metadata(src)?;
     let mtime = meta
         .modified()

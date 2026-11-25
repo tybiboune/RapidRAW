@@ -1126,17 +1126,33 @@ fn generate_mask(
             ai_source.clone(),
         )
         .and_then(commands::to_json),
-        MaskKind::Face => commands::generate_face_mask(
-            &state.ai_state,
-            &models,
-            &cache_key,
-            warped_image,
-            &face_parts(&original),
-            face_method(&original).map(str::to_string),
-            transform,
-            ai_source.clone(),
-        )
-        .and_then(commands::to_json),
+        MaskKind::Face => {
+            // the copies the faces are also looked for in are made from the loaded photo
+            let loaded = state
+                .original_image
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .clone()
+                .filter(|loaded| {
+                    crate::library::sidecars::parse_virtual_path(&loaded.path).0
+                        == crate::library::sidecars::parse_virtual_path(path).0
+                });
+            let copies = loaded.as_ref().and_then(|loaded| {
+                commands::DetectionCopies::for_app(&state, app_handle, loaded, adjustments, true)
+            });
+            commands::generate_face_mask(
+                &state.ai_state,
+                &models,
+                &cache_key,
+                warped_image,
+                &face_parts(&original),
+                face_method(&original).map(str::to_string),
+                copies.as_ref(),
+                transform,
+                ai_source.clone(),
+            )
+            .and_then(commands::to_json)
+        }
         MaskKind::Depth => {
             let params: AiDepthMaskParameters =
                 serde_json::from_value(original.clone()).unwrap_or_default();

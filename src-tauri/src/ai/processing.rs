@@ -27,6 +27,9 @@ const ESAM3_EXEMPLAR_SLOTS: usize = 8;
 pub const ESAM3_SKY_SCORE_THRESHOLD: f32 = 0.6;
 pub const ESAM3_TEXT_SCORE_THRESHOLD: f32 = 0.3;
 pub const ESAM3_FACE_SCORE_THRESHOLD: f32 = 0.3;
+/// The weakest box round a face that is still worth fitting the face points in, when the box the
+/// detector is sure of (over ESAM3_FACE_SCORE_THRESHOLD) at the same place takes in more than the face.
+pub const ESAM3_FACE_ALTERNATIVE_BOX_SCORE: f32 = 0.1;
 const ESAM3_MASK_LOW: f32 = 0.3;
 const ESAM3_MASK_HIGH: f32 = 0.7;
 const ESAM3_REFINE_SIZE: u32 = 1024;

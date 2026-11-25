@@ -34,16 +34,15 @@ mod platform;
 mod render;
 mod retouch;
 
-use std::collections::HashMap;
+#[cfg(target_os = "macos")]
+use std::sync::atomic::AtomicBool;
 #[cfg(target_os = "macos")]
 use std::sync::atomic::Ordering;
-use std::sync::atomic::{AtomicBool, AtomicUsize};
 
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use tauri::Manager;
-use tokio::sync::Mutex as TokioMutex;
 
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
 use crate::app::launch_request::emit_launch_request;
@@ -53,19 +52,15 @@ use crate::app::launch_request::{
 };
 use crate::app::logging::setup_logging;
 use crate::app::settings::{AppSettings, load_settings, save_settings};
+use crate::app::state::AppState;
 #[cfg(not(target_os = "android"))]
 use crate::app::state::WindowState;
-use crate::app::state::{
-    AppState, MetadataManager, ThumbnailManager, ThumbnailProgressTracker, ViewerSession,
-    ViewerState,
-};
 #[cfg(not(target_os = "android"))]
 use crate::platform::main_window::{
     MAIN_WINDOW_MIN_SIZE, MAIN_WINDOW_STATE_FILE, available_monitor_bounds, read_window_state,
     saved_window_state_is_usable, write_window_state,
 };
 use crate::platform::window_customizer::PinchZoomDisablePlugin;
-use crate::render::cache_utils::DecodedImageCache;
 use crate::render::gpu::context::get_or_init_gpu_context;
 use crate::render::preview_worker::{start_analytics_worker, start_preview_worker};
 
@@ -572,57 +567,7 @@ pub fn run() {
 
             Ok(())
         })
-        .manage(AppState {
-            window_setup_complete: AtomicBool::new(false),
-            gpu_crash_flag_path: Mutex::new(None),
-            original_image: Mutex::new(None),
-            cached_preview: Mutex::new(None),
-            viewer_cached_preview: Mutex::new(None),
-            gpu_context: Mutex::new(None),
-            gpu_image_cache: Mutex::new(None),
-            viewer_gpu_image_cache: Mutex::new(None),
-            gpu_processor: Mutex::new(None),
-            ai_state: Mutex::new(None),
-            ai_init_lock: TokioMutex::new(()),
-            active_ai_tasks: Mutex::new(HashMap::new()),
-            export_task_token: Arc::new(Mutex::new(None)),
-            hdr_result: Arc::new(Mutex::new(None)),
-            panorama_result: Arc::new(Mutex::new(None)),
-            focus_stack_result: Arc::new(Mutex::new(None)),
-            indexing_task_handle: Mutex::new(None),
-            lut_cache: Mutex::new(HashMap::new()),
-            initial_file_path: Mutex::new(None),
-            pending_edit_session: Mutex::new(None),
-            thumbnail_cancellation_token: Arc::new(AtomicBool::new(false)),
-            thumbnail_progress: Mutex::new(ThumbnailProgressTracker { total: 0, completed: 0 }),
-            preview_worker_tx: Mutex::new(None),
-            analytics_worker_tx: Mutex::new(None),
-            analytics_channel: Mutex::new(None),
-            mask_cache: Mutex::new(HashMap::new()),
-            patch_cache: Mutex::new(HashMap::new()),
-            uncropped_source_cache: Mutex::new(HashMap::new()),
-            thumbnail_source_cache: Mutex::new(HashMap::new()),
-            load_image_generation: Arc::new(AtomicUsize::new(0)),
-            full_warped_cache: Mutex::new(None),
-            full_warped_build_lock: Mutex::new(()),
-            wgpu_presented_generation: AtomicUsize::new(usize::MAX),
-            patched_cache: Mutex::new(None),
-            cleanup_source_cache: Mutex::new(None),
-            working_cache: Mutex::new(None),
-            decoded_image_cache: Mutex::new(DecodedImageCache::new(5)),
-            decode_flights: Default::default(),
-            image_preloader: Default::default(),
-            thumbnail_manager: ThumbnailManager::new(),
-            memory_budget: crate::app::memory_budget::MemoryBudget::from_total_ram(0.6),
-            metadata_manager: MetadataManager::new(),
-            disks_cache: Mutex::new(None),
-            disks_cache_refreshing: AtomicBool::new(false),
-            camera_session: Mutex::new(integrations::tethering::CameraSession::new()),
-            viewer: Mutex::new(ViewerState {
-                background: render::gpu::display::DisplayTransform::default().bg_secondary,
-                session: ViewerSession::default(),
-            }),
-        })
+        .manage(AppState::new())
         .invoke_handler(tauri::generate_handler![
             render::commands::apply_adjustments,
             render::commands::subscribe_analytics,
