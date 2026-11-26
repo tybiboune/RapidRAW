@@ -1,3 +1,81 @@
+# RapiderRaw
+
+> A personal, enriched edition of [RapidRAW](https://github.com/CyberTimon/RapidRAW), by tybiboune.
+
+## What RapiderRaw is
+
+RapiderRaw is a fork of Timon Käch's RapidRAW, the fast, GPU-accelerated RAW editor whose own description follows
+further down. I made it for my own photography: it is RapidRAW with the tools I missed added on top, mostly for
+portraits (skin retouching, face restoration), for repairing photos (blur, dust, power lines, noise) and for my own
+cameras' files.
+
+**It follows the original.** RapidRAW's evolutions are merged into RapiderRaw regularly, as long as they do not
+interfere with this fork's own modifications. Where the two meet, the fork's tools are adapted so that both keep
+working; a change that would undo or break one of them is left out.
+
+**It is built for my own use, and that has consequences:**
+
+- It is made and tested on **Windows only**. The releases on
+  [this fork's page](https://github.com/tybiboune/RapidRAW/releases/latest) are Windows installers, and the app
+  updates itself from them.
+- **Some additions need software or files that are not included in the distribution.** Without them the rest of the
+  app works normally; only that feature is unavailable or falls back to RapidRAW's behaviour:
+
+| Feature | Needs | How |
+|---|---|---|
+| Nikon HE / HE\* NEFs (Z6 III and others) | [Adobe DNG Converter](https://helpx.adobe.com/camera-raw/using/adobe-dng-converter.html) (free) | the app offers to download and install it; without it, only the embedded preview is shown |
+| DxO denoising | an installed **DxO PhotoLab** (commercial) | the app drives PhotoLab itself |
+| Skin > Lines (wrinkle detection) | `ffhq_wrinkle_unet.onnx` | not hosted anywhere (CC BY-NC-SA weights): put in the models folder by hand |
+| Skin spots detection, AI skin retouch | `abpn_blemish_detection.onnx`, `abpn_retouch_blend.onnx`, `abpn_retouch_inpaint.onnx` | exported from Alibaba's ABPN weights with `scripts/export_blemish_onnx.py` and `scripts/export_abpn_retouch_onnx.py`, put in the models folder by hand |
+| Deblur | `deblur_motion_nafnet.onnx`, `deblur_defocus_restormer.onnx` | exported with `scripts/export_deblur_onnx.py`, put in the models folder by hand |
+
+The models folder is `%APPDATA%\io.github.CyberTimon.RapidRAW\models`. The other new models (face parser,
+CodeFormer, RealPLKSR ×4, RawForge) download by themselves on first use, like RapidRAW's own. Several face models
+(the face parser, CodeFormer, the wrinkle model) are licensed for **non-commercial use only**.
+
+RapiderRaw keeps RapidRAW's AGPL-3.0 licence. All credit for the editor itself goes to Timon Käch and RapidRAW's
+contributors.
+
+## What it adds to RapidRAW
+
+**Portrait retouching**
+
+- **A Skin tool that works by kind of fault**, over the face the masking already finds: *Spots*, *Redness*,
+  *Pigment*, *Tone*, *Shine*, *Lines* and *Under eyes*, each with its own slider. Blemishes and
+  lines are healed from the clean skin around them; the nose, the lips and the eyes are kept out.
+- **One-button skin retouch, three ways** ([docs/SKIN-RETOUCH-METHODS.md](docs/SKIN-RETOUCH-METHODS.md)):
+  - **Renewal**: an automated interpretation, worked out with AI, of PiXimperfect's YouTube tutorial
+    *Flawless 1-Min Skin Retouch Action in Photoshop!* (median base, new pore grain, the original's finest detail),
+    with every value the retoucher judges by eye worked out from the photo
+    ([docs/SKIN-RENEWAL.md](docs/SKIN-RENEWAL.md)). It is not affiliated with or endorsed by PiXimperfect;
+  - **Natural**: an automatic dodge & burn that evens light and shade and keeps every pore, freckle and the face's
+    shape;
+  - **AI**: Alibaba's ABPN, trained on professionally retouched portraits.
+- **The detection maps in view**: see exactly what each skin tool found before applying it.
+- **Restore Face** with CodeFormer, brushed over a face, and face detection that holds up in hard light.
+
+**Repairing photos**
+
+- **Brushed repairs**: *Deblur* (camera shake or missed focus), *Dust Spots* and *Power Lines*.
+- **Upscale ×4** with darktable's RealPLKSR model, and **Superfocus**: finer detail by upscaling and coming back to
+  the photo's own size.
+- **More denoisers**: DxO PhotoLab's DeepPRIME XD driven from the app, and RawForge's three AI models, which are
+  given the photo's ISO.
+- Repairs run before the upscaler, and the AI tools make room on the GPU and retry smaller instead of failing.
+
+**Workflow**
+
+- **Focus peaking** (shortcut `Z`), from a focus map of the full photo, through crops and rotations, with a
+  sensitivity setting.
+- **The areas an adjustment affects**, shown while `Alt` is held on its slider.
+- **Nikon HE / HE\* NEFs** developed from the real raw data (through Adobe DNG Converter), with their as-shot white
+  balance and baseline exposure.
+- Lens blur runs at a fraction of the size on large photos, and the app **updates itself** from this fork's releases.
+
+---
+
+*What follows is RapidRAW's own README, unchanged.*
+
 <p align="center">
   <img src="https://raw.githubusercontent.com/CyberTimon/RapidRAW/assets/.github/assets/editor.jpg" alt="RapidRAW Editor">
 </p>
