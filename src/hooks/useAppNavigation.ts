@@ -13,6 +13,7 @@ import { LibraryViewMode } from '../types/settings';
 import { ImageFile } from '../types/library';
 import { INITIAL_ADJUSTMENTS } from '../utils/adjustments';
 import { adjustmentsFromMetadata } from '../utils/developDefaults';
+import { isSameValue } from '../utils/editHistory';
 import { globalImageCache } from '../utils/ImageLRUCache';
 import { decodeImage } from '../utils/decodeImage';
 import { debouncedSave, debouncedSetHistory } from './useEditorActions';
@@ -153,7 +154,7 @@ export function useAppNavigation({ clearThumbnailQueue, refs }: AppNavigationPro
     });
 
     debouncedSave.flush();
-    debouncedSetHistory.cancel();
+    debouncedSetHistory.flush();
 
     const lastActivePath = selectedImage?.path ?? null;
     const isStillVisible =
@@ -173,7 +174,7 @@ export function useAppNavigation({ clearThumbnailQueue, refs }: AppNavigationPro
   const handleImageSelect = useCallback(
     async (path: string, openInEditor: boolean = true, force: boolean = false) => {
       const generation = ++imageSelectGeneration;
-      const { selectedImage, isSliderDragging, resetHistory, setEditor } = useEditorStore.getState();
+      const { selectedImage, isSliderDragging, resetHistory, stashHistory, setEditor } = useEditorStore.getState();
       const { setLibrary } = useLibraryStore.getState();
       const { setUI } = useUIStore.getState();
       const wasEditorVisible = useUIStore.getState().activeView === 'editor';
@@ -189,7 +190,6 @@ export function useAppNavigation({ clearThumbnailQueue, refs }: AppNavigationPro
 
       useEditorStore.getState().patchesSentToBackend.clear();
       debouncedSave.flush();
-      debouncedSetHistory.cancel();
 
       if (!force && selectedImage?.path && cachedEditStateRef.current) {
         globalImageCache.set(selectedImage.path, cachedEditStateRef.current);
@@ -218,6 +218,7 @@ export function useAppNavigation({ clearThumbnailQueue, refs }: AppNavigationPro
         setEditor({ wgpuPhase: 'hidden' });
       }
 
+      stashHistory();
       selectedImagePathRef.current = path;
 
       const { multiSelectedPaths } = useLibraryStore.getState();
@@ -259,7 +260,7 @@ export function useAppNavigation({ clearThumbnailQueue, refs }: AppNavigationPro
         });
 
         setEditor({ adjustments: cached.adjustments });
-        resetHistory(cached.adjustments);
+        resetHistory(cached.adjustments, path);
         prevAdjustmentsRef.current = { path, adjustments: cached.adjustments };
 
         setLibrary({ isViewLoading: false });
@@ -287,9 +288,9 @@ export function useAppNavigation({ clearThumbnailQueue, refs }: AppNavigationPro
           .then((metadata: any) => {
             if (selectedImagePathRef.current !== path) return;
             const freshAdjustments = adjustmentsFromMetadata(metadata.adjustments);
-            if (!isSliderDragging && JSON.stringify(cached.adjustments) !== JSON.stringify(freshAdjustments)) {
+            if (!isSliderDragging && !isSameValue(cached.adjustments, freshAdjustments)) {
               setEditor({ adjustments: freshAdjustments });
-              resetHistory(freshAdjustments);
+              resetHistory(freshAdjustments, path);
               prevAdjustmentsRef.current = { path, adjustments: freshAdjustments };
               globalImageCache.set(path, { ...cached, adjustments: freshAdjustments });
             }
@@ -356,7 +357,7 @@ export function useAppNavigation({ clearThumbnailQueue, refs }: AppNavigationPro
       const { setLibrary, sortCriteria } = useLibraryStore.getState();
       const { setUI } = useUIStore.getState();
       const { setProcess } = useProcessStore.getState();
-      const { selectedImage, resetHistory, setEditor } = useEditorStore.getState();
+      const { selectedImage, resetHistory, stashHistory, setEditor } = useEditorStore.getState();
       const libraryViewMode = appSettings?.libraryViewMode;
 
       if (!skipHistory && path) {
@@ -416,10 +417,10 @@ export function useAppNavigation({ clearThumbnailQueue, refs }: AppNavigationPro
 
         if (!preserveEditor && selectedImage) {
           debouncedSave.flush();
-          debouncedSetHistory.cancel();
+          stashHistory();
           setEditor({ selectedImage: null, finalPreviewUrl: null, uncroppedAdjustedPreviewUrl: null, histogram: null });
           setEditor({ adjustments: INITIAL_ADJUSTMENTS });
-          resetHistory(INITIAL_ADJUSTMENTS);
+          resetHistory(INITIAL_ADJUSTMENTS, null);
           useEditorStore.getState().patchesSentToBackend.clear();
         }
 

@@ -51,7 +51,7 @@ use crate::app::launch_request::{
     resolve_gui_launch_paths, set_process_exit_code,
 };
 use crate::app::logging::setup_logging;
-use crate::app::settings::{AppSettings, load_settings, save_settings};
+use crate::app::settings::{AppSettings, load_settings};
 use crate::app::state::AppState;
 #[cfg(not(target_os = "android"))]
 use crate::app::state::WindowState;
@@ -193,6 +193,11 @@ pub fn run() {
                     platform::viewer_window::handle_viewer_resized(window, *size);
                 }
             }
+            tauri::WindowEvent::Moved(_)
+            | tauri::WindowEvent::Focused(true)
+            | tauri::WindowEvent::ScaleFactorChanged { .. } => {
+                render::gpu::display::request_display_refresh(window.app_handle());
+            }
             tauri::WindowEvent::CloseRequested { api, .. } => {
                 platform::viewer_window::handle_close_requested(window, api)
             }
@@ -202,6 +207,8 @@ pub fn run() {
             _ => {}
         })
         .setup(move |app| {
+            platform::monitor::watch_screen_changes(app.handle());
+
             #[cfg(feature = "tethering")]
             {
                 std::thread::spawn(|| {
@@ -263,15 +270,11 @@ pub fn run() {
                 });
             }
 
-            let config_dir = app_handle.path().app_config_dir().expect("Failed to get config dir");
-            let crash_flag_path = config_dir.join(".gpu_init_crash_flag");
-
-            {
-                let state = app.state::<AppState>();
-                *state.gpu_crash_flag_path.lock().unwrap() = Some(crash_flag_path.clone());
+            if let Ok(config_dir) = app_handle.path().app_config_dir() {
+                let _ = std::fs::remove_file(config_dir.join(".gpu_init_crash_flag"));
             }
 
-            let mut settings: AppSettings = load_settings(app_handle.clone()).unwrap_or_default();
+            let settings: AppSettings = load_settings(app_handle.clone()).unwrap_or_default();
 
             {
                 let state = app.state::<AppState>();
@@ -280,26 +283,24 @@ pub fn run() {
             }
             crate::app::storage::apply_cache_limits(&settings);
 
-            if crash_flag_path.exists() {
-                log::warn!("GPU Driver crash detected on last run! Falling back to OpenGL backend.");
-                settings.processing_backend = Some("gl".to_string());
-                let _ = save_settings(settings.clone(), app_handle.clone());
-                let _ = std::fs::remove_file(&crash_flag_path);
-            }
+            let backend =
+                render::gpu::fallback::choose_backend(settings.processing_backend.as_deref());
 
             adjustments::lens_correction::init_lensfun_db(&app_handle);
 
+            #[cfg(target_os = "linux")]
+            let webkit_transport = platform::linux_graphics::configure_webkit_transport(
+                settings.linux_gpu_optimization.unwrap_or(false),
+            );
+
             unsafe {
-                if let Some(backend) = &settings.processing_backend
-                    && backend != "auto" {
-                        std::env::set_var("WGPU_BACKEND", backend);
-                    }
+                if let Some(backend) = &backend {
+                    std::env::set_var("WGPU_BACKEND", backend);
+                }
 
                 #[cfg(target_os = "linux")]
                 {
                     if settings.linux_gpu_optimization.unwrap_or(false) {
-                        std::env::set_var("WEBKIT_DISABLE_DMABUF_RENDERER", "1");
-                        std::env::set_var("WEBKIT_DISABLE_COMPOSITING_MODE", "1");
                         std::env::set_var("NODEVICE_SELECT", "1");
                     }
                 }
@@ -329,22 +330,24 @@ pub fn run() {
 
             setup_logging(&app_handle);
 
-            if let Some(backend) = &settings.processing_backend
-                && backend != "auto" {
-                    log::info!("Applied processing backend setting: {}", backend);
-                }
+            if let Some(backend) = &backend {
+                log::info!("Applied processing backend: {}", backend);
+            }
 
             #[cfg(target_os = "linux")]
-            if settings.linux_gpu_optimization.unwrap_or(false) {
-                log::info!("Applied Linux Compatibility Mode (forced software compositing).");
-            } else {
+            {
+                log::info!(
+                    "WebKitGTK {}, buffer transport: {:?}",
+                    platform::linux_graphics::webkit_version(),
+                    webkit_transport
+                );
                 log::info!(
                     "Wayland Nvidia quirk status: {:?}",
                     tauri_plugin_wayland_nvidia_quirk::status()
                 );
             }
 
-            jxl_oxide::integration::register_image_decoding_hook();
+            jxl_image_rs_integration::register_image_decoding_hook();
 
             match launch_req {
                 LaunchRequest::HeadlessExport(session) => {
@@ -569,6 +572,8 @@ pub fn run() {
         })
         .manage(AppState::new())
         .invoke_handler(tauri::generate_handler![
+            render::gpu::fallback::get_gpu_fallbacks,
+            render::gpu::fallback::reset_gpu_fallback,
             render::commands::apply_adjustments,
             render::commands::subscribe_analytics,
             render::commands::generate_preview_for_path,
@@ -577,8 +582,10 @@ pub fn run() {
             app::logging::get_log_file_path,
             app::logging::frontend_log,
             merge::save_collage,
-            merge::hdr::merge_hdr,
-            merge::hdr::save_hdr,
+            merge::start_merge,
+            merge::update_merge_preview,
+            merge::save_merge,
+            merge::discard_merge,
             adjustments::lut_processing::load_and_parse_lut,
             adjustments::lut_processing::list_luts,
             adjustments::lut_processing::import_luts,
@@ -607,6 +614,7 @@ pub fn run() {
             app::settings::set_ui_scale,
             app::settings::is_tethering_supported,
             app::settings::is_wgpu_renderer_supported,
+            app::settings::get_display_status,
             ai::commands::generate_ai_subject_mask,
             ai::commands::precompute_ai_subject_mask,
             ai::commands::generate_ai_foreground_mask,
@@ -641,8 +649,6 @@ pub fn run() {
             retouch::inpainting::generate_deblur_patch,
             retouch::inpainting::generate_dust_patch,
             retouch::inpainting::generate_wire_patch,
-            merge::focus_stacking::stitch_focus_stack,
-            merge::focus_stacking::save_focus_stack,
             decode::image_loader::load_image,
             integrations::dxo::get_dxo_status,
             integrations::dxo::run_dxo_denoise,
@@ -651,9 +657,8 @@ pub fn run() {
             decode::dng_converter::install_dng_converter,
             decode::image_loader::is_image_cached,
             decode::image_preload::preload_images,
-            merge::panorama::stitch_panorama,
-            merge::panorama::save_panorama,
             export::export_images,
+            export::resolve_export_file_stem,
             export::tasks::cancel_export,
             export::size_estimate::estimate_export_sizes,
             integrations::edit_in::edit_in_app,
@@ -784,6 +789,7 @@ pub fn run() {
                 tauri::RunEvent::ExitRequested { api, code, .. } => {
                     api.prevent_exit();
                     let code = resolve_exit_code(code, process_exit_code());
+                    render::gpu::fallback::abandon_attempt();
 
                     #[cfg(target_os = "macos")]
                     unsafe { libc::_exit(code); }
@@ -793,6 +799,7 @@ pub fn run() {
                 }
                 tauri::RunEvent::Exit => {
                     let code = process_exit_code();
+                    render::gpu::fallback::abandon_attempt();
 
                     #[cfg(target_os = "macos")]
                     unsafe { libc::_exit(code); }

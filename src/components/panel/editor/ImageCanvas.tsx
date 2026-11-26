@@ -2576,7 +2576,7 @@ const ImageCanvas = memo(
       }
       setWbBox(null);
       resetWbSample();
-    }, [isWbPickerActive, selectedImage.path, resetWbSample]);
+    }, [isWbPickerActive, isMixerPickerActive, selectedImage.path, resetWbSample]);
 
     const handleStart = useCallback(
       (e: any) => {
@@ -4135,6 +4135,7 @@ const ImageCanvas = memo(
                           e.stopPropagation();
                         }
                       }}
+                      onFocus={(e) => (e.target as HTMLElement).blur()}
                     >
                       <ReactCrop
                         aspect={

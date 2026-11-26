@@ -645,6 +645,7 @@ mod tests {
             .expect("no wgpu adapter (install a Vulkan driver, e.g. mesa lavapipe)");
         eprintln!("adapter: {:?}", adapter.get_info().name);
         let limits = adapter.limits();
+        let backend = adapter.get_info().backend;
         let (device, queue) = pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
             required_limits: limits.clone(),
             ..Default::default()
@@ -653,6 +654,7 @@ mod tests {
         GpuContext {
             instance,
             adapter,
+            backend,
             device: Arc::new(device),
             queue: Arc::new(queue),
             limits,
@@ -756,15 +758,22 @@ mod tests {
         render_sized(context, img, adjustments)
     }
 
+    /// Renders an sRGB picture through the skin passes and gives it back in sRGB: the passes take the
+    /// picture in the working space, as the pipeline hands it to them.
     fn render_sized(
         context: &GpuContext,
         img: &Rgb32FImage,
         adjustments: serde_json::Value,
     ) -> Vec<[f32; 3]> {
+        use crate::render::color_space::{srgb_to_working, working_to_srgb};
         assert_eq!(IMAGE_FORMAT, wgpu::TextureFormat::Rgba16Float);
-        let dynamic = DynamicImage::ImageRgb32F(img.clone());
-        let slot =
-            compute::upload_image(context, img.dimensions(), &compute::rgba_halves(&dynamic));
+        let (to_working, to_srgb) = (srgb_to_working(), working_to_srgb());
+        let mut working = img.clone();
+        for p in working.pixels_mut() {
+            p.0 = (to_working * glam::Vec3::from_array(p.0)).to_array();
+        }
+        let dynamic = DynamicImage::ImageRgb32F(working);
+        let slot = compute::upload_image(context, &dynamic);
         let source = RenderSource::new(
             &dynamic,
             1,
@@ -776,6 +785,9 @@ mod tests {
         );
         let out = source.render(context, &slot).expect("render");
         read(context, &out)
+            .into_iter()
+            .map(|p| (to_srgb * glam::Vec3::from_array(p)).to_array())
+            .collect()
     }
 
     fn luma(p: [f32; 3]) -> f32 {
@@ -1164,6 +1176,7 @@ mod tests {
                 settings.linear_raw_mode.clone(),
                 settings.raw_preprocessing_color_nr.unwrap_or(0.5),
                 settings.raw_preprocessing_sharpening.unwrap_or(0.35),
+                settings.remove_hot_pixels.unwrap_or(true),
                 None,
             )
             .unwrap()

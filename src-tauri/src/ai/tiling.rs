@@ -16,8 +16,8 @@ struct TileParams {
 
 const DENOISE_TILE: TileParams = TileParams {
     cs: 504,
-    margin: 12,
-    overlap: 64,
+    margin: 40,
+    overlap: 56,
 };
 
 pub const UPSCALE_TILE_SIZE: usize = 544;
@@ -303,34 +303,8 @@ const RAWFORGE_TILE: TileParams = TileParams {
     overlap: 48,
 };
 
-/// RawForge's networks were trained on linear Rec. 2020 pictures, while the develop pipeline works in
-/// linear sRGB: the picture crosses over for the network and comes back after.
-const SRGB_TO_REC2020: [[f32; 3]; 3] = [
-    [0.627_403_9, 0.329_283, 0.043_313_1],
-    [0.069_097_3, 0.919_540_4, 0.011_362_3],
-    [0.016_391_4, 0.088_013_3, 0.895_595_3],
-];
-
-const REC2020_TO_SRGB: [[f32; 3]; 3] = [
-    [1.660_491, -0.587_641_1, -0.072_849_9],
-    [-0.124_550_5, 1.132_899_9, -0.008_349_4],
-    [-0.018_150_8, -0.100_578_9, 1.118_729_7],
-];
-
-/// Applies a 3Ã—3 colour matrix to a 1Ã—3Ã—hÃ—w tile, optionally keeping the result inside 0..1.
-fn convert_tile(tile: &mut Array4<f32>, matrix: &[[f32; 3]; 3], clamp: bool) {
-    let (h, w) = (tile.dim().2, tile.dim().3);
-    for y in 0..h {
-        for x in 0..w {
-            let px = [tile[[0, 0, y, x]], tile[[0, 1, y, x]], tile[[0, 2, y, x]]];
-            for (c, row) in matrix.iter().enumerate() {
-                let v = row[0] * px[0] + row[1] * px[1] + row[2] * px[2];
-                tile[[0, c, y, x]] = if clamp { v.clamp(0.0, 1.0) } else { v };
-            }
-        }
-    }
-}
-
+/// RawForge's networks were trained on linear Rec. 2020 pictures, which is the develop pipeline's own working
+/// space: the picture goes in as it is, kept inside 0..1 as the network learned it.
 /// The ISO is passed to the network as ISO / 6400, in half precision, as RawForge does.
 pub fn run_rawforge_denoise(
     rgb_img: &Rgb32FImage,
@@ -342,19 +316,18 @@ pub fn run_rawforge_denoise(
 
     let cond = ndarray::Array2::from_elem((1, 1), f16::from_f32(iso as f32 / 6400.0));
     let infer = |mut tile: Array4<f32>| -> Result<Array4<f32>> {
-        convert_tile(&mut tile, &SRGB_TO_REC2020, true);
+        tile.mapv_inplace(|v| v.clamp(0.0, 1.0));
         let input = Tensor::from_array(tile.mapv(f16::from_f32))?;
         let cond = Tensor::from_array(cond.clone())?;
         let mut sess = session.lock().unwrap();
         let outputs = gpu_inference(sess.run(ort::inputs!["input" => input, "cond" => cond]))?;
-        let mut out = outputs[0]
+        let out = outputs[0]
             .try_extract_array::<f16>()?
             .mapv(|v| v.to_f32())
             .as_standard_layout()
             .into_owned()
             .into_dimensionality::<ndarray::Ix4>()
             .map_err(|e| anyhow::anyhow!("Unexpected output shape: {}", e))?;
-        convert_tile(&mut out, &REC2020_TO_SRGB, false);
         Ok(out)
     };
     let out = run_tiled(rgb_img, &infer, RAWFORGE_TILE, 1, on_progress)?;

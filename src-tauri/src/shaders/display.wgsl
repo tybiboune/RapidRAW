@@ -5,13 +5,17 @@ struct Transform {
     image_size: vec2<f32>,
     texture_size: vec2<f32>,
     pixelated: f32,
-    _pad: f32,
+    hdr_white: f32,
     bg_primary: vec4<f32>,
     bg_secondary: vec4<f32>,
     original_size: vec2<f32>,
     split_origin: vec2<f32>,
     split_normal: vec2<f32>,
     split_offset: vec2<f32>,
+    lut: vec4<f32>,
+    frame_curve: vec4<f32>,
+    frame_to_srgb: mat3x3<f32>,
+    linear_max: f32,
     peak: vec4<f32>,
     peak_color: vec4<f32>,
     // the focus map: x is 1 while it is the shown photo's, y its number of levels; and the matrix rows
@@ -25,9 +29,10 @@ struct Transform {
 @group(0) @binding(1) var tex: texture_2d<f32>;
 @group(0) @binding(2) var samp: sampler;
 @group(0) @binding(3) var original_tex: texture_2d<f32>;
+@group(0) @binding(4) var color_lut: texture_3d<f32>;
 // how blurred each edge of the photo is (see render/focus_map.rs): the blur in 32nds of a pixel, 255 for
 // no edge, with a level per halving, each the sharpest of the 2x2 below it
-@group(0) @binding(4) var focus_map: texture_2d<f32>;
+@group(0) @binding(5) var focus_map: texture_2d<f32>;
 
 struct VertexOutput {
     @builtin(position) pos: vec4<f32>,
@@ -199,6 +204,27 @@ fn map_blur(texel: vec2<f32>, footprint: f32) -> f32 {
     return code / 32.0;
 }
 
+fn frame_to_linear(encoded: vec3<f32>) -> vec3<f32> {
+    let curve = transform.frame_curve;
+    let value = max(encoded, vec3<f32>(0.0));
+    let toe = value / max(curve.z, 0.000001);
+    let power = pow((value + curve.y) / (1.0 + curve.y), vec3<f32>(1.0 / curve.x));
+    return select(power, toe, value <= vec3<f32>(curve.w * curve.z));
+}
+
+fn present(color: vec4<f32>) -> vec4<f32> {
+    if (transform.hdr_white > 0.0) {
+        let linear = transform.frame_to_srgb * frame_to_linear(color.rgb) * transform.hdr_white;
+        return vec4<f32>(min(linear, vec3<f32>(transform.linear_max)), color.a);
+    }
+    if (transform.lut.x > 0.0) {
+        let shaped = pow(frame_to_linear(min(color.rgb, vec3<f32>(1.0))), vec3<f32>(transform.lut.z));
+        let position = shaped * transform.lut.x + transform.lut.y;
+        return vec4<f32>(textureSampleLevel(color_lut, samp, position, 0.0).rgb, color.a);
+    }
+    return color;
+}
+
 @fragment
 fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     // how many texels of the focus map one screen pixel spans: read first, while every pixel of the quad
@@ -210,20 +236,20 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     let uv = select(in.uv, in.uv + transform.split_offset / transform.rect.zw, is_original);
 
     if (uv.x < 0.0 || uv.x > 1.0 || uv.y < 0.0 || uv.y > 1.0) {
-        return transform.bg_secondary;
+        return present(transform.bg_secondary);
     }
 
     if (is_original) {
-        return sample_layer(original_tex, uv, transform.original_size, transform.original_size);
+        return present(sample_layer(original_tex, uv, transform.original_size, transform.original_size));
     }
     let colour = sample_layer(tex, uv, transform.image_size, transform.texture_size);
     // Nothing is marked until the photo's focus map is there and fits the picture shown: marks read some
     // other way first and then replaced would be two different answers in a second.
     if (transform.peak.x <= 0.0 || transform.peak_map.x <= 0.5) {
-        return colour;
+        return present(colour);
     }
     // over the edited side only: the point of it is to judge the picture being worked on
     let strength = map_peak(map_blur(map_at, footprint), peak_detail(uv));
     let marked = mix(colour.rgb, transform.peak_color.rgb, strength * transform.peak.x);
-    return vec4<f32>(marked, colour.a);
+    return present(vec4<f32>(marked, colour.a));
 }

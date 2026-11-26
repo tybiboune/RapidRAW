@@ -13,7 +13,11 @@
 use std::borrow::Cow;
 use std::collections::hash_map::DefaultHasher;
 
-use image::DynamicImage;
+use glam::{Mat3, Vec3};
+use image::{DynamicImage, Rgb32FImage};
+use rayon::prelude::*;
+
+use crate::render::color_space::{srgb_to_working, working_to_srgb};
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Method {
@@ -80,17 +84,105 @@ pub fn hash_inputs(adjustments: &serde_json::Value, hasher: &mut DefaultHasher, 
 }
 
 /// The picture with its skin retouched the way asked for, or as it was.
+///
+/// The picture comes in the working space (Rec.2020 primaries): linear for a raw, encoded with the sRGB curve
+/// otherwise. Each retouch finds what it works on - the skin's colour, its redness, its spots - with numbers
+/// made for sRGB, so it is given the picture in sRGB primaries, in the same encoding, and only what it
+/// changed is taken back to the working space: a colour sRGB cannot hold stays as it was wherever nothing
+/// was done to it.
 pub fn apply<'a>(
     base: Cow<'a, DynamicImage>,
     path: &str,
     is_raw: bool,
     adjustments: &serde_json::Value,
 ) -> Cow<'a, DynamicImage> {
-    match Method::of(adjustments) {
-        Method::Renewal => super::renewal::apply(base, path, is_raw, adjustments),
-        Method::DodgeBurn => super::dodge_burn::apply(base, path, is_raw, adjustments),
-        Method::Ai => super::ai_retouch::apply(base, is_raw, adjustments),
+    let method = Method::of(adjustments);
+    let enabled = match method {
+        Method::Renewal => super::renewal::is_enabled(adjustments),
+        Method::DodgeBurn => super::dodge_burn::is_enabled(adjustments),
+        Method::Ai => super::ai_retouch::is_enabled(adjustments),
+    };
+    if !enabled {
+        return base;
     }
+    let working = base.to_rgb32f();
+    let srgb = DynamicImage::ImageRgb32F(convert(&working, working_to_srgb(), is_raw));
+    let retouched = match method {
+        Method::Renewal => super::renewal::apply(Cow::Borrowed(&srgb), path, is_raw, adjustments),
+        Method::DodgeBurn => {
+            super::dodge_burn::apply(Cow::Borrowed(&srgb), path, is_raw, adjustments)
+        }
+        Method::Ai => super::ai_retouch::apply(Cow::Borrowed(&srgb), is_raw, adjustments),
+    };
+    let Cow::Owned(retouched) = retouched else {
+        return base;
+    };
+    let retouched = retouched.into_rgb32f();
+    let Some(srgb) = srgb.as_rgb32f() else {
+        return base;
+    };
+    if retouched.dimensions() != working.dimensions() {
+        return Cow::Owned(DynamicImage::ImageRgb32F(convert(
+            &retouched,
+            srgb_to_working(),
+            is_raw,
+        )));
+    }
+    Cow::Owned(DynamicImage::ImageRgb32F(add_change(
+        working, srgb, &retouched, is_raw,
+    )))
+}
+
+/// The picture taken through `matrix` (from one set of primaries to another), linear or in the sRGB curve.
+fn convert(image: &Rgb32FImage, matrix: Mat3, linear: bool) -> Rgb32FImage {
+    let mut out = image.clone();
+    out.par_chunks_exact_mut(3)
+        .for_each(|pixel| pixel.copy_from_slice(&through(matrix, pixel, linear)));
+    out
+}
+
+/// The working picture with what the retouch changed, in sRGB primaries, added in the working space.
+fn add_change(
+    mut working: Rgb32FImage,
+    before: &Rgb32FImage,
+    after: &Rgb32FImage,
+    linear: bool,
+) -> Rgb32FImage {
+    let back = srgb_to_working();
+    working
+        .par_chunks_exact_mut(3)
+        .zip(before.par_chunks_exact(3))
+        .zip(after.par_chunks_exact(3))
+        .for_each(|((pixel, before), after)| {
+            if before == after {
+                return;
+            }
+            let (from, to) = (through(back, before, linear), through(back, after, linear));
+            for c in 0..3 {
+                pixel[c] += to[c] - from[c];
+            }
+        });
+    working
+}
+
+fn through(matrix: Mat3, pixel: &[f32], linear: bool) -> [f32; 3] {
+    let rgb = Vec3::new(pixel[0], pixel[1], pixel[2]);
+    if linear {
+        return (matrix * rgb).to_array();
+    }
+    let decoded = rgb.to_array().map(signed_decode);
+    (matrix * Vec3::from_array(decoded))
+        .to_array()
+        .map(signed_encode)
+}
+
+// the sRGB curve, kept odd so a colour outside the gamut (a negative channel) comes back where it was
+fn signed_decode(c: f32) -> f32 {
+    c.signum() * crate::render::color_space::srgb_decode(c.abs())
+}
+
+fn signed_encode(c: f32) -> f32 {
+    c.signum() * crate::render::color_space::srgb_encode(c.abs())
 }
 
 /// A pixel shown as part of a map: the picture in grey, dimmed, with the map's colour over it as strongly as

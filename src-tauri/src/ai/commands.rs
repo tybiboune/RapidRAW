@@ -456,6 +456,7 @@ impl<'a> DetectionCopies<'a> {
     pub(crate) fn make(&self) -> Vec<(&'static str, DynamicImage)> {
         let base = crate::adjustments::negative_conversion::apply_negative_conversion(
             std::borrow::Cow::Borrowed(self.loaded.image.as_ref()),
+            self.loaded.is_raw,
             self.adjustments,
         );
         let is_raw = crate::adjustments::negative_conversion::effective_is_raw(
@@ -1763,6 +1764,7 @@ mod detection_probe {
         let adapter = pollster::block_on(instance.request_adapter(&Default::default()))
             .expect("no wgpu adapter");
         let limits = adapter.limits();
+        let backend = adapter.get_info().backend;
         let (device, queue) = pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
             required_limits: limits.clone(),
             ..Default::default()
@@ -1771,6 +1773,7 @@ mod detection_probe {
         crate::render::gpu::context::GpuContext {
             instance,
             adapter,
+            backend,
             device: Arc::new(device),
             queue: Arc::new(queue),
             limits,
@@ -1854,6 +1857,7 @@ mod detection_probe {
                 image: Arc::new(base),
                 is_raw: true,
                 as_shot: crate::decode::as_shot::as_shot(&source),
+                has_gain_map: false,
             };
             let name = std::path::Path::new(path)
                 .file_stem()
@@ -1973,6 +1977,7 @@ mod detection_probe {
                 image: Arc::new(base),
                 is_raw: true,
                 as_shot: crate::decode::as_shot::as_shot(&source),
+                has_gain_map: false,
             };
             let seen = crate::masks::generation::build_converted_source_image(
                 &loaded.image,

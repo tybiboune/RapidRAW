@@ -374,7 +374,6 @@
     },
     "editor": {
       "autoAdjust": "自動調整",
-      "autoLensCorrection": "自動鏡頭校正",
       "autoStraighten": "自動拉直",
       "cancel": "取消",
       "closeViewer": "關閉第二視窗",
@@ -383,7 +382,6 @@
       "convertBlackWhite": "轉換為黑白",
       "convertNegative": "轉換負片",
       "copyAdjustments": "複製調整",
-      "cullImage": "自動篩選",
       "denoise": "降噪",
       "editImage": "編輯影像",
       "editIn": "在其他程式中編輯",
@@ -392,6 +390,7 @@
       "flagPick": "留用",
       "flagReject": "已拒絕",
       "frameImage": "邊框編輯器",
+      "lensCorrection": "鏡頭校正",
       "mergeHdr": "合併為 HDR",
       "noLabel": "無標籤",
       "noRating": "無評分",
@@ -404,6 +403,7 @@
       "redo": "重做",
       "removeBlackWhite": "移除黑白",
       "removeDenoise": "移除降噪",
+      "removeLensCorrection": "移除鏡頭校正",
       "removeNegativeConversion": "移除負片轉換",
       "removeSuperResolution": "移除 RapidRes",
       "resetAdjustments": "重置調整",
@@ -454,8 +454,6 @@
       "addToAlbum": "新增到相簿",
       "autoAdjust_one": "自動調整",
       "autoAdjust_other": "自動調整",
-      "autoLensCorrection_one": "自動鏡頭校正",
-      "autoLensCorrection_other": "自動鏡頭校正",
       "autoStraighten_one": "自動拉直",
       "autoStraighten_other": "自動拉直",
       "collage_one": "邊框編輯器",
@@ -476,6 +474,8 @@
       "enable": "啟用",
       "exportImage_one": "匯出影像",
       "exportImage_other": "匯出 {{count}} 張影像",
+      "lensCorrection_one": "鏡頭校正",
+      "lensCorrection_other": "鏡頭校正",
       "noAlbums": "無可用相簿",
       "pasteAdjustments_one": "貼上調整",
       "pasteAdjustments_other": "貼上調整到 {{count}} 張影像",
@@ -1042,6 +1042,9 @@
         "masks": "遮色片"
       },
       "title": "預設",
+      "toasts": {
+        "importFailed": "匯入 {{fileName}} 失敗: {{error}}"
+      },
       "tooltips": {
         "explore": "探索社群預設",
         "export": "將所有預設匯出為 .rrpreset 檔案",
@@ -1077,13 +1080,14 @@
     },
     "toolbar": {
       "history": "歷史記錄",
-      "switchToVariant": "Switch to {{label}}",
+      "switchToVariant": "切換到 {{label}}",
       "tooltips": {
         "aperture": "光圈",
         "backToLibrary": "返回相簿",
         "compare": "前後對比（B）或模式（右鍵）",
         "focalLength": "焦距",
         "fullscreen": "切換全屏（F）",
+        "hdr": "在此螢幕上顯示 HDR，除非開啟 HDR 輸出，否則不影響匯出",
         "iso": "ISO",
         "redo": "重做（Ctrl+Y）或歷史記錄（右鍵單擊）",
         "shutterSpeed": "快門速度",
@@ -1127,6 +1131,13 @@
       "mb": "MB",
       "tb": "TB"
     },
+    "conflict": {
+      "createUnique": "保留兩者 (_1, _2)",
+      "label": "檔案已存在時",
+      "overwrite": "覆蓋",
+      "overwriteIfChanged": "有變更時覆蓋",
+      "skip": "略過"
+    },
     "destination": {
       "customFolder": "自訂資料夾",
       "originalFolder": "原始影像資料夾",
@@ -1140,7 +1151,15 @@
       "selectFolderTitle_other": "選擇資料夾以匯出 {{count}} 張影像"
     },
     "file": {
+      "colorSpace": "色彩空間",
       "dpi": "DPI",
+      "hdr": "HDR 輸出",
+      "hdrHeadroom": "HDR 餘裕",
+      "hdrHeadroomHint": "匯出中亮部可以有多亮。2 EV 適合大多數螢幕。",
+      "hdrJpegHint": "為 HDR 螢幕加入增益圖。其他螢幕顯示一般照片。",
+      "hdrJxlHint": "真正的 HDR 檔案（PQ、Rec. 2020）。需要支援 HDR 的檢視器。",
+      "hdrNoPreview": "此螢幕無法顯示 HDR。",
+      "hdrPreviewOff": "在工具列中開啟 HDR 即可預覽。",
       "quality": "品質",
       "qualityLossless": "品質（無損）",
       "resolution": "解析度",
@@ -1187,6 +1206,7 @@
       "watermark": "水印"
     },
     "status": {
+      "allSkipped": "已略過所有影像",
       "cancelExport": "取消匯出",
       "cancelled": "匯出已取消",
       "cancelling": "正在取消匯出…",
@@ -1203,7 +1223,8 @@
       "failed": "匯出失敗",
       "noImageSelected": "未選擇要匯出的影像。",
       "noImagesSelected": "未選擇影像。",
-      "success": "匯出成功！"
+      "success": "匯出成功！",
+      "successWithSkipped": "已匯出 {{exported}} 張，略過 {{skipped}} 張"
     },
     "title": "匯出",
     "watermark": {
@@ -1350,7 +1371,7 @@
       "clickThumbnailsHint": "按一下右側邊欄中的縮圖，將其新增至比較檢視中。",
       "colorLabel": "顏色標籤",
       "dimensions": "尺寸",
-      "editImage": "編輯影像",
+      "doubleClickToEditHint": "按兩下縮圖即可在編輯器中開啟。",
       "focalLength": "焦距",
       "iso": "ISO",
       "metadata": "中繼資料",
@@ -1472,12 +1493,12 @@
         "filterByFileType": "按檔案型別過濾",
         "filterByFlag": "按標記過濾",
         "filterByRating": "按評分過濾",
-        "groupEditedFiles": "Include edited files in groups",
-        "groupIgnoreMetadata": "Ignore mismatched EXIF dates",
-        "groupOff": "Off",
-        "groupPreferJpeg": "Prefer JPEG",
-        "groupPreferRaw": "Prefer RAW",
-        "groupRawJpeg": "Group RAW + JPEG",
+        "groupEditedFiles": "將已編輯的檔案納入分組",
+        "groupIgnoreMetadata": "忽略不一致的 EXIF 日期",
+        "groupOff": "關閉",
+        "groupPreferJpeg": "優先 JPEG",
+        "groupPreferRaw": "優先 RAW",
+        "groupRawJpeg": "RAW + JPEG 分組",
         "metadataAlways": "始終",
         "metadataHover": "懸停時",
         "metadataOff": "關閉",
@@ -1533,6 +1554,7 @@
       },
       "openInLibrary": "在圖庫中開啟",
       "recent": "最近",
+      "skipped_other": "已略過 {{count}} 張",
       "title": "工作"
     },
     "reject": {
@@ -1787,38 +1809,27 @@
       "title": "Adobe DNG Converter needed"
     },
     "focusStack": {
-      "cancel": "取消",
-      "close": "關閉",
       "depthMap": "深度圖",
       "description": "將多張不同對焦距離的影像合併為一張完美清晰的影像。",
       "descriptionWithCount_one": "將 {{count}} 張不同對焦距離的影像合併為一張完美清晰的影像。",
       "descriptionWithCount_other": "將 {{count}} 張不同對焦距離的影像合併為一張完美清晰的影像。",
       "failed": "焦距合成失敗",
-      "initializing": "正在初始化...",
-      "openInEditor": "在編輯器中打開",
-      "result": "結果",
-      "save": "儲存",
+      "method": "方法",
+      "methodDetail": "細節",
+      "methodHint": "細節可保留毛髮和剛毛等最細微的結構。平滑可帶來更柔和的過渡與更少的雜訊。",
+      "methodSmooth": "平滑",
+      "processing": "正在合成焦距",
       "savedSuccess": "焦距合成已成功儲存！",
-      "stacking": "正在合成焦距",
-      "start": "開始",
       "title": "焦距合成"
     },
     "hdr": {
-      "cancel": "取消",
-      "close": "關閉",
       "description": "將您的包圍曝光合併為一張高動態範圍影像。",
       "descriptionWithCount": "將 {{count}} 張包圍曝光合併為一張高動態範圍影像。",
       "descriptionWithCount_one": "將 {{count}} 張包圍曝光合併為一張高動態範圍影像。",
       "descriptionWithCount_other": "將 {{count}} 張包圍曝光合併為一張高動態範圍影像。",
       "failed": "HDR 合併失敗",
-      "initializing": "初始化中...",
-      "merging": "合併 HDR 中",
-      "openInEditor": "在編輯器中開啟",
-      "retry": "重試",
-      "save": "儲存",
+      "processing": "合併 HDR 中",
       "savedSuccess": "HDR 儲存成功！",
-      "speedNotice": "這可能需要幾分鐘，具體取決於曝光影像的數量和大小。",
-      "start": "開始",
       "title": "合併為 HDR"
     },
     "importSettings": {
@@ -1867,22 +1878,44 @@
       "zoomInTooltip": "放大",
       "zoomOutTooltip": "縮小"
     },
-    "panorama": {
+    "merge": {
+      "autoCrop": "自動裁切",
+      "autoCropHint": "裁掉未被所有影像覆蓋的邊緣。",
       "cancel": "取消",
       "close": "關閉",
-      "descCount": "將 {{count}} 張重疊影像合併為一張無縫全景圖。",
-      "descCount_one": "將 {{count}} 張重疊影像合併為一張無縫全景圖。",
-      "descCount_other": "將 {{count}} 張重疊影像合併為一張無縫全景圖。",
-      "descGeneric": "將您的重疊影像合併為一張無縫全景圖。",
-      "failed": "全景圖拼接失敗",
+      "excludedImages": "{{count}} 張影像無法比對，已被排除",
+      "excludedImages_one": "{{count}} 張影像無法比對，已被排除",
+      "excludedImages_other": "{{count}} 張影像無法比對，已被排除",
       "initializing": "初始化中...",
       "openInEditor": "在編輯器中開啟",
-      "retry": "重試",
+      "outputInfo": "{{images}} 張影像 · {{width}} × {{height}} 像素",
+      "result": "結果",
       "save": "儲存",
-      "savedSuccess": "全景圖儲存成功！",
+      "saving": "正在儲存…",
       "speedNotice": "這可能需要幾分鐘，具體取決於影像的數量和大小。",
       "start": "開始",
-      "stitchingProgress": "拼接全景圖中",
+      "unalignedImages_one": "{{count}} 張影像無法對齊",
+      "unalignedImages_other": "{{count}} 張影像無法對齊"
+    },
+    "panorama": {
+      "autoProjectionUsed": "使用中：{{projection}}",
+      "boundaryWarp": "邊界變形",
+      "boundaryWarpHint": "延展邊緣以填滿畫面，而非將其裁掉。",
+      "description": "將您的重疊影像合併為一張無縫全景圖。",
+      "descriptionWithCount": "將 {{count}} 張重疊影像合併為一張無縫全景圖。",
+      "descriptionWithCount_one": "將 {{count}} 張重疊影像合併為一張無縫全景圖。",
+      "descriptionWithCount_other": "將 {{count}} 張重疊影像合併為一張無縫全景圖。",
+      "exposureCompensation": "曝光補償",
+      "exposureCompensationHint": "統一各影像之間的曝光、白平衡與暗角。",
+      "failed": "全景圖拼接失敗",
+      "processing": "拼接全景圖中",
+      "projection": "投影",
+      "projectionAuto": "自動",
+      "projectionCylindrical": "圓柱",
+      "projectionFallback": "{{requested}} 無法涵蓋此視野，正在使用 {{projection}}",
+      "projectionPerspective": "透視",
+      "projectionSpherical": "球面",
+      "savedSuccess": "全景圖儲存成功！",
       "title": "拼接全景圖"
     },
     "renameAlbum": {
@@ -2268,12 +2301,34 @@
       "alwaysDecodeRawLabel": "始終為縮圖解碼 RAW",
       "backend": "處理後端",
       "backendDesc": "選擇圖形 API。推薦使用「自動」。在某些系統上可能解決崩潰問題。",
+      "backendFallback": "{{failed}} 在此 GPU 上啟動時當機，因此暫時使用 {{using}}。",
+      "backendFallbackRetry": "重新嘗試 {{failed}}",
+      "backendFallbackRetryPending": "下次啟動時將重新嘗試 {{failed}}。",
       "backends": {
         "auto": "自動",
         "dx12": "DirectX 12",
         "gl": "OpenGL",
         "metal": "Metal",
         "vulkan": "Vulkan"
+      },
+      "colorManagement": {
+        "chooseProfile": "選擇描述檔",
+        "modeAuto": "自動（系統描述檔）",
+        "modeCustom": "自訂 ICC 描述檔",
+        "modeOff": "關閉",
+        "previewGamut": "預覽色域",
+        "previewGamutDesc": "請與匯出所用的色彩空間保持一致。sRGB 顯示 sRGB 或網頁匯出的效果。廣色域還會顯示螢幕能呈現的超出 sRGB 的顏色，例如 Display P3 或 Adobe RGB 匯出。",
+        "previewGamutSrgb": "sRGB",
+        "previewGamutWide": "廣色域",
+        "previewGamutWideSpace": "廣色域（{{space}}）",
+        "profile": "螢幕描述檔",
+        "profileDesc": "將編輯器預覽轉換為螢幕的色彩描述檔，讓顏色在已校色與廣色域螢幕上正確顯示。匯出不受影響。",
+        "statusInvalid": "無法載入此描述檔。",
+        "statusNone": "找不到螢幕描述檔。預覽以 sRGB 顯示。",
+        "statusProfile": "正在使用 {{name}}。",
+        "statusSystem": "顏色由作業系統管理。",
+        "statusUnavailable": "色彩管理需要 WGPU 直接渲染。",
+        "wideGamut": "廣色域預覽（{{space}}）。"
       },
       "defaultAdjustments": {
         "addCamera": "新增相機…",
@@ -2300,6 +2355,9 @@
         "sliderResetNeutral": "中性值",
         "title": "預設調整"
       },
+      "display": {
+        "title": "顯示"
+      },
       "dynamicDesc": "編輯器根據顯示器實際畫素密度渲染預覽。這確保每個細節都以 1:1 畫素精度呈現，在縮放和檢查焦點時提供最大清晰度。",
       "editIn": {
         "add": "新增程式",
@@ -2317,6 +2375,15 @@
         "title": "在其他程式中編輯"
       },
       "enableLivePreviews": "啟用即時預覽",
+      "hdr": {
+        "gainMaps": "HDR 相片",
+        "gainMapsAuto": "自動",
+        "gainMapsDesc": "含有 HDR 增益圖的照片（例如新款手機拍攝的照片）會在螢幕允許的範圍內顯示 HDR 亮部。HDR 匯出會使用匯出設定中的餘裕，其他匯出則顯示一般照片。「一律為 SDR」會忽略 HDR 資料。",
+        "gainMapsNever": "一律以 SDR 開啟",
+        "statusActive": "此螢幕處於 HDR 模式。在編輯器工具列中開啟 HDR 即可預覽。",
+        "statusInactive": "此顯示器未處於 HDR 模式。請在系統顯示設定中開啟 HDR 以查看效果。",
+        "statusUnsupported": "HDR 需要 WGPU 直接渲染；在 Linux 上還需要支援 HDR 的 Wayland 工作階段。"
+      },
       "highDpi": "高 DPI 渲染",
       "highDpiDesc": "以螢幕原生 {{dpr}}x 物理畫素解析度渲染預覽。產生最清晰的預覽，但會顯著增加記憶體使用。",
       "highDpiDescStandard": "此設定僅影響高 DPI 顯示器。您當前的顯示器為標準解析度。",
@@ -2324,7 +2391,7 @@
       "imageCacheDesc": "儲存在記憶體中的全解析度影像最大數量。較高的值可使最近編輯的影像之間切換即時完成，但會顯著增加記憶體使用。",
       "images": "張影像",
       "linuxCompat": "Linux 相容模式",
-      "linuxCompatDesc": "啟用針對常見 GPU 驅動和顯示伺服器問題的相容方案。停用此選項以啟用完整的 GPU 加速。",
+      "linuxCompatDesc": "透過共享記憶體而非 GPU 緩衝區共享來傳輸網頁視圖，以規避視窗空白等 GPU 驅動問題。X11 上的 Nvidia GPU 已自動套用此方案，因此僅在視窗仍然空白或顯示異常時才啟用此選項。",
       "linuxCompatLabel": "啟用相容模式",
       "livePreviewQuality": "即時預覽品質",
       "livePreviewQualityDesc": "控制拖動滑桿時影像的解析度和壓縮。較低的品質可顯著提高反應速度。",
@@ -2355,12 +2422,15 @@
         "enableAppleRaw9": "對 RAW 檔案使用 Apple RAW 9",
         "enableBaselineExposure": "對 RAW 檔案套用基礎曝光",
         "enableHighlightPreservation": "補償相機的高光保護模式",
+        "enableHotPixels": "移除熱像素與壞點",
         "enablePreprocessingNonRaws": "對非 RAW 影像啟用",
         "enableTonemapperOverride": "啟用色調映射覆蓋",
         "highlightPreservation": "高光保護補償",
         "highlightPreservationDesc": "恢復相機高光保護模式（如富士 DR200/DR400、Nikon 動態 D-Lighting）降低的曝光。",
         "highlightRecovery": "RAW 亮部恢復",
         "highlightRecoveryDesc": "控制從 RAW 檔案的裁剪亮部中恢復細節的程度。較高的值可恢復更多細節，但可能引入紫色偽影。",
+        "hotPixels": "熱像素移除",
+        "hotPixelsDesc": "解碼 RAW 檔案時自動修復感光元件上的熱像素、卡住像素與壞點。僅替換孤立的單一像素，因此星星與細小高光會被保留。",
         "linearOptions": {
           "auto": "自動",
           "gamma": "應用 Gamma",
@@ -2386,6 +2456,16 @@
         "high": "高品質",
         "performance": "效能優先"
       },
+      "rawDecoding": "RAW 解碼",
+      "rawDecodingDesc": "選擇在何處解碼 RAW 檔案。「自動」使用 GPU，並在 GPU 無法處理您的影像時切換到 CPU。「GPU」始終先嘗試 GPU。「CPU」較慢，但適用於所有系統。",
+      "rawDecodingFallback": "GPU 處理大型 RAW 檔案失敗，因此 {{megapixels}} MP 以上的檔案暫時在 CPU 上顯影。",
+      "rawDecodingFallbackRetry": "重新嘗試 GPU",
+      "rawDecodingOptions": {
+        "auto": "自動",
+        "cpu": "CPU",
+        "gpu": "GPU"
+      },
+      "rawDecodingUnavailable": "此 GPU 無法執行 RAW 解碼，因此 RAW 檔案在 CPU 上解碼。",
       "renderScale": "渲染解析度縮放",
       "renderScaleDesc": "相對於顯示器縮放渲染解析度。較低的值可在高解析度螢幕上提高效能，但會犧牲一些清晰度。",
       "restartRequired": "處理引擎的更改需要重啟應用程式才能生效。",

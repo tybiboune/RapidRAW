@@ -14,6 +14,10 @@
 // Brightness and colour are kept apart throughout. Redness comes out along the colour axes alone and
 // leaves the brightness exactly as it was: correct a flush by darkening it and the face goes grey,
 // which is the usual giveaway.
+//
+// The picture comes in the working space (Rec.2020 primaries). Every colour here is read in sRGB
+// primaries, which the YCbCr axes and every threshold below were made for, and only the change is taken
+// back to the working space, so a colour sRGB cannot hold is not clipped where nothing was done to it.
 
 // A pair of numbers sits on an eight-byte boundary here, so the order is the layout and the Rust copy
 // of this struct is written to come out the same.
@@ -114,7 +118,7 @@ fn sk_stats(@builtin(local_invocation_index) li: u32) {
         let uv = (vec2<f32>(xy) + 0.5) / vec2<f32>(size);
         let skin = tap_sample(t1, tap_uv(uv, params.face_size)).x;
         if (skin < SKIN_HERE) { continue; }
-        let ycc = to_ycc(textureLoad(t0, xy, 0).rgb);
+        let ycc = to_ycc(WORKING_TO_SRGB * textureLoad(t0, xy, 0).rgb);
         atomicAdd(&cb_bins[bin_of(ycc.y)], 1u);
         atomicAdd(&cr_bins[bin_of(ycc.z)], 1u);
         mine += 1u;
@@ -167,7 +171,7 @@ fn sk_split(@builtin(global_invocation_id) id: vec3<u32>) {
     let p = vec2<i32>(id.xy);
     let uv = (vec2<f32>(id.xy) + 0.5) / vec2<f32>(params.grid.dst);
     let skin = clamp(tap_sample(t1, tap_uv(uv, params.face_size)).x, 0.0, 1.0);
-    let ycc = to_ycc(textureLoad(t0, p, 0).rgb);
+    let ycc = to_ycc(WORKING_TO_SRGB * textureLoad(t0, p, 0).rgb);
     textureStore(out_f32, p, vec4<f32>((ycc.x - 16.0) / 219.0 * skin, ycc.y * skin, ycc.z * skin, skin));
 }
 
@@ -607,6 +611,7 @@ fn sk_apply(@builtin(global_invocation_id) id: vec3<u32>) {
     if (outside(id)) { return; }
     let p = vec2<i32>(id.xy);
     let texel = textureLoad(t0, p, 0);
+    let srgb = WORKING_TO_SRGB * texel.rgb;
     // The maps were made on the copy the faults are looked for on, which is smaller than the picture
     // when the picture is large: each is read at this pixel's place on it. When the two are the same
     // size the read lands exactly on the texel.
@@ -615,14 +620,14 @@ fn sk_apply(@builtin(global_invocation_id) id: vec3<u32>) {
     let maps = tap_sample(t1, at);
     let skin = maps.w;
     if (params.show_map > 0u) {
-        textureStore(out_f16, p, vec4<f32>(map_shown(texel.rgb, at, maps), texel.a));
+        textureStore(out_f16, p, vec4<f32>(SRGB_TO_WORKING * map_shown(srgb, at, maps), texel.a));
         return;
     }
     if (skin <= 0.01) {
         textureStore(out_f16, p, texel);
         return;
     }
-    var ycc = to_ycc(texel.rgb);
+    var ycc = to_ycc(srgb);
     let l0 = (ycc.x - 16.0) / 219.0;
     let fine = tap_sample(t2, at);
     let wide = tap_sample(t3, at);
@@ -779,5 +784,6 @@ fn sk_apply(@builtin(global_invocation_id) id: vec3<u32>) {
 
     let fixed_rgb = to_rgb(level, cb, cr);
     // only as far as the mask says, so the edge of a correction is never a visible border
-    textureStore(out_f16, p, vec4<f32>(mix(texel.rgb, fixed_rgb, skin), texel.a));
+    let change = SRGB_TO_WORKING * ((fixed_rgb - srgb) * skin);
+    textureStore(out_f16, p, vec4<f32>(texel.rgb + change, texel.a));
 }

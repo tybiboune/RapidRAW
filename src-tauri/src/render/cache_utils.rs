@@ -609,6 +609,7 @@ impl DecodeFingerprint {
         let denoised = crate::integrations::dxo::existing_denoised(path)
             .and_then(|dng| dng.metadata().ok())
             .map(|meta| (meta.len(), meta.modified().ok()));
+        settings.remove_hot_pixels.hash(&mut hasher);
         Some(Self {
             len: metadata.len(),
             modified: metadata.modified().ok(),

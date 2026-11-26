@@ -2,6 +2,7 @@ use crate::ai::base_cache::{BaseCache, entry_key, source_string};
 use crate::ai::denoise::DenoiseMethod;
 use crate::app::state::{AppState, LoadedImage};
 use crate::render::adjustment_utils::is_effect_enabled;
+use crate::render::color_space::working_luma;
 use image::imageops::{self, FilterType};
 use image::{DynamicImage, GenericImageView, Rgb32FImage};
 use rayon::prelude::*;
@@ -10,9 +11,9 @@ use std::path::Path;
 use std::sync::{Arc, Mutex};
 use tauri::Manager;
 
-const MODEL_TAG: &str = "upscale-v3";
+const MODEL_TAG: &str = "upscale-v4";
 // the four-times model is another network, so its results are cached apart
-const MODEL_TAG_4X: &str = "upscale4-realplksr-v1";
+const MODEL_TAG_4X: &str = "upscale4-realplksr-v2";
 /// The longest side an upscaled picture may have: the render works on GPU textures, which most cards cap
 /// at this many pixels. A picture that would come out larger is upscaled two times instead of four.
 const MAX_OUTPUT_SIDE: u32 = 16384;
@@ -391,10 +392,6 @@ fn upsample_add(dst: &mut [f32], src: &[f32], width: usize, height: usize, facto
         });
 }
 
-fn luma(p: &[f32]) -> f32 {
-    0.2126 * p[0] + 0.7152 * p[1] + 0.0722 * p[2]
-}
-
 fn detail_amount(adjustments: &serde_json::Value) -> f32 {
     (adjustments["aiUpscaleDetail"].as_f64().unwrap_or(30.0) as f32 / 100.0).clamp(0.0, 1.0)
 }
@@ -477,6 +474,7 @@ impl DetailField<'_> {
         let blend = &scratch.blend;
         let signal = scratch.signal[span.clone()].iter_mut();
         let residual = scratch.residual[span].iter_mut();
+        let [luma_r, luma_g, luma_b] = working_luma();
         for (ox, ((pixel, s), r)) in pixels
             .as_chunks::<3>()
             .0
@@ -487,7 +485,8 @@ impl DetailField<'_> {
         {
             let (x0, x1, wx) = taps(ox, self.width, self.factor);
             let up = blend[x0] + (blend[x1] - blend[x0]) * wx;
-            *s = luma(pixel).max(0.0).sqrt();
+            let luma = luma_r * pixel[0] + luma_g * pixel[1] + luma_b * pixel[2];
+            *s = luma.max(0.0).sqrt();
             *r = *s - up.max(0.0).sqrt();
         }
     }
@@ -533,7 +532,12 @@ fn soft_limit(value: f32, lo: f32, hi: f32, knee: f32) -> f32 {
 }
 
 fn enhance_detail(out: &mut Rgb32FImage, source: &Rgb32FImage, amount: f32) {
-    let source_luma: Vec<f32> = source.as_raw().par_chunks_exact(3).map(luma).collect();
+    let [luma_r, luma_g, luma_b] = working_luma();
+    let source_luma: Vec<f32> = source
+        .as_raw()
+        .par_chunks_exact(3)
+        .map(|p| luma_r * p[0] + luma_g * p[1] + luma_b * p[2])
+        .collect();
     let field = DetailField {
         source_luma: &source_luma,
         width: source.width() as usize,

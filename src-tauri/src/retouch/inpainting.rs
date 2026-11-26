@@ -8,14 +8,16 @@ use serde_json::Value;
 use crate::ai::{connector, lama, models};
 use crate::app::settings::load_settings;
 use crate::app::state::AppState;
-use crate::decode::image_loader::prepare_base_image_cow;
+use crate::decode::image_loader::prepare_base_image;
 use crate::masks::generation::{
     AiPatchDefinition, MaskDefinition, SubMask, generate_mask_bitmap,
     resolve_warped_image_for_masks,
 };
 use crate::masks::morphology::{gaussian_blur_mask, grayscale_dilate};
 use crate::render::geometry::{Crop, inverse_transform_mask, inverse_transform_point};
-use crate::render::image_processing::apply_linear_to_srgb;
+use crate::render::image_processing::{
+    apply_linear_to_srgb, apply_working_display_to_srgb, working_display_image_to_srgb8,
+};
 use crate::render::preview::{get_or_compute_stage, patched_cache_key};
 use crate::retouch::touch_up::{LiquifyMode, LiquifyPoint, LiquifyStroke};
 
@@ -57,7 +59,7 @@ fn prepare_source_image(
         &source_image_adjustments,
     );
 
-    let composited = prepare_base_image_cow(
+    let composited = prepare_base_image(
         &loaded_image.image,
         &loaded_image.path,
         &source_image_adjustments,
@@ -216,6 +218,7 @@ fn encode_patch_result(
     width: u32,
     height: u32,
     is_srgb: bool,
+    is_working_space: bool,
     quality: u8,
     mask_as_png: bool,
 ) -> Result<Value, String> {
@@ -250,7 +253,8 @@ fn encode_patch_result(
         "offsetY": offset_y,
         "width": width,
         "height": height,
-        "isSrgbEncoded": is_srgb
+        "isSrgbEncoded": is_srgb,
+        "primaries": is_working_space.then_some(crate::decode::image_loader::PATCH_PRIMARIES)
     }))
 }
 
@@ -462,6 +466,7 @@ pub async fn generate_manual_cleanup_patch(
         crop_w,
         crop_h,
         is_raw,
+        true,
         100,
         false,
     )?;
@@ -495,8 +500,9 @@ pub async fn invoke_generative_replace_with_mask_def(
 
     let settings = load_settings(app_handle.clone()).unwrap_or_default();
 
-    let (source_image, is_raw) =
+    let (mut source_image, is_raw) =
         prepare_source_image(&patch_definition.id, &current_adjustments, &state)?;
+    apply_working_display_to_srgb(&mut source_image, false);
     let (img_w, img_h) = source_image.dimensions();
 
     let orientation_steps = current_adjustments
@@ -976,6 +982,7 @@ fn encode_generated_patch(
         crop_w,
         crop_h,
         is_raw,
+        false,
         95,
         true,
     )
@@ -1090,6 +1097,7 @@ pub async fn generate_liquify_patch(
         color_image.width(),
         color_image.height(),
         is_raw,
+        true,
         100,
         true,
     )
@@ -1159,6 +1167,7 @@ pub async fn generate_retouch_patch(
         crop_w,
         crop_h,
         is_raw,
+        true,
         100,
         true,
     )
@@ -1219,7 +1228,9 @@ pub async fn generate_face_restore_patch(
         .map_err(|_| "No brush strokes found for Restore Face.".to_string())?;
     let (min_x, max_x, min_y, max_y) = bounds;
 
-    // the faces are found on the same picture the patch is made from
+    // The face models learned on sRGB pictures: the faces are found and restored on the picture in sRGB,
+    // and the patch says so. The faces are found on the same picture the patch is made from.
+    let source_image = Arc::new(in_srgb(&source_image));
     let picture = DynamicImage::ImageRgb8(source_image.as_ref().clone());
     let without_patch = adjustments_without_patch(&patch_definition.id, &current_adjustments);
     let key = format!("{}#faces", patched_cache_key(&path, &without_patch));
@@ -1274,10 +1285,17 @@ pub async fn generate_face_restore_patch(
         crop_w,
         crop_h,
         is_raw,
+        false,
         100,
         true,
     )
     .map(|v| v.to_string())
+}
+
+/// The picture a patch is made from (the working space in the sRGB curve) in sRGB, for the networks that
+/// learned on sRGB pictures.
+fn in_srgb(source: &RgbImage) -> RgbImage {
+    working_display_image_to_srgb8(&DynamicImage::ImageRgb8(source.clone()))
 }
 
 // What every brushed repair starts from: the picture the patch is made on, the brushed mask and its
@@ -1335,7 +1353,13 @@ impl Brushed {
         self.number(key, default) / 100.0
     }
 
+    /// The patch of a repair made on the picture as it is, in the working space.
     fn patch(&self, color_image: &RgbImage) -> Result<String, String> {
+        self.patch_in(color_image, true)
+    }
+
+    /// `is_working_space` is false for a repair made on the picture in sRGB (see `in_srgb`).
+    fn patch_in(&self, color_image: &RgbImage, is_working_space: bool) -> Result<String, String> {
         let (min_x, max_x, min_y, max_y) = self.bounds;
         let (crop_w, crop_h) = ((max_x - min_x + 1) as u32, (max_y - min_y + 1) as u32);
         let output_mask =
@@ -1349,6 +1373,7 @@ impl Brushed {
             crop_w,
             crop_h,
             self.is_raw,
+            is_working_space,
             100,
             true,
         )
@@ -1410,6 +1435,8 @@ pub async fn generate_deblur_patch(
             tiles[0]
         ),
     }
+    // NAFNet and Restormer learned on sRGB pictures
+    let source = Arc::new(in_srgb(&brushed.source));
     let mut last_error = String::new();
     for tile in tiles
         .into_iter()
@@ -1423,14 +1450,14 @@ pub async fn generate_deblur_patch(
         )
         .await
         .map_err(|e| e.to_string())?;
-        let (source, bounds) = (brushed.source.clone(), brushed.bounds);
+        let (source, bounds) = (source.clone(), brushed.bounds);
         let result = tauri::async_runtime::spawn_blocking(move || {
             crate::retouch::repair::deblur(&source, bounds, &session, scale, strength, tile)
         })
         .await
         .map_err(|e| e.to_string())?;
         match result {
-            Ok(color_image) => return brushed.patch(&color_image),
+            Ok(color_image) => return brushed.patch_in(&color_image, false),
             Err(e) if e.downcast_ref::<models::GpuOutOfMemory>().is_some() => {
                 log::info!("Deblur: the GPU gave up at {tile} px tiles, trying smaller");
                 last_error = e.to_string();

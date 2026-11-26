@@ -374,7 +374,6 @@
     },
     "editor": {
       "autoAdjust": "Ajustament automàtic",
-      "autoLensCorrection": "Correcció d'objectiu automàtica",
       "autoStraighten": "Redreçar automàticament",
       "cancel": "Cancel·lar",
       "closeViewer": "Tanca la segona finestra",
@@ -383,7 +382,6 @@
       "convertBlackWhite": "Convertir a blanc i negre",
       "convertNegative": "Convertir negatiu",
       "copyAdjustments": "Copiar ajustaments",
-      "cullImage": "Cribratge automàtic",
       "denoise": "Reduir soroll",
       "editImage": "Editar imatge",
       "editIn": "Edita a",
@@ -392,6 +390,7 @@
       "flagPick": "Seleccionada",
       "flagReject": "Rebutjada",
       "frameImage": "Editor de marcs",
+      "lensCorrection": "Correcció de l'objectiu",
       "mergeHdr": "Fusionar a HDR",
       "noLabel": "Sense etiqueta",
       "noRating": "Sense puntuació",
@@ -405,6 +404,7 @@
       "redo": "Refer",
       "removeBlackWhite": "Treure blanc i negre",
       "removeDenoise": "Treure reducció de soroll",
+      "removeLensCorrection": "Treure correcció d'objectiu",
       "removeNegativeConversion": "Treure conversió de negatiu",
       "removeSuperResolution": "Treure RapidRes",
       "resetAdjustments": "Restablir ajustaments",
@@ -459,9 +459,6 @@
       "autoAdjust_one": "Ajustament automàtic",
       "autoAdjust_many": "Ajustament automàtic",
       "autoAdjust_other": "Ajustament automàtic",
-      "autoLensCorrection_one": "Correcció d'objectiu automàtica",
-      "autoLensCorrection_many": "Correcció d'objectiu automàtica",
-      "autoLensCorrection_other": "Correcció d'objectiu automàtica",
       "autoStraighten_one": "Redreçar automàticament",
       "autoStraighten_many": "Redreçar automàticament",
       "autoStraighten_other": "Redreçar automàticament",
@@ -489,6 +486,9 @@
       "exportImage_one": "Exportar imatge",
       "exportImage_many": "Exportar {{count}} imatges",
       "exportImage_other": "Exportar {{count}} imatges",
+      "lensCorrection_one": "Correcció de l'objectiu",
+      "lensCorrection_many": "Correcció de l'objectiu",
+      "lensCorrection_other": "Correcció de l'objectiu",
       "noAlbums": "Cap àlbum disponible",
       "pasteAdjustments_one": "Enganxar ajustaments",
       "pasteAdjustments_many": "Enganxar ajustaments a {{count}} imatges",
@@ -1071,6 +1071,9 @@
         "masks": "Màscares"
       },
       "title": "Ajustos preestablerts",
+      "toasts": {
+        "importFailed": "No s'ha pogut importar {{fileName}}: {{error}}"
+      },
       "tooltips": {
         "explore": "Explorar ajustos de la comunitat",
         "export": "Exportar tots els ajustos preestablerts a un fitxer .rrpreset",
@@ -1113,6 +1116,7 @@
         "compare": "Abans / després (B) o modes (clic dret)",
         "focalLength": "Distància focal",
         "fullscreen": "Alternar pantalla completa (F)",
+        "hdr": "Mostra HDR en aquesta pantalla, les exportacions no canvien si no actives la sortida HDR",
         "iso": "ISO",
         "redo": "Refer (Ctrl+Y) o Historial (Clic dret)",
         "shutterSpeed": "Velocitat d'obturació",
@@ -1156,6 +1160,13 @@
       "mb": "MB",
       "tb": "TB"
     },
+    "conflict": {
+      "createUnique": "Conservar tots dos (_1, _2)",
+      "label": "Si el fitxer existeix",
+      "overwrite": "Sobreescriure",
+      "overwriteIfChanged": "Sobreescriure si ha canviat",
+      "skip": "Ometre"
+    },
     "destination": {
       "customFolder": "Carpeta personalitzada",
       "originalFolder": "Carpeta de la imatge original",
@@ -1170,7 +1181,15 @@
       "selectFolderTitle_other": "Seleccioneu la carpeta per exportar {{count}} imatges"
     },
     "file": {
+      "colorSpace": "Espai de color",
       "dpi": "PPP",
+      "hdr": "Sortida HDR",
+      "hdrHeadroom": "Marge HDR",
+      "hdrHeadroomHint": "Fins on poden brillar les llums a l'exportació. 2 EV va bé per a la majoria de pantalles.",
+      "hdrJpegHint": "Afegeix un mapa de guany per a pantalles HDR. Les altres mostren la foto normal.",
+      "hdrJxlHint": "Fitxer HDR real (PQ, Rec. 2020). Cal un visor HDR.",
+      "hdrNoPreview": "Aquesta pantalla no pot mostrar HDR.",
+      "hdrPreviewOff": "Activa l'HDR a la barra d'eines per previsualitzar-ho.",
       "quality": "Qualitat",
       "qualityLossless": "Qualitat (Sense pèrdua)",
       "resolution": "Resolució",
@@ -1217,6 +1236,7 @@
       "watermark": "Marca d'aigua"
     },
     "status": {
+      "allSkipped": "S'han omès totes les imatges",
       "cancelExport": "Cancel·lar exportació",
       "cancelled": "Exportació cancel·lada",
       "cancelling": "S'està cancel·lant l'exportació…",
@@ -1234,7 +1254,8 @@
       "failed": "L'exportació ha fallat",
       "noImageSelected": "No s'ha seleccionat cap imatge per exportar.",
       "noImagesSelected": "No s'han seleccionat imatges.",
-      "success": "Exportació correcta!"
+      "success": "Exportació correcta!",
+      "successWithSkipped": "{{exported}} exportades, {{skipped}} omeses"
     },
     "title": "Exportar",
     "watermark": {
@@ -1382,7 +1403,7 @@
       "clickThumbnailsHint": "Feu clic a les miniatures a la barra lateral dreta per afegir-les a la vista de comparació.",
       "colorLabel": "Etiqueta de color",
       "dimensions": "Dimensions",
-      "editImage": "Editar imatge",
+      "doubleClickToEditHint": "Feu doble clic en una miniatura per obrir-la a l'editor.",
       "focalLength": "Distància focal",
       "iso": "ISO",
       "metadata": "Metadades",
@@ -1568,6 +1589,9 @@
       },
       "openInLibrary": "Obre a la biblioteca",
       "recent": "Recents",
+      "skipped_one": "omesa: {{count}}",
+      "skipped_many": "omeses: {{count}}",
+      "skipped_other": "omeses: {{count}}",
       "title": "Tasques"
     },
     "reject": {
@@ -1826,40 +1850,29 @@
       "title": "Adobe DNG Converter needed"
     },
     "focusStack": {
-      "cancel": "Cancel·la",
-      "close": "Tanca",
       "depthMap": "Mapa de profunditat",
       "description": "Combina diverses imatges amb diferents distàncies d'enfocament en una sola imatge perfectament nítida.",
       "descriptionWithCount_one": "Combina {{count}} imatge amb diferents distàncies d'enfocament en una sola imatge perfectament nítida.",
       "descriptionWithCount_many": "Combina {{count}} imatges amb diferents distàncies d'enfocament en una sola imatge perfectament nítida.",
       "descriptionWithCount_other": "Combina {{count}} imatges amb diferents distàncies d'enfocament en una sola imatge perfectament nítida.",
       "failed": "S'ha produït un error en l'apilament d'enfocament",
-      "initializing": "Inicialitzant...",
-      "openInEditor": "Obre a l'editor",
-      "result": "Resultat",
-      "save": "Desa",
+      "method": "Mètode",
+      "methodDetail": "Detall",
+      "methodHint": "Detall conserva les estructures més fines com pèls i cerres. Suau ofereix transicions més suaus i menys soroll.",
+      "methodSmooth": "Suau",
+      "processing": "Apilant enfocament",
       "savedSuccess": "L'apilament d'enfocament s'ha desat correctament!",
-      "stacking": "Apilant enfocament",
-      "start": "Inicia",
       "title": "Apilament d'enfocament"
     },
     "hdr": {
-      "cancel": "Cancel·lar",
-      "close": "Tancar",
       "description": "Combineu les exposicions bràqueting en una única imatge d'Alt Rang Dinàmic (HDR).",
       "descriptionWithCount": "Combineu {{count}} exposicions bràqueting en una única imatge d'Alt Rang Dinàmic.",
       "descriptionWithCount_one": "Combineu {{count}} exposició bràqueting en una única imatge d'Alt Rang Dinàmic.",
       "descriptionWithCount_many": "Combineu {{count}} exposicions bràqueting en una única imatge d'Alt Rang Dinàmic.",
       "descriptionWithCount_other": "Combineu {{count}} exposicions bràqueting en una única imatge d'Alt Rang Dinàmic.",
       "failed": "La fusió a HDR ha fallat",
-      "initializing": "S'està inicialitzant...",
-      "merging": "S'està fusionant HDR",
-      "openInEditor": "Obrir a l'editor",
-      "retry": "Tornar-ho a intentar",
-      "save": "Desar",
+      "processing": "S'està fusionant HDR",
       "savedSuccess": "HDR desat correctament!",
-      "speedNotice": "Això pot trigar uns minuts depenent del nombre i la mida de les vostres exposicions.",
-      "start": "Iniciar",
       "title": "Fusionar a HDR"
     },
     "importSettings": {
@@ -1908,23 +1921,47 @@
       "zoomInTooltip": "Apropar",
       "zoomOutTooltip": "Allunyar"
     },
-    "panorama": {
+    "merge": {
+      "autoCrop": "Retall automàtic",
+      "autoCropHint": "Retalla les vores que no cobreixen totes les imatges.",
       "cancel": "Cancel·lar",
       "close": "Tancar",
-      "descCount": "Combineu {{count}} imatges superposades en un panorama perfecte.",
-      "descCount_one": "Combineu {{count}} imatge superposada en un panorama perfecte.",
-      "descCount_many": "Combineu {{count}} imatges superposades en un panorama perfecte.",
-      "descCount_other": "Combineu {{count}} imatges superposades en un panorama perfecte.",
-      "descGeneric": "Combineu les imatges superposades en un panorama perfecte.",
-      "failed": "El panorama ha fallat",
+      "excludedImages": "{{count}} imatges no s'han pogut emparellar i s'han omès",
+      "excludedImages_one": "{{count}} imatge no s'ha pogut emparellar i s'ha omès",
+      "excludedImages_many": "{{count}} d'imatges no s'han pogut emparellar i s'han omès",
+      "excludedImages_other": "{{count}} imatges no s'han pogut emparellar i s'han omès",
       "initializing": "S'està inicialitzant...",
       "openInEditor": "Obrir a l'editor",
-      "retry": "Tornar-ho a intentar",
+      "outputInfo": "{{images}} imatges · {{width}} × {{height}} px",
+      "result": "Resultat",
       "save": "Desar",
-      "savedSuccess": "Panorama desat correctament!",
+      "saving": "S'està desant…",
       "speedNotice": "Això pot trigar uns minuts depenent del nombre i la mida de les imatges.",
       "start": "Iniciar",
-      "stitchingProgress": "S'està unint el panorama",
+      "unalignedImages_one": "No s'ha pogut alinear {{count}} imatge",
+      "unalignedImages_many": "No s'han pogut alinear {{count}} d'imatges",
+      "unalignedImages_other": "No s'han pogut alinear {{count}} imatges"
+    },
+    "panorama": {
+      "autoProjectionUsed": "S'utilitza {{projection}}",
+      "boundaryWarp": "Deformació dels límits",
+      "boundaryWarpHint": "Estira les vores per omplir l'enquadrament en lloc de retallar-les.",
+      "description": "Combineu les imatges superposades en un panorama perfecte.",
+      "descriptionWithCount": "Combineu {{count}} imatges superposades en un panorama perfecte.",
+      "descriptionWithCount_one": "Combineu {{count}} imatge superposada en un panorama perfecte.",
+      "descriptionWithCount_many": "Combineu {{count}} imatges superposades en un panorama perfecte.",
+      "descriptionWithCount_other": "Combineu {{count}} imatges superposades en un panorama perfecte.",
+      "exposureCompensation": "Compensació de l'exposició",
+      "exposureCompensationHint": "Iguala l'exposició, el balanç de blancs i el vinyetatge entre les imatges.",
+      "failed": "El panorama ha fallat",
+      "processing": "S'està unint el panorama",
+      "projection": "Projecció",
+      "projectionAuto": "Automàtica",
+      "projectionCylindrical": "Cilíndrica",
+      "projectionFallback": "{{requested}} no cobreix aquest camp de visió, s'utilitza {{projection}}",
+      "projectionPerspective": "Perspectiva",
+      "projectionSpherical": "Esfèrica",
+      "savedSuccess": "Panorama desat correctament!",
       "title": "Unir panorama"
     },
     "renameAlbum": {
@@ -2314,12 +2351,34 @@
       "alwaysDecodeRawLabel": "Descodificar sempre els RAW per a miniatures",
       "backend": "Motor de processament",
       "backendDesc": "Seleccioneu l'API de gràfics. Es recomana 'Auto'. Pot solucionar bloquejos en alguns sistemes.",
+      "backendFallback": "{{failed}} ha fallat en iniciar-se en aquesta GPU, així que de moment s'utilitza {{using}}.",
+      "backendFallbackRetry": "Tornar a provar {{failed}}",
+      "backendFallbackRetryPending": "{{failed}} es tornarà a provar en el proper inici.",
       "backends": {
         "auto": "Auto",
         "dx12": "DirectX 12",
         "gl": "OpenGL",
         "metal": "Metal",
         "vulkan": "Vulkan"
+      },
+      "colorManagement": {
+        "chooseProfile": "Tria un perfil",
+        "modeAuto": "Automàtic (perfil del sistema)",
+        "modeCustom": "Perfil ICC personalitzat",
+        "modeOff": "Desactivat",
+        "previewGamut": "Gamma de la previsualització",
+        "previewGamutDesc": "Tria l'espai de color en què exportes. sRGB mostra com es veurà una exportació sRGB o per al web. Gamma àmplia mostra també els colors fora d'sRGB que el monitor pot mostrar, com en exportacions Display P3 o Adobe RGB.",
+        "previewGamutSrgb": "sRGB",
+        "previewGamutWide": "Gamma àmplia",
+        "previewGamutWideSpace": "Gamma àmplia ({{space}})",
+        "profile": "Perfil del monitor",
+        "profileDesc": "Converteix la previsualització de l'editor al perfil de color del teu monitor perquè els colors es vegin correctament en pantalles calibrades i de gamma àmplia. Les exportacions no es veuen afectades.",
+        "statusInvalid": "No s'ha pogut carregar aquest perfil.",
+        "statusNone": "No s'ha trobat cap perfil de monitor. La previsualització es mostra com a sRGB.",
+        "statusProfile": "S'està utilitzant {{name}}.",
+        "statusSystem": "El sistema operatiu gestiona els colors.",
+        "statusUnavailable": "La gestió del color necessita la Renderització directa WGPU.",
+        "wideGamut": "Previsualització de gamma àmplia ({{space}})."
       },
       "defaultAdjustments": {
         "addCamera": "Afegir càmera…",
@@ -2346,6 +2405,9 @@
         "sliderResetNeutral": "Valor neutre",
         "title": "Ajustaments per defecte"
       },
+      "display": {
+        "title": "Pantalla"
+      },
       "dynamicDesc": "L'editor renderitza la vista prèvia perquè coincideixi amb la densitat real de píxels de la vostra pantalla. Això assegura que cada detall es representi amb precisió 1:1, proporcionant la màxima claredat a l'hora de fer zoom i comprovar l'enfocament.",
       "editIn": {
         "add": "Afegeix un programa",
@@ -2363,6 +2425,15 @@
         "title": "Edita a"
       },
       "enableLivePreviews": "Activar vistes prèvies en directe",
+      "hdr": {
+        "gainMaps": "Fotos HDR",
+        "gainMapsAuto": "Automàtic",
+        "gainMapsDesc": "Les fotos amb un mapa de guany HDR, com les dels mòbils recents, mostren les llums HDR fins on permet la pantalla. Les exportacions HDR fan servir el marge definit a la configuració d'exportació; les altres exportacions mostren la foto normal. Sempre com a SDR ignora les dades HDR.",
+        "gainMapsNever": "Sempre en SDR",
+        "statusActive": "Aquesta pantalla està en mode HDR. Activa l'HDR a la barra d'eines de l'editor per previsualitzar-ho.",
+        "statusInactive": "Aquesta pantalla no està en mode HDR. Activa l'HDR a la configuració de pantalla del sistema per veure l'efecte.",
+        "statusUnsupported": "L'HDR necessita la Renderització directa WGPU i, a Linux, una sessió Wayland amb suport HDR."
+      },
       "highDpi": "Renderització High-DPI",
       "highDpiDesc": "Renderitzar vistes prèvies a la resolució nativa de {{dpr}}x píxels de la pantalla. Produeix la vista prèvia més nítida possible, però utilitza molta més memòria.",
       "highDpiDescStandard": "Aquesta configuració només afecta pantalles d'alta densitat (High-DPI). La vostra pantalla actual té una resolució estàndard.",
@@ -2370,7 +2441,7 @@
       "imageCacheDesc": "Nombre màxim d'imatges de resolució completa que es mantenen a la memòria RAM. Valors més alts fan que canviar entre imatges editades recentment sigui instantani, però utilitzen moltíssima més memòria.",
       "images": "Imatges",
       "linuxCompat": "Mode de compatibilitat de Linux",
-      "linuxCompatDesc": "Força la composició de programari per evitar bloquejos del controlador de la GPU. Les GPU Nvidia ja tenen una solució automàtica més lleugera, així que només activeu-ho si encara experimenteu bloquejos a l'inici o en obrir imatges.",
+      "linuxCompatDesc": "Envia la vista web a través de memòria compartida en lloc de compartir memòries intermèdies de la GPU per evitar problemes del controlador de la GPU, com ara una finestra en blanc. Les GPU Nvidia amb X11 ja ho tenen automàticament, així que només activeu-ho si encara veieu una finestra en blanc o trencada.",
       "linuxCompatLabel": "Activar el mode de compatibilitat",
       "livePreviewQuality": "Qualitat de la vista prèvia en directe",
       "livePreviewQualityDesc": "Controla la resolució i compressió de la imatge quan s'arrosseguen els controls lliscants. Una qualitat inferior millora significativament la resposta.",
@@ -2401,12 +2472,15 @@
         "enableAppleRaw9": "Utilitza Apple RAW 9 per als fitxers RAW",
         "enableBaselineExposure": "Aplica l'exposició base als fitxers RAW",
         "enableHighlightPreservation": "Compensa els modes de preservació de llums de la càmera",
+        "enableHotPixels": "Elimina els píxels calents i morts",
         "enablePreprocessingNonRaws": "Activar per a No-RAW",
         "enableTonemapperOverride": "Activar la sobreescriptura del mapejador de tons",
         "highlightPreservation": "Compensació de la preservació de llums",
         "highlightPreservationDesc": "Restaura l'exposició reduïda pels modes de preservació de llums de la càmera, com Fujifilm DR200/DR400 o D-Lighting actiu de Nikon.",
         "highlightRecovery": "Recuperació de llums altes RAW",
         "highlightRecoveryDesc": "Controla la quantitat de detalls que es recuperen de les llums altes retallades als fitxers RAW. Valors més alts recuperen més detalls però poden introduir artefactes de color porpra.",
+        "hotPixels": "Eliminació de píxels calents",
+        "hotPixelsDesc": "Corregeix automàticament els píxels calents, encallats i morts del sensor en descodificar fitxers RAW. Només es substitueixen píxels aïllats, de manera que les estrelles i els petits reflexos es conserven.",
         "linearOptions": {
           "auto": "Auto",
           "gamma": "Aplicar Gamma",
@@ -2432,6 +2506,16 @@
         "high": "Alta qualitat",
         "performance": "Rendiment"
       },
+      "rawDecoding": "Descodificació RAW",
+      "rawDecodingDesc": "Seleccioneu on es descodifiquen els fitxers RAW. 'Auto' utilitza la GPU i canvia a la CPU si no pot gestionar les vostres imatges. 'GPU' sempre prova primer la GPU. 'CPU' és més lenta, però funciona a tots els sistemes.",
+      "rawDecodingFallback": "La GPU ha fallat amb fitxers RAW grans, així que de moment els fitxers de {{megapixels}} MP o més es revelen a la CPU.",
+      "rawDecodingFallbackRetry": "Tornar a provar la GPU",
+      "rawDecodingOptions": {
+        "auto": "Auto",
+        "cpu": "CPU",
+        "gpu": "GPU"
+      },
+      "rawDecodingUnavailable": "Aquesta GPU no pot fer la descodificació RAW, així que els fitxers RAW es descodifiquen a la CPU.",
       "renderScale": "Escala de resolució de renderització",
       "renderScaleDesc": "Escala la resolució de renderització respecte a la vostra pantalla. Valors més baixos milloren el rendiment en pantalles d'alta resolució a canvi d'una mica de pèrdua de nitidesa.",
       "restartRequired": "Els canvis al motor de processament requereixen reiniciar l'aplicació per fer efecte.",
