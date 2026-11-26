@@ -12,12 +12,14 @@
 //   - the blur radius is the smallest that has evened the skin out, as long as its real structure (the nose,
 //     the lip line, the beard's edge) is still there;
 //   - the median is Photoshop's: the middle value of each channel over a round neighbourhood, at full size;
-//   - the fine texture has the grain size and strength measured in the cleanest skin of this very face, and is
-//     laid on in Overlay; the High Pass has the grain's radius and goes on in Linear Light at 72 %, as in the
-//     tutorial;
-//   - the original's detail is soft-clipped, so a blemish or a hair is not carried across as "texture";
-//   - the highlights and the shadows left alone are taken from the skin's own tones;
-//   - the mask is a score of how uneven each place is next to its own evened-out self, kept off edges.
+//   - the fine texture is the tutorial's, scaled to the face: noise blurred 1.8 px on a face about 2650 px
+//     wide, at the strength his finished picture shows, laid on in Overlay; the High Pass has the same radius
+//     and goes on in Linear Light at 72 %, as in the tutorial;
+//   - the original's detail is soft-clipped near the skin's usual grain, so a bump's bright tip, a blemish's
+//     rim or a hair is not carried across as "texture";
+//   - the shadows left alone are taken from the skin's own tones; the shine is renewed like the rest, since
+//     that is where bumpy skin shows most;
+//   - the mask is the whole skin, as the tutorial paints it, kept off strong edges and off hairs and lashes.
 //
 // Everything is worked out in a gamma-coded copy, which is what the hand technique does it in, and is kept as
 // a change to add to the picture, so the amount can move without any of it being done again.
@@ -241,6 +243,20 @@ pub(super) fn smoothstep(a: f32, b: f32, x: f32) -> f32 {
 
 /// The "OG texture" layer's opacity in the tutorial ("72 to 74 %").
 const DETAIL_OPACITY: f32 = 0.72;
+
+/// The made-up grain's blur, and the High Pass radius, as a share of the face's width: the tutorial's 1.8 px
+/// on a face about 2650 px wide.
+const GRAIN_PER_FACE: f32 = 1.8 / 2650.0;
+
+/// The made-up grain's deviation from its 50 % grey, in the gamma-coded copy, at Texture 50: what the
+/// tutorial's finished picture shows (about 3.6 levels of 255). Copying the grain of the face's own cleanest
+/// skin made it far too faint on soft pictures.
+const GRAIN_STRENGTH: f32 = 0.014;
+
+/// Where the original's detail is soft-clipped, in the skin's usual detail: above it, a bump's bright tip or a
+/// blemish's rim is brought down to grain. At 2.5 the bumps on a nose and the pebbles of a shiny cheek came
+/// back as they were.
+const DETAIL_CLIP: f32 = 1.5;
 
 /// Photoshop's Overlay of `top` on `bottom`, both 0..1.
 fn overlay(bottom: f32, top: f32) -> f32 {
@@ -604,43 +620,28 @@ pub(super) fn blur_for_width(table: &[(f32, f32, f32)], half_width: f32) -> f32 
     interpolate(table, |r| r.1, half_width, |r| r.0)
 }
 
-/// What is left, through the high pass, of a grain of unit strength blurred by `blur`.
-fn strength_for_blur(table: &[(f32, f32, f32)], blur: f32) -> f32 {
-    interpolate(table, |r| r.0, blur, |r| r.2).max(1e-6)
-}
-
 const GAMMA: f32 = 2.2;
 
-/// Over how many median radii the face's light is taken back: half a radius brings back the creases and
-/// the contours of the cheeks and lips the median softens, while blemishes, narrower still, stay evened.
-/// Chosen by eye on six portraits against wider spreads, which left the faces looking flatter.
-const VOLUME_SPREAD: f32 = 0.5;
+/// Over how many median radii the face's light is taken back: a fifth of a radius brings back the contours
+/// the median softens - the wings of the nose, the eyelids, the lips' edges, the roundness of the cheeks -
+/// while blemishes, narrower still, stay evened. Chosen by eye on nineteen portraits: half a radius left the
+/// noses and the lying faces looking flat.
+const VOLUME_SPREAD: f32 = 0.2;
 
 /// The choices that shape how much of the face's own light the renewal keeps.
 #[derive(Clone, Copy, Debug)]
 pub(super) struct Tuning {
     /// how far, in median radii, the light the median took is given back over; 0 gives none back
     pub spread: f32,
-    /// highlights judged on each place's own light, so a shine narrower than the median is kept
-    pub local_highlights: bool,
     /// the evened skin's colour taken from the skin alone (a blur over the face's mask) rather than from a
     /// median of each channel over the whole box, which can bring in the colour of an eye or of hair and
     /// make up a colour of its own (a green cast at the corner of a lit eye)
     pub skin_colour: bool,
-    /// how much of the renewal goes on even where the skin is already even; the rest follows how uneven
-    /// each place is
-    pub floor: f32,
 }
-
-/// How much of the renewal goes on where the skin is already even. Chosen by eye on four sharp portraits
-/// against 40 %, which made even skin look waxy, and 0.
-const FLOOR: f32 = 0.2;
 
 const TUNING: Tuning = Tuning {
     spread: VOLUME_SPREAD,
-    local_highlights: false,
     skin_colour: true,
-    floor: FLOOR,
 };
 
 /// The biggest face box, in pixels, that is worked out at full size: about 16 million (4000 x 4000). A bigger
@@ -681,6 +682,123 @@ fn thin_lines(y: &Plane, sigma: f32, s_detail: f32) -> Plane {
 /// fully at the second. A lash or a stray hair stands several times further out than a fine wrinkle does.
 const LINE_LO: f32 = 1.5;
 const LINE_HI: f32 = 3.0;
+
+/// How much each place is, or is the rim of, a round spot standing out of the skin (a bump, a pore's bright
+/// tip), 0 to 1: the light curves alike both ways there, at `sigma` or at twice it. Spread over the spot's
+/// rim, where the line test is fooled: across a rim the light curves, along it hardly at all, as across a hair.
+fn round_spots(y: &Plane, sigma: f32, s_detail: f32) -> Plane {
+    let (w, h) = (y.w, y.h);
+    let mut spots = Plane {
+        w,
+        h,
+        v: vec![0.0f32; w * h],
+    };
+    for sg in [sigma, 2.0 * sigma] {
+        let smooth = gauss(y, sg);
+        let at = |x: usize, yy: usize| smooth.v[yy * w + x];
+        let mut v = vec![0.0f32; w * h];
+        v.par_chunks_mut(w).enumerate().for_each(|(yy, row)| {
+            if yy == 0 || yy + 1 >= h {
+                return;
+            }
+            for (x, o) in row.iter_mut().enumerate().take(w - 1).skip(1) {
+                let c = at(x, yy);
+                let dxx = at(x + 1, yy) + at(x - 1, yy) - 2.0 * c;
+                let dyy = at(x, yy + 1) + at(x, yy - 1) - 2.0 * c;
+                let dxy = 0.25
+                    * (at(x + 1, yy + 1) + at(x - 1, yy - 1) - at(x + 1, yy - 1) - at(x - 1, yy + 1));
+                let mean = 0.5 * (dxx + dyy);
+                let spread = (0.25 * (dxx - dyy).powi(2) + dxy * dxy).sqrt();
+                let (l1, l2) = (mean + spread, mean - spread);
+                // a dome or a dip: curved the same way both ways
+                if l1 * l2 <= 0.0 {
+                    continue;
+                }
+                let (big, small) = (l1.abs().max(l2.abs()), l1.abs().min(l2.abs()));
+                let strength = big * sg * sg / s_detail.max(1e-6);
+                *o = smoothstep(LINE_LO, LINE_HI, strength)
+                    * smoothstep(0.35, 0.6, small / big.max(1e-9));
+            }
+        });
+        let rims = gauss(&Plane { w, h, v }, 1.5 * sg).map(|s| (4.0 * s).min(1.0));
+        spots = spots.zip(&rims, |a, b| a.max(b));
+    }
+    spots
+}
+
+/// The thin lines to keep (lashes, stray hairs), without the round spots that also pass the line test at
+/// their rims. Looked for at a scale tied to the face as well as to the grain, so a cluster of small bumps
+/// (on a nose, on a shiny cheek) does not read as a tangle of lines.
+fn lines_to_keep(y: &Plane, face: f32, sig_tex: f32, s_detail: f32) -> Plane {
+    let sigma = (LINE_PER_FACE * face).max(sig_tex).max(1.0);
+    let lines = thin_lines(y, sigma, s_detail);
+    let spots = round_spots(y, sig_tex.max(1.0), s_detail);
+    lines.zip(&spots, |l, s| l * (1.0 - s))
+}
+
+/// The scale lines are looked for at, as a share of the face's width.
+const LINE_PER_FACE: f32 = 0.0015;
+
+/// The full-size detail finer than the reduced copy a big face is worked out on, soft-clipped as the copy's
+/// own detail is: without this it comes back untouched, bumps and all. `layer` is the enlarged change.
+fn tame_fine_detail(layer: &mut Layer, image: &Rgb32FImage, k: usize, is_raw: bool) {
+    let (w, h, x0, y0) = (layer.w, layer.h, layer.x0, layer.y0);
+    // the gamma-coded copy as the reduced work had it: the skin's middle at mid-grey
+    let scale = if is_raw {
+        0.5f32.powf(GAMMA) / layer.skin_level.max(1e-5)
+    } else {
+        1.0
+    };
+    let to_gamma = |v: f32| {
+        if is_raw {
+            (v * scale).clamp(0.0, 1.0).powf(1.0 / GAMMA)
+        } else {
+            v.clamp(0.0, 1.0)
+        }
+    };
+    let from_gamma = |g: f32| {
+        if is_raw {
+            g.clamp(0.0, 1.0).powf(GAMMA) / scale
+        } else {
+            g
+        }
+    };
+    let skin = Plane {
+        w,
+        h,
+        v: layer
+            .weight
+            .iter()
+            .map(|&wt| if wt > 0.3 { 1.0 } else { 0.0 })
+            .collect(),
+    };
+    for c in 0..3 {
+        let lin: Vec<f32> = (0..w * h)
+            .into_par_iter()
+            .map(|i| image.get_pixel((x0 + i % w) as u32, (y0 + i / w) as u32).0[c])
+            .collect();
+        let g = Plane {
+            w,
+            h,
+            v: lin.par_iter().map(|&v| to_gamma(v)).collect(),
+        };
+        let fine = g.zip(&gauss(&g, 0.5 * k as f32), |a, b| a - b);
+        let clip = DETAIL_CLIP
+            * mean_where(&fine.map(|d| d * d), &skin)
+                .sqrt()
+                .max(1e-5);
+        layer
+            .delta
+            .par_chunks_mut(3)
+            .enumerate()
+            .for_each(|(i, d)| {
+                let f = fine.v[i];
+                let tamed = clip * (f / clip).tanh();
+                let now = to_gamma(lin[i] + d[c]);
+                d[c] = from_gamma(now + tamed - f) - lin[i];
+            });
+    }
+}
 
 /// The picture reduced by `k`, each pixel the mean of the k x k it stands for.
 fn shrink_rgb(image: &Rgb32FImage, k: usize) -> Rgb32FImage {
@@ -821,7 +939,9 @@ fn build_within(
             max_pixels,
             tuning,
         )?;
-        return Some(enlarge(&small, k, iw, ih));
+        let mut layer = enlarge(&small, k, iw, ih);
+        tame_fine_detail(&mut layer, image, k, is_raw);
+        return Some(layer);
     }
 
     // the skin's own light: raw pictures are linear, and are scaled so that the skin sits mid-grey in the
@@ -967,7 +1087,14 @@ fn build_within(
 
     // where the skin is uneven, next to its own evened-out self
     let sig_mid = (0.004 * face).max(1.5);
-    let lum_dev = gauss(&y, sig_mid).zip(&base_y, |a, b| (a - b).abs());
+    // only what is narrower than about 1 % of the face counts: a contour (the side of the nose, an eyelid, the
+    // lips) is wider, and is the face's volume, not a flaw
+    let lum_dev = {
+        let d = y.zip(&base_y, |a, b| a - b);
+        gauss(&d, sig_mid).zip(&gauss(&d, (0.01 * face).max(2.0 * sig_mid)), |a, b| {
+            (a - b).abs()
+        })
+    };
     let chroma_dev = {
         let rg = gauss(&chan[0].zip(&chan[1], |r, g| r - g), sig_mid);
         let bg = gauss(&chan[2].zip(&chan[1], |b, g| b - g), sig_mid);
@@ -1001,8 +1128,10 @@ fn build_within(
         quantile(&score, &interior, 0.25),
         quantile(&score, &interior, 0.92),
     );
-    let need_raw = score.map(|s| smoothstep(lo, hi, s));
-    let need = need_raw.map(|n| tuning.floor + (1.0 - tuning.floor) * n);
+    // how uneven each place is: not where the renewal goes (it goes on the whole skin, as the tutorial paints
+    // it: a mask following unevenness left skin that is rough all over hardly touched), but where the clean
+    // skin the detail is measured in is
+    let uneven = score.map(|s| smoothstep(lo, hi, s));
 
     // edges and the mask's border let go of the effect
     // only the strongest edges count, those of the nose, the lips and the eyes: a blemish's own edge is not
@@ -1012,38 +1141,24 @@ fn build_within(
         .map(|e| 1.0 - smoothstep(0.3, 0.9, e));
     let border = gauss(&m, 0.012 * face).map(|b| smoothstep(0.0, 1.0, b));
 
-    // highlights and shadows left alone, from the skin's own tones. They are judged on the evened-out skin
-    // and not on each pixel: a dark spot on mid-tone skin is a blemish, not a shadow, and a shadow is dark
-    // all around.
-    let (hi0, hi1, sh1, sh0) = (
-        quantile(&base_y, &interior, 0.93),
-        quantile(&base_y, &interior, 0.995),
+    // the deepest shadows left alone, from the skin's own tones. They are judged on the evened-out skin and not
+    // on each pixel: a dark spot on mid-tone skin is a blemish, not a shadow, and a shadow is dark all around.
+    // The highlights are renewed like the rest: a shine on bumpy skin is where the bumps show most, and left
+    // alone it stood out as a rough island on evened skin.
+    let (sh1, sh0) = (
         quantile(&base_y, &interior, 0.04),
         quantile(&base_y, &interior, 0.002),
     );
-    let tone = if tuning.local_highlights {
-        // a shine (the tip of the nose, a cheekbone, the forehead) is narrower than the median and gone
-        // from the evened skin: highlights are judged on each place's own light, shadows still on the
-        // evened skin
-        let local = gauss(&y, sig_mid);
-        base_y.zip(&local, |b, l| {
-            (1.0 - smoothstep(hi0, hi1, b.max(l))) * smoothstep(sh0, sh1, b)
-        })
-    } else {
-        base_y.map(|v| (1.0 - smoothstep(hi0, hi1, v)) * smoothstep(sh0, sh1, v))
-    };
+    let tone = base_y.map(|v| smoothstep(sh0, sh1, v));
 
-    // the fine texture: its strength and grain size measured in the cleanest skin of this face, on a high pass
-    // made only to measure them, wide enough to let the coarsest grain through
-    let sig_probe = (0.005 * face).max(GRAIN_PROBE_MIN);
-    let detail = y.zip(&gauss(&y, sig_probe), |a, b| a - b);
+    // the skin's usual detail is measured where it is cleanest: even, and away from edges
     let clean = Plane {
         w,
         h,
         v: (0..w * h)
             .into_par_iter()
             .map(|i| {
-                if need_raw.v[i] < 0.2 && guard.v[i] > 0.8 && interior.v[i] > 0.5 {
+                if uneven.v[i] < 0.2 && guard.v[i] > 0.8 && interior.v[i] > 0.5 {
                     1.0
                 } else {
                     0.0
@@ -1056,16 +1171,9 @@ fn build_within(
     } else {
         clean
     };
-    let s_clean = mean_where(&detail.map(|d| d * d), &clean).sqrt().max(1e-5);
-    // How wide the grain is: how far, across and down, the skin's detail goes on looking like itself. That
-    // width is then matched against made-up grains, blurred noise put through the same high pass, and the
-    // blur whose grain measures the same is the one used.
-    let half_width = grain_half_width(&detail, &clean);
-    let grains = grain_table(sig_probe);
-    // the grain's blur, and, by the tutorial's rule, the High Pass radius too: "the exact number you chose for
-    // the Gaussian blur"
-    let sig_tex = blur_for_width(&grains, half_width).clamp(0.8, 4.0);
-    let unit_rms = strength_for_blur(&grains, sig_tex);
+    // the grain's blur, the tutorial's scaled to this face, and, by the tutorial's rule, the High Pass radius
+    // too: "the exact number you chose for the Gaussian blur"
+    let sig_tex = (GRAIN_PER_FACE * face).clamp(0.5, 4.0);
     let noise = gauss(&white_noise(w, h), sig_tex);
     let (nm, nv) = {
         let n = noise.v.len() as f64;
@@ -1078,24 +1186,24 @@ fn build_within(
             / n;
         (mean as f32, (var.sqrt() as f32).max(1e-9))
     };
-    // the noise layer's deviation from its 50 % grey: through the same high pass, as rough as the face's
-    // cleanest skin
-    let tex_amp = s_clean * texture / (nv * unit_rms);
+    // the noise layer's deviation from its 50 % grey
+    let tex_amp = GRAIN_STRENGTH * texture / nv;
 
     // "OG texture": a High Pass of each channel at the grain's radius, in Linear Light at the tutorial's 72 %.
-    // Its strongest detail is soft-clipped, so a hair or a blemish's rim is not laid back as texture.
+    // Its strongest detail is soft-clipped, so a bump's tip, a blemish's rim or a hair is not laid back as
+    // texture.
     let high_pass: [Plane; 3] =
         std::array::from_fn(|c| chan[c].zip(&gauss(&chan[c], sig_tex), |a, b| a - b));
     let s_detail = mean_where(&luma(&high_pass).map(|d| d * d), &clean)
         .sqrt()
         .max(1e-5);
-    let clip = 2.5 * s_detail;
+    let clip = DETAIL_CLIP * s_detail;
 
     // thin lines that stand far out of the skin's own detail - the lashes, a stray hair across the cheek - are
     // not texture to even: the clip above would fade them. A line curves the light strongly across it and hardly
     // along it, where a pore or a blemish curves it alike in every way; the faint lines of fine wrinkles stay
     // well under the bar and are still evened.
-    let lines = thin_lines(&y, sig_tex.max(1.0), s_detail);
+    let lines = lines_to_keep(&y, face, sig_tex, s_detail);
 
     // the renewed skin, layer by layer as in Photoshop: the median base; the noise layer in Overlay; the High
     // Pass in Linear Light
@@ -1115,21 +1223,18 @@ fn build_within(
                 // a clipped pixel is changed from where the gamma-coded copy had it
                 d[c] = from_gamma(renewed) - from_gamma(chan[c].v[i]);
             }
-            *wt = need.v[i] * guard.v[i] * border.v[i] * tone.v[i] * (1.0 - lines.v[i]);
+            *wt = guard.v[i] * border.v[i] * tone.v[i] * (1.0 - lines.v[i]);
         });
 
     let report = format!(
-        "face {:.0} px, median radius {:.0} px ({:.1}% of the face, {} candidates), grain half width {:.2} px, \
-         pore grain and high pass {:.2} px, texture {:.4}, detail {:.4}, highlights from {:.2}, shadows to {:.2}",
+        "face {:.0} px, median radius {:.0} px ({:.1}% of the face, {} candidates), grain and high pass \
+         {:.2} px, detail {:.4}, shadows to {:.2}",
         face,
         radius,
         chosen.0 * 100.0,
         tried.len(),
-        half_width,
         sig_tex,
-        s_clean,
         s_detail,
-        hi0,
         sh1
     );
     Some(Layer {
@@ -1267,12 +1372,14 @@ mod tests {
     fn the_face_keeps_its_shading() {
         let kept = shading_kept(VOLUME_SPREAD);
         let flattened = shading_kept(0.0);
+        println!("shading kept {kept}, with no light given back {flattened}");
         assert!(
             kept > flattened + 0.1,
             "with the light given back {kept}, without {flattened}"
         );
-        // shading as wide as the median's radius is the hardest to keep: about 0.85 of it is, against 0.7
-        assert!(kept > 0.8, "the shading kept {kept}");
+        // shading as wide as the median's radius is the hardest to keep: about 0.98 of it is, against 0.65
+        // with none of the light given back (and 0.85 when it was given back over half a radius)
+        assert!(kept > 0.92, "the shading kept {kept}");
     }
 
     /// A thin dark line (a lash, a stray hair) is found as a line; a round spot just as dark is not.
@@ -1317,13 +1424,79 @@ mod tests {
         );
     }
 
+    /// Small bright bumps scattered over the skin (on a nose, on a shiny cheek) are far less taken for lines,
+    /// so they are evened; a hair beside them still is a line.
+    #[test]
+    fn bumps_are_not_lines() {
+        let (w, h) = (240usize, 240usize);
+        let noise = white_noise(w, h);
+        // bumps 1.2 to 2 px across, scattered about one per 60 px² over the top right
+        let mut seed = 12345u32;
+        let mut next = || {
+            seed = seed.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
+            (seed >> 8) as f32 / (1u32 << 24) as f32
+        };
+        let bumps: Vec<(f32, f32, f32)> = (0..110)
+            .map(|_| (135.0 + 100.0 * next(), 5.0 + 100.0 * next(), 1.2 + 0.8 * next()))
+            .collect();
+        let y = Plane {
+            w,
+            h,
+            v: (0..w * h)
+                .map(|i| {
+                    let (x, yy) = ((i % w) as f32, (i / w) as f32);
+                    let d = ((x - yy) / 2f32.sqrt()).abs();
+                    let hair = if x < 100.0 {
+                        (-(d * d) / (2.0 * 0.8 * 0.8)).exp()
+                    } else {
+                        0.0
+                    };
+                    let bump: f32 = bumps
+                        .iter()
+                        .map(|&(bx, by, r)| {
+                            (-((x - bx).powi(2) + (yy - by).powi(2)) / (2.0 * r * r)).exp()
+                        })
+                        .sum();
+                    0.5 + 0.004 * noise.v[i] - 0.12 * hair + 0.1 * bump.min(1.5)
+                })
+                .collect(),
+        };
+        // a face about 700 px wide, the grain at 1 px
+        let lines = lines_to_keep(&y, 700.0, 1.0, 0.006);
+        assert!(
+            lines.v[50 * w + 50] > 0.8,
+            "on the hair {}",
+            lines.v[50 * w + 50]
+        );
+        let over_bumps = |p: &Plane| {
+            (20..90)
+                .flat_map(|yy| (150..220).map(move |x| yy * w + x))
+                .map(|i| p.v[i])
+                .sum::<f32>()
+                / (70.0 * 70.0)
+        };
+        // where bumps overlap they make short shapes of their own, so not all of it goes: about half does
+        let as_lines = over_bumps(&thin_lines(&y, 1.05, 0.006));
+        let kept = over_bumps(&lines);
+        assert!(
+            kept < 0.6 * as_lines,
+            "over the bumps {kept}, as lines alone {as_lines}"
+        );
+    }
+
     /// A face too big to work out at full size, as in an upscaled picture: it is renewed on a reduced copy,
     /// and the change, brought back to full size, still evens the spot and keeps the edge.
     #[test]
     fn a_face_too_big_is_renewed_on_a_reduced_copy() {
         let (small_img, small_mask) = skin();
-        let img = imageops::resize(&small_img, 720, 840, imageops::FilterType::Nearest);
+        let mut img = imageops::resize(&small_img, 720, 840, imageops::FilterType::Nearest);
         let mask = imageops::resize(&small_mask, 720, 840, imageops::FilterType::Nearest);
+        // a bright speck finer than the reduced copy, as a bump's tip at full size
+        for (x, y) in [(200, 600), (201, 600), (200, 601), (201, 601)] {
+            for c in 0..3 {
+                img.get_pixel_mut(x, y).0[c] += 0.04;
+            }
+        }
         let layer = build_within(&img, &mask, true, 1.0, 200_000, TUNING).expect("a layer");
         assert!(layer.report.contains("1/2 of the size"), "{}", layer.report);
         assert!(layer.x0 + layer.w <= 720 && layer.y0 + layer.h <= 840);
@@ -1346,11 +1519,21 @@ mod tests {
         );
         let step = renewed(592, 600, 1) - renewed(620, 600, 1);
         assert!(step > 0.03, "edge {step}: {}", layer.report);
+        // the speck is brought down, not carried back untouched with the full size's fine detail
+        let stands = |v: &dyn Fn(u32, u32) -> f32| v(200, 600) - 0.5 * (v(196, 600) + v(205, 600));
+        let speck_before = stands(&|x, y| img.get_pixel(x, y).0[1]);
+        let speck_after = stands(&|x, y| renewed(x, y, 1));
+        assert!(
+            speck_after < 0.5 * speck_before,
+            "speck {speck_before} -> {speck_after}: {}",
+            layer.report
+        );
     }
 
     /// Renders the renewal of an 8-bit picture (RRAW_IN) with its skin mask (RRAW_MASK, grey PNG), at the
     /// amount RRAW_AMOUNT (0..1), once for each light spread in RRAW_SPREADS ("0,1.25,..."; 0 is no light
-    /// given back), to RRAW_OUT_<spread>.png. For judging the face's volumes on real portraits.
+    /// given back; "0.2:0" also takes the evened colour from a median of each channel), to
+    /// RRAW_OUT_<spread>.png. For judging the face's volumes on real portraits.
     #[test]
     #[ignore]
     fn renewal_spreads_on_a_picture() {
@@ -1363,9 +1546,7 @@ mod tests {
             let parts: Vec<&str> = spread.split(':').collect();
             let tuning = Tuning {
                 spread: parts[0].parse().unwrap(),
-                local_highlights: parts.get(1) == Some(&"1"),
-                skin_colour: parts.get(2).is_none_or(|c| *c == "1"),
-                floor: parts.get(3).map_or(TUNING.floor, |f| f.parse().unwrap()),
+                skin_colour: parts.get(1).is_none_or(|c| *c == "1"),
             };
             let layer = build_within(&img, &mask, false, 1.0, MAX_PIXELS, tuning).expect("a layer");
             eprintln!("variant {spread}: {}", layer.report);
